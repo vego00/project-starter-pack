@@ -88,6 +88,7 @@ class DecisionCard(_Frozen):
     card_id: str
     version: int = Field(ge=1)
     layer: Layer
+    order: int = 50  # Position within the layer; lower comes first.
     question: str
     options: tuple[CardOption, ...] = Field(min_length=2)
     signals: dict[str, tuple[str, ...]] = Field(default_factory=dict)

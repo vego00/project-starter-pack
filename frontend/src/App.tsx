@@ -136,8 +136,8 @@ export default function App() {
           {error}
         </p>
       )}
-      <p className="sr-only" role="status">
-        {busy ? "처리하는 중이에요." : ""}
+      <p className={busy ? "working" : "sr-only"} role="status">
+        {busy ? "처리하는 중이에요. 모델을 쓸 때는 시간이 조금 걸려요." : ""}
       </p>
       {restoring ? (
         <p className="panel muted">저장된 여정을 불러오는 중이에요…</p>

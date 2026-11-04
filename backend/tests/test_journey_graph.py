@@ -7,11 +7,12 @@ from app.journey.deciders.mock import MockDecider
 from app.journey.graph import OwnershipError, _guarded, build_graph, journey_config, journey_input
 from app.journey.nodes import resume_command
 from app.journey.services import JourneyDeps
-from app.journey.state import MAX_QUESTIONS_PER_CARD, JourneyState, ProjectSpec
-from app.registry.loader import load_registry
+from app.journey.state import MAX_QUESTIONS_PER_CARD, Advice, JourneyState, ProjectSpec
+from app.registry.loader import Registry, load_registry
 from langgraph.checkpoint.memory import InMemorySaver
 
-REGISTRY = load_registry()
+# Rule-bearing cards only, so each test states exactly the cards it walks through.
+REGISTRY = Registry(card for card in load_registry().cards if card.card_id != "agent.topology")
 IDEA = "민감한고객문의내용을 처리하는 멀티 에이전트 서비스"
 COMPLETE_SPEC = {
     "idea": IDEA,
@@ -62,7 +63,7 @@ class Journey:
         return self
 
 
-def test_full_journey_completes_with_all_seven_user_decisions():
+def test_full_journey_completes_with_every_card_decided_by_the_user():
     journey = Journey().choose_defaults()
 
     state = journey.state
@@ -519,3 +520,57 @@ def test_node_writing_outside_its_fields_is_rejected():
 
     with pytest.raises(OwnershipError, match="advisor"):
         node(state)
+
+
+def test_shipped_registry_starts_with_topology_and_completes():
+    saver = InMemorySaver()
+    graph = build_graph(load_registry(), checkpointer=saver)
+    journey_id = uuid4()
+    config = journey_config(journey_id)
+
+    result = graph.invoke(journey_input(journey_id, ProjectSpec(**COMPLETE_SPEC)), config)
+    assert result["__interrupt__"][0].value["card"]["card_id"] == "agent.topology"
+
+    while result.get("__interrupt__"):
+        result = graph.invoke(resume_command({"action": "accept_recommendation"}), config)
+
+    state = JourneyState.model_validate(graph.get_state(config).values)
+    assert state.status == "completed"
+    assert len(state.decisions) == len(load_registry().cards)
+
+
+def test_tokens_and_prompt_versions_reach_the_trace():
+    advice = Advice(
+        source="llm",
+        notes={},
+        model_id="m-1",
+        prompt_version="advisor-v1",
+        input_tokens=10,
+        output_tokens=5,
+    )
+
+    class StubAdvisor:
+        def advise(self, state, card):
+            return advice.model_copy(update={"notes": {o.id: "설명" for o in card.options}})
+
+    journey = Journey(deps=JourneyDeps(advisor=StubAdvisor()))
+
+    event = next(e for e in journey.state.trace if e.node == "advisor")
+    assert (event.model_id, event.prompt_version) == ("m-1", "advisor-v1")
+    assert (event.input_tokens, event.output_tokens) == (10, 5)
+    assert journey.prompt["card"]["advice_source"] == "llm"
+
+
+def test_real_decider_explains_recommendation_from_card_signals():
+    class StubDecider:
+        name = "jev"
+
+        def decide(self, state, question):
+            return DeciderResult(answer=question.choices[1], confidence=0.9, model_id="jev-x")
+
+    journey = Journey(deps=JourneyDeps(decider=StubDecider()))
+
+    recommendation = journey.prompt["card"]["recommendation"]
+    assert recommendation["decider"] == "jev"
+    assert recommendation["option_id"] == "question"
+    assert recommendation["reason"].startswith("이런 경우에 잘 맞아요")

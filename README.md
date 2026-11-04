@@ -55,7 +55,13 @@ experiment 브랜치에는 01_jev, 02_reasoning_graph, 03_mcp_tool_use, 04_agent
 
 ## 로컬 실행
 
-모델은 연결되어 있지 않다. 결정 카드의 추천은 카드 기본값이며 프로젝트를 분석한 결과가 아니다.
+기본값은 mock이다. 이때 결정 카드의 추천은 카드 기본값이며 프로젝트를 분석한 결과가 아니다.
+실제 모델을 쓰려면 `.env`에 키를 넣고 `APP_PROVIDER=gemini`, `APP_DECIDER=jev`로 바꾼 뒤 연결을 확인한다.
+이때 프로젝트 아이디어가 Gemini API와 Vercel AI Gateway를 거쳐 Jev로 전송된다. Jev 요청은 데이터 미보존(ZDR)을 요구한다.
+
+```bash
+uv run python scripts/smoke_models.py
+```
 
 ```bash
 # 로컬 환경 (uv, Node.js 22.12 이상)

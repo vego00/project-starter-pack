@@ -14,9 +14,9 @@ from pydantic import BaseModel
 from app.config import Settings
 from app.journey.persistence import open_checkpointer
 from app.journey.service import JourneyError, JourneyService, JourneyView
-from app.journey.services import JourneyDeps
+from app.journey.services import JourneyDeps, build_deps
 from app.journey.state import JourneyAction, ProjectSpec
-from app.registry.loader import load_registry
+from app.registry.loader import Registry, load_registry
 
 logger = logging.getLogger(__name__)
 
@@ -69,9 +69,11 @@ def create_app(
     *,
     checkpointer: Checkpointer = None,
     deps: JourneyDeps | None = None,
+    registry: Registry | None = None,
 ) -> FastAPI:
     settings = settings or Settings()
-    registry = load_registry()
+    registry = registry or load_registry()
+    deps = deps or build_deps(settings, registry)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -108,7 +110,9 @@ def create_app(
         return {
             "status": "ok",
             "provider": settings.provider,
-            "model_connected": False,
+            "decider": settings.decider,
+            # Configured, not proven to work: no model is called for a health check.
+            "model_configured": settings.provider != "mock",
             "journeys_available": getattr(request.app.state, "journeys", None) is not None,
         }
 

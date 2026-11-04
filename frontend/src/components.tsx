@@ -80,6 +80,10 @@ export function StartForm({
           {busy ? "시작하는 중…" : "결정 시작하기"}
         </button>
       </div>
+      <p className="muted privacy">
+        개인정보나 회사 기밀은 적지 마세요. 입력한 내용은 저장되고, 모델이
+        연결된 경우 외부 모델 API로 전송돼요.
+      </p>
       <p className="muted examples-label">예시로 시작하기</p>
       <div className="examples">
         {EXAMPLES.map((example) => (
@@ -291,7 +295,7 @@ export function DecisionView({
             ) : (
               recommendation.confidence !== null && (
                 <p className="muted">
-                  신뢰도 {Math.round(recommendation.confidence * 100)}%
+                  판단 확신도 {Math.round(recommendation.confidence * 100)}%
                 </p>
               )
             )}
@@ -307,6 +311,17 @@ export function DecisionView({
             ` · 근거가 된 DiV 문제: ${card.div_refs.join(", ")}`}
         </p>
       </div>
+      {card.advice_source === "llm" && (
+        <p className="muted">
+          선택지 설명은 AI가 내 프로젝트를 기준으로 쓴 내용이에요. 틀릴 수
+          있어요.
+        </p>
+      )}
+      {card.advice_source === "card_text" && (
+        <p className="muted">
+          AI 설명을 만들지 못해 카드의 기본 설명을 보여드려요.
+        </p>
+      )}
       <div className="options">
         {card.options.map((view) => (
           <OptionCard

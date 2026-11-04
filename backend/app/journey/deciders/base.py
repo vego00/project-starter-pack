@@ -19,6 +19,7 @@ class DeciderQuestion(BaseModel):
     id: str
     text: str
     choices: tuple[str, ...] = Field(min_length=1)
+    criteria: dict[str, str] = Field(default_factory=dict)  # choice -> what it means
     default: str | None = None
 
 
@@ -26,6 +27,8 @@ class DeciderResult(BaseModel):
     answer: str
     confidence: float = Field(ge=0, le=1)
     model_id: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
 
 
 class Decider(Protocol):
@@ -41,6 +44,11 @@ class Judgement(BaseModel):
     confidence: float | None = None
     decider: str
     model_id: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+
+    def trace(self) -> dict[str, object]:
+        return self.model_dump(exclude={"answer"})
 
 
 def judge(decider: Decider, state: "JourneyState", question: DeciderQuestion) -> Judgement:
@@ -56,4 +64,6 @@ def judge(decider: Decider, state: "JourneyState", question: DeciderQuestion) ->
         confidence=result.confidence,
         decider=decider.name,
         model_id=result.model_id,
+        input_tokens=result.input_tokens,
+        output_tokens=result.output_tokens,
     )

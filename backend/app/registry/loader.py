@@ -16,8 +16,8 @@ class RegistryError(ValueError):
 
 class Registry:
     def __init__(self, cards: Iterable[DecisionCard]):
-        # Journey order: layer order first, then card_id for a stable order within a layer.
-        self.cards = tuple(sorted(cards, key=lambda c: (LAYERS.index(c.layer), c.card_id)))
+        # Journey order: layer, then the card's order, then card_id to keep it stable.
+        self.cards = tuple(sorted(cards, key=lambda c: (LAYERS.index(c.layer), c.order, c.card_id)))
         self._by_id = {card.card_id: card for card in self.cards}
         if len(self._by_id) != len(self.cards):
             raise RegistryError("duplicate card_id")

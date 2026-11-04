@@ -155,6 +155,9 @@ describe("starting", () => {
     const user = userEvent.setup();
     const mock = stubFetch(() => Response.json(journey(), { status: 201 }));
     render(<App />);
+    expect(
+      screen.getByText(/개인정보나 회사 기밀은 적지 마세요/),
+    ).toBeVisible();
     const submit = screen.getByRole("button", { name: "결정 시작하기" });
     expect(submit).toBeDisabled();
 
@@ -298,7 +301,8 @@ describe("decision card", () => {
     expect(
       screen.getByText(/내 프로젝트를 분석한 결과는 아니에요/),
     ).toBeVisible();
-    expect(screen.queryByText(/신뢰도/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/확신도/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/AI가 내 프로젝트/)).not.toBeInTheDocument();
     expect(screen.getByText(/연결된 강의 자료 없음/)).toBeVisible();
     expect(screen.getByText("모델 미연결 상태입니다.")).toBeVisible();
   });
@@ -357,7 +361,18 @@ describe("decision card", () => {
       }),
     );
 
-    expect(await screen.findByText("신뢰도 90%")).toBeVisible();
+    expect(await screen.findByText("판단 확신도 90%")).toBeVisible();
+  });
+
+  it.each([
+    ["llm", /AI가 내 프로젝트를 기준으로/],
+    ["card_text", /AI 설명을 만들지 못해/],
+  ])("explains where %s option text came from", async (source, text) => {
+    await startWith(
+      journey({ prompt: decisionPrompt({}, { advice_source: source }) }),
+    );
+
+    expect(await screen.findByText(text)).toBeVisible();
   });
 
   it("shows what an option brings along", async () => {

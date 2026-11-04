@@ -23,10 +23,19 @@ def card(card_id="agent.x", **overrides) -> dict:
     }
 
 
-def test_shipped_cards_cover_each_layer_once_in_journey_order():
-    registry = load_registry()
+def test_shipped_cards_cover_every_layer_in_journey_order():
+    layers = [c.layer for c in load_registry().cards]
 
-    assert [c.layer for c in registry.cards] == list(LAYERS)
+    assert list(dict.fromkeys(layers)) == list(LAYERS)
+    assert layers == sorted(layers, key=LAYERS.index)
+
+
+def test_order_field_decides_position_within_a_layer():
+    first = DecisionCard.model_validate(card("agent.z", order=1))
+    second = DecisionCard.model_validate(card("agent.a"))
+
+    assert Registry([second, first]).card_ids == ("agent.z", "agent.a")
+    assert load_registry().card_ids[:2] == ("agent.topology", "agent.hitl")
 
 
 def test_shipped_cards_do_not_claim_unchecked_sources():
