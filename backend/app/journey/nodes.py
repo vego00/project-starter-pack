@@ -38,6 +38,7 @@ from app.journey.state import (
     SelectAction,
 )
 from app.registry.loader import Registry
+from app.registry.schema import DecisionCard
 
 Node = Callable[[JourneyState], dict[str, Any]]
 
@@ -79,6 +80,15 @@ def _progress(state: JourneyState, registry: Registry) -> dict[str, int]:
     }
 
 
+def _recommendation_reason(card: DecisionCard, option_id: str, decider: str) -> str:
+    default = card.default_recommendation
+    if decider == "mock":
+        # A mock did not read the project: only the card's stated default reason is honest.
+        return default.reason if option_id == default.option else ""
+    signals = card.signals.get(option_id, ())
+    return f"이런 경우에 잘 맞아요: {', '.join(signals)}" if signals else ""
+
+
 def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
     def intake(state: JourneyState) -> dict[str, Any]:
         # S2 keeps the structured input as is; idea extraction by LLM arrives in S3.
@@ -95,19 +105,16 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
             state,
             DeciderQuestion(
                 id="clarify.sufficient",
-                text="이 프로젝트 정보로 결정 카드를 추천하기에 충분한가요?",
+                text="이 프로젝트 정보로 기술 선택지를 추천하기에 충분한가요?",
                 choices=("yes", "no"),
+                criteria={
+                    "yes": "규모, 기간, 배포 목표를 알 수 있어 선택지를 구분할 수 있음",
+                    "no": "결정을 바꿀 정보가 빠져 있어 사용자에게 물어봐야 함",
+                },
                 default="no",
             ),
         )
-        return {
-            "clarify_passed": verdict.answer == "yes",
-            "_trace": {
-                "decider": verdict.decider,
-                "confidence": verdict.confidence,
-                "model_id": verdict.model_id,
-            },
-        }
+        return {"clarify_passed": verdict.answer == "yes", "_trace": verdict.trace()}
 
     def clarify_question(state: JourneyState) -> dict[str, Any]:
         spec = state.project_spec
@@ -159,7 +166,13 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
         return {"current_card_id": next_card(state.pending_cards, state.deferred_cards)}
 
     def advisor(state: JourneyState) -> dict[str, Any]:
-        return {"advice": deps.advisor.advise(state, registry.card(state.current_card_id))}
+        advice = deps.advisor.advise(state, registry.card(state.current_card_id))
+        return {
+            "advice": advice,
+            "_trace": advice.model_dump(
+                include={"model_id", "prompt_version", "input_tokens", "output_tokens"}
+            ),
+        }
 
     def recommender(state: JourneyState) -> dict[str, Any]:
         card = registry.card(state.current_card_id)
@@ -168,7 +181,7 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
         if not choices:
             return {
                 "recommendation": Recommendation(
-                    status="needs_comparison", decider=getattr(deps.decider, "name", "unknown")
+                    status="needs_comparison", decider=deps.decider.name
                 )
             }
         default = card.default_recommendation
@@ -177,8 +190,13 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
             state,
             DeciderQuestion(
                 id=f"recommend.{card.card_id}",
-                text=card.question,
+                text=f"이 프로젝트에 가장 잘 맞는 선택지는? {card.question}",
                 choices=choices,
+                criteria={
+                    option.id: " / ".join((option.summary, *card.signals.get(option.id, ())))
+                    for option in card.options
+                    if option.id in choices
+                },
                 default=default.option if default.option in choices else None,
             ),
         )
@@ -191,17 +209,10 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
                 status="recommended",
                 option_id=verdict.answer,
                 confidence=verdict.confidence,
-                reason=default.reason if verdict.answer == default.option else "",
+                reason=_recommendation_reason(card, verdict.answer, verdict.decider),
                 decider=verdict.decider,
             )
-        return {
-            "recommendation": recommendation,
-            "_trace": {
-                "decider": verdict.decider,
-                "confidence": verdict.confidence,
-                "model_id": verdict.model_id,
-            },
-        }
+        return {"recommendation": recommendation, "_trace": verdict.trace()}
 
     def retriever(state: JourneyState) -> dict[str, Any]:
         return {"evidence": deps.retriever.retrieve(state, registry.card(state.current_card_id))}
@@ -319,10 +330,15 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
         entry = CardQA(
             card_id=card.card_id,
             question=state.pending_question,
-            answer=answer,
-            answered_by=deps.responder.name,
+            answer=answer.text,
+            answered_by=answer.answered_by,
         )
-        return {"qa_history": [*state.qa_history, entry]}
+        return {
+            "qa_history": [*state.qa_history, entry],
+            "_trace": answer.model_dump(
+                include={"model_id", "prompt_version", "input_tokens", "output_tokens"}
+            ),
+        }
 
     def reviewer(state: JourneyState) -> dict[str, Any]:
         # S2 covers rule conflicts only; LLM review of context mismatches arrives in S3.
@@ -333,8 +349,8 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
         }
 
     def composer(state: JourneyState) -> dict[str, Any]:
-        is_mock = getattr(deps.decider, "name", "") == "mock"
-        return {"artifacts": {ARTIFACT_KEY: compose_summary(state, registry, is_mock=is_mock)}}
+        document = compose_summary(state, registry, is_mock=deps.recommendations_are_mock)
+        return {"artifacts": {ARTIFACT_KEY: document}}
 
     def issue_gate(state: JourneyState) -> dict[str, Any]:
         raw = _wait_for_user(

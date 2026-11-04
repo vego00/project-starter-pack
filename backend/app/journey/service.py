@@ -173,7 +173,6 @@ class JourneyService:
 
     def _view(self, journey_id: UUID, snapshot: StateSnapshot) -> JourneyView:
         state = JourneyState.model_validate(snapshot.values)
-        is_mock = getattr(self._deps.decider, "name", "") == "mock"
         return JourneyView(
             journey_id=journey_id,
             revision=len(state.trace),
@@ -182,5 +181,5 @@ class JourneyService:
             prompt=_pending_prompt(snapshot),
             cards=self._card_statuses(state),
             warnings=[c.message for c in state.conflicts if c.severity == "warning"],
-            notice=MOCK_NOTICE if is_mock else None,
+            notice=MOCK_NOTICE if self._deps.recommendations_are_mock else None,
         )

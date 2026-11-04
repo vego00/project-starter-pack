@@ -62,7 +62,7 @@ def choose(page: Page, heading: str, option: str) -> None:
     expect(page.get_by_role("heading", name=heading)).to_be_hidden()
 
 
-def test_seven_cards_to_completion_with_reload_and_restart(page: Page):
+def test_all_cards_to_completion_with_reload_and_restart(page: Page):
     shot(page, "1-start")
     start(page)
 
@@ -77,12 +77,13 @@ def test_seven_cards_to_completion_with_reload_and_restart(page: Page):
 
     expect(page.get_by_text("내 프로젝트를 분석한 결과는 아니에요")).to_be_visible()
     shot(page, "3-card")
+    choose(page, "에이전트를 어떤 구조로 구성할까요?", "고정 파이프라인")
     choose(page, "에이전트가 실행 중간에 사람의 확인을 받아야 하나요?", "승인 interrupt")
     choose(page, "어떤 경로로 LLM을 사용할까요?", "Gemini")
 
     page.reload()
     expect(page.get_by_role("heading", name="에이전트 실행 상태를 어디에")).to_be_visible()
-    expect(page.get_by_text("2 / 7")).to_be_visible()
+    expect(page.get_by_text("3 / 8")).to_be_visible()
 
     if RESTART_CMD:
         subprocess.run(RESTART_CMD, shell=True, check=True, timeout=120)
@@ -101,7 +102,7 @@ def test_seven_cards_to_completion_with_reload_and_restart(page: Page):
     choose(page, "어디에 배포할까요?", "로컬만")
 
     expect(page.get_by_role("heading", name="모든 결정을 마쳤어요")).to_be_visible()
-    expect(page.get_by_text("7 / 7")).to_be_visible()
+    expect(page.get_by_text("8 / 8")).to_be_visible()
     shot(page, "5-completed")
 
     with page.expect_download() as download:
@@ -116,6 +117,7 @@ def test_seven_cards_to_completion_with_reload_and_restart(page: Page):
 def test_questions_defer_and_reopen(page: Page):
     start(page)
     skip_clarify(page)
+    choose(page, "에이전트를 어떤 구조로 구성할까요?", "고정 파이프라인")
     page.get_by_label("이 카드에 대해 질문하기").fill("interrupt가 뭐예요?")
     page.get_by_role("button", name="질문", exact=True).click()
     expect(page.get_by_text("모델 미연결 상태의 고정 응답")).to_be_visible()
@@ -136,15 +138,15 @@ def test_stale_tab_cannot_answer_the_wrong_card(browser: Browser, page: Page):
     skip_clarify(page)
     other = page.context.new_page()
     other.goto(page.url)
-    expect(other.get_by_role("button", name="없음 선택")).to_be_visible()
+    expect(other.get_by_role("button", name="Single Agent 선택")).to_be_visible()
 
-    page.get_by_role("button", name="없음 선택").click()
-    expect(page.get_by_role("heading", name="어떤 경로로 LLM을")).to_be_visible()
+    page.get_by_role("button", name="Single Agent 선택").click()
+    expect(page.get_by_role("heading", name="에이전트가 실행 중간에")).to_be_visible()
 
-    other.get_by_role("button", name="없음 선택").click()
+    other.get_by_role("button", name="Single Agent 선택").click()
     expect(other.get_by_role("alert").first).to_contain_text("최신 상태가 아니에요")
-    expect(other.get_by_role("heading", name="어떤 경로로 LLM을")).to_be_visible()
-    expect(other.get_by_text("1 / 7")).to_be_visible()
+    expect(other.get_by_role("heading", name="에이전트가 실행 중간에")).to_be_visible()
+    expect(other.get_by_text("1 / 8")).to_be_visible()
 
 
 def test_phone_width_has_no_horizontal_scroll(browser: Browser):

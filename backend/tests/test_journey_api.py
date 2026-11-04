@@ -6,10 +6,12 @@ import pytest
 from app.config import Settings
 from app.journey.services import JourneyDeps, MockResponder
 from app.main import create_app
+from app.registry.loader import Registry, load_registry
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import InMemorySaver
 
 JOURNEYS = "/api/v1/journeys"
+REGISTRY = Registry(card for card in load_registry().cards if card.card_id != "agent.topology")
 IDEA = "민감한고객문의내용을 처리하는 멀티 에이전트 서비스"
 SPEC = {
     "idea": IDEA,
@@ -24,7 +26,9 @@ SPEC = {
 
 
 def make_client(deps=None):
-    app = create_app(Settings(_env_file=None), checkpointer=InMemorySaver(), deps=deps)
+    app = create_app(
+        Settings(_env_file=None), checkpointer=InMemorySaver(), deps=deps, registry=REGISTRY
+    )
     return TestClient(app, raise_server_exceptions=False)
 
 
@@ -100,9 +104,9 @@ def test_get_returns_the_same_prompt_without_advancing(client):
 def test_journey_survives_a_new_service_with_the_same_checkpointer():
     saver = InMemorySaver()
     settings = Settings(_env_file=None)
-    with TestClient(create_app(settings, checkpointer=saver)) as first:
+    with TestClient(create_app(settings, checkpointer=saver, registry=REGISTRY)) as first:
         view = select(first, start(first), "question")
-    with TestClient(create_app(settings, checkpointer=saver)) as second:
+    with TestClient(create_app(settings, checkpointer=saver, registry=REGISTRY)) as second:
         resumed = second.get(f"{JOURNEYS}/{view['journey_id']}").json()
 
     assert resumed == view

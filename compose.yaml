@@ -21,7 +21,12 @@ services:
       context: .
       dockerfile: infrastructure/docker/backend.Dockerfile
     environment:
-      APP_PROVIDER: mock
+      APP_PROVIDER: ${APP_PROVIDER:-mock}
+      APP_DECIDER: ${APP_DECIDER:-mock}
+      APP_GEMINI_API_KEY: ${APP_GEMINI_API_KEY:-}
+      APP_GEMINI_MODEL: ${APP_GEMINI_MODEL:-}
+      APP_AI_GATEWAY_API_KEY: ${APP_AI_GATEWAY_API_KEY:-}
+      APP_JEV_MODEL: ${APP_JEV_MODEL:-typesafe-ai/jev-1.14.0}
       APP_DATABASE_URL: postgresql://starter:${POSTGRES_PASSWORD:-starter-local-only}@postgres:5432/starter
     depends_on:
       postgres:

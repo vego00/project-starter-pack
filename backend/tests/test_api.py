@@ -18,7 +18,8 @@ def test_health_does_not_claim_model_connection(client):
     assert response.json() == {
         "status": "ok",
         "provider": "mock",
-        "model_connected": False,
+        "decider": "mock",
+        "model_configured": False,
         "journeys_available": False,
     }
 
@@ -36,7 +37,7 @@ def test_cors_allows_only_configured_origins(client):
 
 def test_unsupported_provider_does_not_silently_use_mock():
     with pytest.raises(ValidationError):
-        Settings(_env_file=None, provider="gemini")
+        Settings(_env_file=None, provider="openai")
 
 
 def test_database_url_is_hidden_from_repr():

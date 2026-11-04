@@ -46,6 +46,7 @@ const promptSchema = z.discriminatedUnion("type", [
       question: z.string(),
       options: z.array(optionViewSchema),
       recommendation: recommendationSchema,
+      advice_source: z.string(),
       evidence: z.array(
         z.object({
           source_id: z.string(),
@@ -117,12 +118,14 @@ export class ApiError extends Error {
   }
 }
 
+// Preparing a card can include model calls, each bounded on the server.
+const REQUEST_TIMEOUT_MS = 60000;
 const OFFLINE =
   "서버에 연결할 수 없어요. 백엔드 실행 상태를 확인하고 다시 시도해 주세요.";
 
 async function request(path: string, init?: RequestInit): Promise<Journey> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     const response = await fetch(path, {
       ...init,

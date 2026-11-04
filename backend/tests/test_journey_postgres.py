@@ -59,18 +59,19 @@ def select(option_id):
 def test_journey_continues_across_processes_until_completed():
     journey_id = uuid4()
 
-    assert step(journey_id, "start", SPEC)["card_id"] == "agent.hitl"
+    assert step(journey_id, "start", SPEC)["card_id"] == "agent.topology"
+    assert step(journey_id, "resume", select("pipeline"))["card_id"] == "agent.hitl"
     assert step(journey_id, "resume", select("question"))["card_id"] == "model.provider"
 
     for option_id in ("gemini", "postgres", "sync", "none", "external_api"):
         result = step(journey_id, "resume", select(option_id))
     assert result["card_id"] == "cloud.target"
-    assert len(result["decisions"]) == 6
+    assert len(result["decisions"]) == 7
 
     final = step(journey_id, "resume", select("local"))
     assert final["card_id"] is None
     assert final["status"] == "completed"
-    assert len(final["decisions"]) == 7
+    assert len(final["decisions"]) == 8
 
 
 @needs_postgres
@@ -80,7 +81,7 @@ def test_invalid_answer_after_restart_keeps_the_same_card():
 
     result = step(journey_id, "resume", {})
 
-    assert result["card_id"] == "agent.hitl"
+    assert result["card_id"] == "agent.topology"
     assert result["decisions"] == []
 
 
@@ -98,8 +99,8 @@ def test_journeys_are_isolated_and_setup_is_repeatable():
         graph.invoke(journey_input(second, spec), journey_config(second))
         missing = graph.get_state(journey_config(uuid4()))
 
-    assert step(first, "resume", select("approval"))["decisions"] == ["agent.hitl"]
-    assert step(second, "resume", select("none"))["card_id"] == "model.provider"
+    assert step(first, "resume", select("single"))["decisions"] == ["agent.topology"]
+    assert step(second, "resume", select("pipeline"))["card_id"] == "agent.hitl"
     assert missing.values == {}
 
 

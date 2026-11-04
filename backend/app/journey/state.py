@@ -15,6 +15,7 @@ DeploymentTarget = Literal["local_demo", "small_group", "public_service"]
 MAX_CLARIFY_ROUNDS = 2
 MAX_QUESTIONS_PER_ROUND = 3
 MAX_QUESTIONS_PER_CARD = 5
+MAX_LLM_CALLS_PER_JOURNEY = 40  # Provisional cost ceiling; recalibrate from real usage.
 
 # Ordered by how many decisions the signal changes; only unanswered ones are asked.
 CLARIFY_QUESTIONS: dict[str, str] = {
@@ -72,8 +73,14 @@ class Recommendation(BaseModel):
 
 
 class Advice(BaseModel):
+    """`source` tells the screen whether an LLM wrote this or the card's own text is shown."""
+
     source: str
     notes: dict[str, str] = {}  # option_id -> explanation
+    model_id: str | None = None
+    prompt_version: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
 
 
 class Evidence(BaseModel):
@@ -121,6 +128,8 @@ class NodeEvent(BaseModel):
     confidence: float | None = None
     model_id: str | None = None
     prompt_version: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
 
 
 class JourneyState(BaseModel):
