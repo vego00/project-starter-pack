@@ -44,6 +44,7 @@
 - [System Architecture](https://app.notion.com/p/40e96199efb38194b04fc9720bf7e486) · [Frontend](https://app.notion.com/p/40e96199efb381e99713c5b89c62039f) · [Backend API](https://app.notion.com/p/40e96199efb381199d82e4d2fb88d728)
 - [Agent / Model Providers](https://app.notion.com/p/40e96199efb381f99893d1a3fccc7a8c) · [PostgreSQL & Persistence](https://app.notion.com/p/40e96199efb381c2b774fe624a2d3f00)
 - [uv Workspace / Docker](https://app.notion.com/p/40e96199efb3813c8c60f49f337cf1a6) · [CI / Release / Operations](https://app.notion.com/p/40e96199efb38118ba28ede3fcb7e372)
+- [Tool/MCP Permissions & Recovery (Later)](https://app.notion.com/p/40e96199efb381398cb3e7fbb83d6096) · [Architecture Decision Records / Open Questions](https://app.notion.com/p/40e96199efb381b7870afe652522a060)
 
 이전 Notion 메인(Architecture & Docs)과 해당 하위 문서는 **마이그레이션 전 참고 이력**으로만 간주한다. 최신 의사결정·구현 계약은 위 신규 모듈을 기준으로 한다. 세 모듈은 **개발 작업 구분**이며 서로 독립 배포된 MSA 서비스 3개라는 뜻이 아니다.
 
