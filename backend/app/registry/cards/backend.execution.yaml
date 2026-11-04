@@ -1,6 +1,7 @@
 card_id: backend.execution
 version: 1
 layer: backend
+title: 작업 실행
 question: 에이전트 작업을 어떻게 실행할까요?
 options:
   - id: sync

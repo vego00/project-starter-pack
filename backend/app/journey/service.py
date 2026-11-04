@@ -23,8 +23,11 @@ from app.journey.state import (
 )
 from app.registry.loader import Registry
 
-MOCK_NOTICE = (
+NO_MODEL_NOTICE = (
     "모델 미연결 상태입니다. 추천은 카드의 기본값이며 내 프로젝트를 분석한 결과가 아닙니다."
+)
+MOCK_RECOMMENDATION_NOTICE = (
+    "선택지 설명은 AI가 쓰지만, 추천은 아직 카드의 기본값이며 내 프로젝트를 분석한 결과가 아닙니다."
 )
 
 
@@ -37,6 +40,7 @@ class JourneyError(Exception):
 class CardStatus(BaseModel):
     card_id: str
     layer: str
+    title: str
     question: str
     state: Literal["decided", "implied", "deferred", "current", "pending"]
     option_id: str | None = None
@@ -164,6 +168,7 @@ class JourneyService:
                 CardStatus(
                     card_id=card.card_id,
                     layer=card.layer,
+                    title=card.title,
                     question=card.question,
                     state=kind,
                     option_id=decision.option_id if decision else None,
@@ -173,6 +178,11 @@ class JourneyService:
                 )
             )
         return statuses
+
+    def _notice(self) -> str | None:
+        if not self._deps.recommendations_are_mock:
+            return None
+        return NO_MODEL_NOTICE if self._deps.explanations_are_mock else MOCK_RECOMMENDATION_NOTICE
 
     def _view(self, journey_id: UUID, snapshot: StateSnapshot) -> JourneyView:
         state = JourneyState.model_validate(snapshot.values)
@@ -184,5 +194,5 @@ class JourneyService:
             prompt=_pending_prompt(snapshot),
             cards=self._card_statuses(state),
             warnings=[c.message for c in state.conflicts if c.severity == "warning"],
-            notice=MOCK_NOTICE if self._deps.recommendations_are_mock else None,
+            notice=self._notice(),
         )

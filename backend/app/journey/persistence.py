@@ -1,4 +1,4 @@
-"""PostgreSQL checkpointer so a journey outlives the process (Notion 02-1 §2.6, DiV P4)."""
+"""PostgreSQL checkpointer so a journey outlives the process (DiV P4)."""
 
 from collections.abc import Iterator
 from contextlib import contextmanager

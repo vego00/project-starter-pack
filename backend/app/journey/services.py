@@ -266,6 +266,10 @@ class JourneyDeps:
     def recommendations_are_mock(self) -> bool:
         return self.decider.name == "mock"
 
+    @property
+    def explanations_are_mock(self) -> bool:
+        return isinstance(self.advisor, MockAdvisor)
+
 
 def build_deps(settings: Settings, registry: Registry) -> JourneyDeps:
     decider: Decider = MockDecider()

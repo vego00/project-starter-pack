@@ -1,6 +1,7 @@
 card_id: agent.hitl
 version: 1
 layer: agent
+title: 사람 확인
 question: 에이전트가 실행 중간에 사람의 확인을 받아야 하나요?
 options:
   - id: none
@@ -32,7 +33,7 @@ signals:
   question: [입력이 모호한 경우가 많음]
   approval: [메일 발송·결제처럼 외부 쓰기가 있음]
 requires:
-  # Notion 10 §3
+  # Decision Registry 규칙
   - id: hitl-needs-durable-checkpointer
     when:
       - {card: agent.hitl, not_in: [none]}

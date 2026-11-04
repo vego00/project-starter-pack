@@ -1,6 +1,7 @@
 card_id: mlops.model_serving
 version: 1
 layer: mlops
+title: 모델 서빙
 question: 모델을 어떻게 서빙할까요?
 options:
   - id: external_api
@@ -32,7 +33,7 @@ signals:
   ollama: [데이터 외부 전송 불가, 소규모 사용]
   vllm: [GPU 보유, 높은 처리량 필요]
 conflicts:
-  # Notion 10 §3의 ollama ∧ cloud.compute=serverless를 이번 카드 묶음의 cloud.target으로 표현
+  # Decision Registry의 ollama ∧ cloud.compute=serverless를 이번 카드 묶음의 cloud.target으로 표현
   - id: self-serving-on-cloud
     severity: warning
     when:

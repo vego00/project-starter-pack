@@ -1,4 +1,4 @@
-"""Journey contracts (Notion 02-1 §6). Checkpoints hold JSON only; see `nodes._jsonable`."""
+"""Journey contracts. Checkpoints hold JSON only; see `nodes._jsonable`."""
 
 import operator
 from datetime import datetime
