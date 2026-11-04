@@ -38,10 +38,12 @@
 
 | 경로 | 용도 |
 | --- | --- |
-| frontend/ | 사용자 웹 UI |
-| backend/ | API와 서비스 로직 |
-| agents/ | 재사용 가능한 에이전트 구성 |
-| benchmarks/datasets/, benchmarks/evaluators/ | 평가 데이터와 평가기 |
+| pyproject.toml, uv.lock | uv 워크스페이스, 공통 개발 도구, 의존성 잠금 |
+| compose.yaml | FE·BE 로컬 컨테이너 실행 |
+| frontend/ | 사용자 웹 UI (npm) |
+| backend/ | API와 서비스 로직 (워크스페이스 멤버) |
+| agents/ | 재사용 가능한 에이전트 구성 (추후 멤버 추가) |
+| benchmarks/datasets/, benchmarks/evaluators/ | 평가 데이터와 평가기 (추후 멤버 추가) |
 | infrastructure/docker/, infrastructure/kubernetes/ | 환경·배포 구성 공간 |
 | reports/ | 기계 생성 평가 결과 |
 | tests/ | 테스트 |
@@ -49,7 +51,25 @@
 
 experiment 브랜치에는 01_jev, 02_reasoning_graph, 03_mcp_tool_use, 04_agent_serving 실험 폴더를 둔다. main에는 experiments/를 추적하지 않는다. 검증된 결과만 제품 경로로 옮겨 반영하며 실험 브랜치를 통째로 병합하지 않는다. .gitignore만으로 추적 파일 유입을 막을 수 없으므로 CI에서도 main의 experiments/ 유입을 검사한다.
 
-현재 폴더는 .gitkeep만 포함한 준비 구조이며, 기능 구현 또는 인프라 도입 확정을 의미하지 않는다.
+.gitkeep만 있는 폴더는 준비 구조이며, 기능 구현 또는 인프라 도입 확정을 의미하지 않는다.
+
+## 로컬 실행
+
+모델은 연결되어 있지 않으며 고정 템플릿 예시만 반환한다.
+
+```bash
+# 로컬 환경 (uv, Node.js 22.12 이상)
+uv sync
+npm --prefix frontend ci
+./scripts/dev.sh
+
+# 또는 컨테이너
+docker compose up --build
+```
+
+웹 UI는 http://127.0.0.1:5173, API 문서는 http://127.0.0.1:8000/docs 에서 확인한다.
+
+새 Python 멤버를 추가할 때는 해당 폴더에 pyproject.toml을 만들고 루트 pyproject.toml의 `tool.uv.workspace.members`에 등록한 뒤 `uv lock`을 실행한다.
 
 ## 초기 산출물 제안
 
