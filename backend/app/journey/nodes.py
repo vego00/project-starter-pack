@@ -218,6 +218,7 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
                     note=state.advice.notes.get(option.id, ""),
                     blocked_reason=blocked.get(option.id),
                     implies={k: v.option_id for k, v in impact.implied.items()},
+                    implied_messages=[v.message for v in impact.implied.values()],
                     warnings=[conflict.message for conflict in impact.conflicts],
                     artifacts=list(card.artifacts.get(option.id, ())),
                 )

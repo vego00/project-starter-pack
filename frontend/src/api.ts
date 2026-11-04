@@ -1,72 +1,177 @@
 import { z } from "zod";
 
-const responseSchema = z.object({
-  request_id: z.string().uuid(),
-  provider: z.literal("mock"),
-  is_mock: z.literal(true),
-  notice: z.string(),
-  starter_pack: z.object({
-    pain_point: z.string(),
-    goal: z.string(),
-    assumptions: z.array(z.string()),
-    agent_recommended: z.boolean().nullable(),
-    agent_blueprint: z.object({
-      architecture: z.enum([
-        "undetermined",
-        "single_agent",
-        "multi_agent",
-        "rule_based",
-      ]),
-      roles: z.array(z.string()),
-      workflow: z.array(z.string()),
-      tools: z.array(z.string()),
-    }),
-    next_steps: z.array(z.string()).min(1),
+const optionViewSchema = z.object({
+  option: z.object({
+    id: z.string(),
+    name: z.string(),
+    summary: z.string(),
+    pros: z.array(z.string()),
+    cons: z.array(z.string()),
+    learning_difficulty: z.enum(["low", "medium", "high"]),
+    ops_burden: z.enum(["low", "medium", "high"]),
+    cost_nature: z.string(),
   }),
+  note: z.string(),
+  blocked_reason: z.string().nullable(),
+  implied_messages: z.array(z.string()),
+  warnings: z.array(z.string()),
 });
 
-export type GenerateResponse = z.infer<typeof responseSchema>;
+const recommendationSchema = z.object({
+  status: z.enum(["recommended", "needs_comparison"]),
+  option_id: z.string().nullable(),
+  confidence: z.number().nullable(),
+  reason: z.string(),
+  decider: z.string(),
+});
 
-export async function generatePack(
-  painPoint: string,
-  context: string,
-): Promise<GenerateResponse> {
+const issueSchema = z.object({
+  rule_id: z.string(),
+  severity: z.enum(["error", "warning"]),
+  message: z.string(),
+  card_ids: z.array(z.string()),
+});
+
+const promptSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("clarify"),
+    round: z.number(),
+    questions: z.array(z.object({ field: z.string(), question: z.string() })),
+  }),
+  z.object({
+    type: z.literal("decision"),
+    card: z.object({
+      card_id: z.string(),
+      layer: z.string(),
+      question: z.string(),
+      options: z.array(optionViewSchema),
+      recommendation: recommendationSchema,
+      evidence: z.array(
+        z.object({
+          source_id: z.string(),
+          title: z.string(),
+          excerpt: z.string(),
+        }),
+      ),
+      div_refs: z.array(z.string()),
+    }),
+    qa: z.array(
+      z.object({
+        question: z.string(),
+        answer: z.string(),
+        answered_by: z.string(),
+      }),
+    ),
+    conflicts: z.array(issueSchema),
+    error: z.string().nullable(),
+  }),
+  z.object({
+    type: z.literal("issues"),
+    issues: z.array(issueSchema),
+    error: z.string().nullable(),
+  }),
+]);
+
+const journeySchema = z.object({
+  journey_id: z.string().uuid(),
+  revision: z.number(),
+  status: z.enum(["in_progress", "needs_fix", "completed"]),
+  idea: z.string(),
+  prompt: promptSchema.nullable(),
+  cards: z.array(
+    z.object({
+      card_id: z.string(),
+      layer: z.string(),
+      question: z.string(),
+      state: z.enum(["decided", "implied", "deferred", "current", "pending"]),
+      option_name: z.string().nullable(),
+      by: z.enum(["user", "recommended", "implied"]).nullable(),
+      rationale: z.string(),
+    }),
+  ),
+  warnings: z.array(z.string()),
+  notice: z.string().nullable(),
+});
+
+export type Journey = z.infer<typeof journeySchema>;
+export type Prompt = NonNullable<Journey["prompt"]>;
+export type DecisionPrompt = Extract<Prompt, { type: "decision" }>;
+export type ClarifyPrompt = Extract<Prompt, { type: "clarify" }>;
+export type IssuesPrompt = Extract<Prompt, { type: "issues" }>;
+export type CardStatus = Journey["cards"][number];
+
+export type Action =
+  | { action: "select"; option_id: string; rationale?: string }
+  | { action: "accept_recommendation" }
+  | { action: "defer" }
+  | { action: "ask"; question: string }
+  | { action: "reopen"; card_id: string }
+  | { action: "clarify"; answers: Record<string, unknown> };
+
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly code: string,
+  ) {
+    super(message);
+  }
+}
+
+const OFFLINE =
+  "서버에 연결할 수 없어요. 백엔드 실행 상태를 확인하고 다시 시도해 주세요.";
+
+async function request(path: string, init?: RequestInit): Promise<Journey> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
   try {
-    const response = await fetch("/api/v1/starter-packs/generate", {
-      method: "POST",
+    const response = await fetch(path, {
+      ...init,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        pain_point: painPoint.trim(),
-        context: context.trim(),
-      }),
       signal: controller.signal,
     });
+    const body: unknown = await response.json().catch(() => null);
     if (!response.ok) {
-      const messages: Record<number, string> = {
-        422: "입력 길이를 확인해 주세요. 문제는 10~3,000자, 참고 맥락은 2,000자까지 입력할 수 있어요.",
-        502: "결과 형식을 확인하지 못했어요. 다시 시도해 주세요.",
-        504: "응답 시간이 초과됐어요. 잠시 후 다시 시도해 주세요.",
-      };
-      throw new Error(
-        messages[response.status] ||
-          "서버에 연결할 수 없어요. 백엔드 실행 상태를 확인하고 다시 시도해 주세요.",
-      );
+      const detail = z
+        .object({ error: z.object({ code: z.string(), message: z.string() }) })
+        .safeParse(body);
+      if (detail.success)
+        throw new ApiError(detail.data.error.message, detail.data.error.code);
+      throw new ApiError(OFFLINE, "unavailable");
     }
-    const parsed = responseSchema.safeParse(await response.json());
+    const parsed = journeySchema.safeParse(body);
     if (!parsed.success)
-      throw new Error("결과 형식을 확인하지 못했어요. 다시 시도해 주세요.");
+      throw new ApiError(
+        "결과 형식을 확인하지 못했어요. 다시 시도해 주세요.",
+        "invalid_output",
+      );
     return parsed.data;
   } catch (error) {
     if (controller.signal.aborted)
-      throw new Error("응답 시간이 초과됐어요. 다시 시도해 주세요.");
-    if (error instanceof TypeError)
-      throw new Error(
-        "서버에 연결할 수 없어요. 백엔드 실행 상태를 확인하고 다시 시도해 주세요.",
+      throw new ApiError(
+        "응답 시간이 초과됐어요. 다시 시도해 주세요.",
+        "timeout",
       );
+    if (error instanceof TypeError) throw new ApiError(OFFLINE, "unavailable");
     throw error;
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export function startJourney(idea: string): Promise<Journey> {
+  return request("/api/v1/journeys", {
+    method: "POST",
+    body: JSON.stringify({ idea: idea.trim() }),
+  });
+}
+
+export function getJourney(id: string): Promise<Journey> {
+  return request(`/api/v1/journeys/${id}`);
+}
+
+export function sendAction(journey: Journey, action: Action): Promise<Journey> {
+  return request(`/api/v1/journeys/${journey.journey_id}/decisions`, {
+    method: "POST",
+    body: JSON.stringify({ revision: journey.revision, action }),
+  });
 }

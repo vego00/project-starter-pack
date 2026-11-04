@@ -1,205 +1,614 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import App from "../src/App";
-import { DRAFT_KEY } from "../src/document";
 
-const result = {
-  request_id: "e29a4ac6-f90c-4f97-91d6-d99acf27351f",
-  provider: "mock",
-  is_mock: true,
-  notice: "모델 미연결 · 고정 템플릿 예시이며 실제 분석 결과가 아닙니다.",
-  starter_pack: {
-    pain_point: "<img src=x onerror=alert(1)> 입력한 문제",
-    goal: "예시 프로젝트 목표",
-    assumptions: ["확인이 필요한 가정"],
-    agent_recommended: null,
-    agent_blueprint: {
-      architecture: "undetermined",
-      roles: ["요구사항 정리 (예시)"],
-      workflow: ["문제 확인", "검증"],
-      tools: [],
+const ID = "e29a4ac6-f90c-4f97-91d6-d99acf27351f";
+const LAST_KEY = "starter-pack:last-journey:v1";
+
+function optionView(id: string, name: string, extra = {}) {
+  return {
+    option: {
+      id,
+      name,
+      summary: `${name} 설명`,
+      pros: [`${name} 장점`],
+      cons: [`${name} 단점`],
+      learning_difficulty: "low",
+      ops_burden: "medium",
+      cost_nature: "추가 비용 없음",
     },
-    next_steps: ["성공 기준을 정하세요."],
-  },
+    note: `${name} 설명`,
+    blocked_reason: null,
+    implies: {},
+    implied_messages: [],
+    warnings: [],
+    artifacts: [],
+    ...extra,
+  };
+}
+
+const recommendation = {
+  status: "recommended",
+  option_id: "none",
+  confidence: 0.9,
+  reason: "기본값 이유",
+  decider: "mock",
 };
 
-function mockApi(
-  generate: () => Promise<Response> = async () => Response.json(result),
-) {
-  return vi.fn((url: string) =>
-    url === "/health"
-      ? Promise.resolve(Response.json({ status: "ok" }))
-      : generate(),
+function decisionPrompt(overrides = {}, cardOverrides = {}) {
+  return {
+    type: "decision",
+    card: {
+      card_id: "agent.hitl",
+      version: 1,
+      layer: "agent",
+      question: "사람 확인이 필요한가요?",
+      options: [
+        optionView("none", "없음"),
+        optionView("approval", "승인", {
+          blocked_reason: "체크포인터가 필요합니다.",
+        }),
+      ],
+      recommendation,
+      evidence: [],
+      advice_source: "mock",
+      learning_refs: [],
+      div_refs: ["P1"],
+      ...cardOverrides,
+    },
+    qa: [],
+    conflicts: [],
+    progress: { total: 2, decided: 0, implied: 0, deferred: 0 },
+    error: null,
+    ...overrides,
+  };
+}
+
+function cards(first = "current", second = "pending") {
+  const status = (card_id: string, layer: string, state: string) => ({
+    card_id,
+    layer,
+    question: `${card_id} 질문`,
+    state,
+    option_id: state === "decided" ? "none" : null,
+    option_name: state === "decided" ? "없음" : null,
+    by: state === "decided" ? "user" : null,
+    rationale: "",
+  });
+  return [
+    status("agent.hitl", "agent", first),
+    status("cloud.target", "cloud", second),
+  ];
+}
+
+function journey(overrides = {}) {
+  return {
+    journey_id: ID,
+    revision: 7,
+    status: "in_progress",
+    idea: "강의 자료를 찾아 답하는 서비스",
+    prompt: decisionPrompt(),
+    cards: cards(),
+    warnings: [],
+    notice: "모델 미연결 상태입니다.",
+    ...overrides,
+  };
+}
+
+function errorResponse(status: number, code: string, message: string) {
+  return Response.json({ error: { code, message } }, { status });
+}
+
+type Handler = (
+  url: string,
+  init?: RequestInit,
+) => Response | Promise<Response>;
+
+function stubFetch(handler: Handler) {
+  const mock = vi.fn(async (url: string, init?: RequestInit) =>
+    handler(url, init),
   );
+  vi.stubGlobal("fetch", mock);
+  return mock;
+}
+
+function bodyOf(call: unknown[]) {
+  return JSON.parse((call[1] as RequestInit).body as string);
+}
+
+function stubStorage(initial: Record<string, string> = {}) {
+  const items = new Map(Object.entries(initial));
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => items.get(key) ?? null,
+    setItem: (key: string, value: string) => void items.set(key, value),
+    removeItem: (key: string) => void items.delete(key),
+  });
+  return items;
+}
+
+async function startWith(view: unknown) {
+  const user = userEvent.setup();
+  const mock = stubFetch(() => Response.json(view, { status: 201 }));
+  render(<App />);
+  await user.type(
+    screen.getByLabelText("프로젝트 아이디어"),
+    "강의 자료를 찾아 답하는 서비스",
+  );
+  await user.click(screen.getByRole("button", { name: "결정 시작하기" }));
+  return { user, mock };
 }
 
 beforeEach(() => {
-  // Node 26 exposes its own storage global; isolate browser storage in component tests.
-  const items = new Map<string, string>();
-  vi.stubGlobal("localStorage", {
-    getItem: (key: string) => items.get(key) ?? null,
-    setItem: (key: string, value: string) => {
-      items.set(key, value);
-    },
-    removeItem: (key: string) => {
-      items.delete(key);
-    },
-    clear: () => items.clear(),
-  });
-  vi.stubGlobal("fetch", mockApi());
+  stubStorage();
+  window.history.replaceState(null, "", "/");
 });
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
-  vi.restoreAllMocks();
 });
 
-describe("studio workflow", () => {
-  it("requires a meaningful input and renders API results safely", async () => {
+describe("starting", () => {
+  it("requires a meaningful idea and sends it trimmed", async () => {
     const user = userEvent.setup();
-    const { container } = render(<App />);
-    const submit = screen.getByRole("button", { name: /예시 스타터팩 만들기/ });
-    expect(submit).toBeDisabled();
-    await user.click(screen.getByRole("button", { name: /회의 후속 작업/ }));
-    expect(submit).toBeEnabled();
-    await user.click(submit);
-    expect(await screen.findByText("예시 프로젝트 목표")).toBeInTheDocument();
-    expect(screen.getByText(result.notice)).toBeInTheDocument();
-    expect(
-      screen.getByText(result.starter_pack.pain_point),
-    ).toBeInTheDocument();
-    expect(container.querySelector("img")).toBeNull();
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/v1/starter-packs/generate",
-      expect.objectContaining({ method: "POST" }),
-    );
-  });
-
-  it("prevents duplicate submissions while waiting", async () => {
-    let resolve!: (value: Response) => void;
-    const fetcher = mockApi(
-      () =>
-        new Promise((r) => {
-          resolve = r;
-        }),
-    );
-    vi.stubGlobal("fetch", fetcher);
+    const mock = stubFetch(() => Response.json(journey(), { status: 201 }));
     render(<App />);
-    fireEvent.change(screen.getByLabelText(/해결하고 싶은 문제/), {
-      target: { value: "반복적인 팀 회의 작업을 줄이고 싶어요." },
-    });
-    const form = screen
-      .getByRole("button", { name: /예시 스타터팩 만들기/ })
-      .closest("form")!;
-    fireEvent.submit(form);
-    fireEvent.submit(form);
+    const submit = screen.getByRole("button", { name: "결정 시작하기" });
+    expect(submit).toBeDisabled();
+
+    await user.type(screen.getByLabelText("프로젝트 아이디어"), "  짧음  ");
+    expect(submit).toBeDisabled();
+
+    await user.clear(screen.getByLabelText("프로젝트 아이디어"));
+    await user.click(
+      screen.getAllByRole("button", { name: /부트캠프 강의/ })[0],
+    );
+    await user.click(submit);
+
+    expect(bodyOf(mock.mock.calls[0]).idea).toMatch(/^부트캠프/);
     expect(
-      screen.getByRole("button", { name: /예시 결과를 불러오는 중/ }),
-    ).toBeDisabled();
-    expect(
-      fetcher.mock.calls.filter(([url]) => url !== "/health"),
-    ).toHaveLength(1);
-    resolve(Response.json(result));
-    expect(await screen.findByText("예시 프로젝트 목표")).toBeInTheDocument();
+      await screen.findByRole("heading", { name: "사람 확인이 필요한가요?" }),
+    ).toBeInTheDocument();
   });
 
-  it("preserves input on failure and supports retry", async () => {
-    let failed = true;
-    vi.stubGlobal(
-      "fetch",
-      mockApi(async () =>
-        failed ? new Response("", { status: 503 }) : Response.json(result),
+  it("shows the server's message when starting fails and keeps the input", async () => {
+    const user = userEvent.setup();
+    stubFetch(() =>
+      errorResponse(
+        503,
+        "persistence_unavailable",
+        "저장소가 연결되어 있지 않아요.",
       ),
     );
-    const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", { name: /학습 자료 정리/ }));
-    const input = screen.getByLabelText(
-      /해결하고 싶은 문제/,
-    ) as HTMLTextAreaElement;
-    const before = input.value;
-    await user.click(
-      screen.getByRole("button", { name: /예시 스타터팩 만들기/ }),
+    const input = screen.getByLabelText("프로젝트 아이디어");
+    await user.type(input, "강의 자료를 찾아 답하는 서비스");
+    await user.click(screen.getByRole("button", { name: "결정 시작하기" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("저장소가");
+    expect(input).toHaveValue("강의 자료를 찾아 답하는 서비스");
+  });
+
+  it("explains a network failure", async () => {
+    const user = userEvent.setup();
+    stubFetch(() => {
+      throw new TypeError("failed");
+    });
+    render(<App />);
+    await user.type(
+      screen.getByLabelText("프로젝트 아이디어"),
+      "강의 자료를 찾아 답하는 서비스",
     );
+    await user.click(screen.getByRole("button", { name: "결정 시작하기" }));
+
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "서버에 연결할 수 없어요",
     );
-    expect(input.value).toBe(before);
-    failed = false;
-    await user.click(
-      screen.getByRole("button", { name: /예시 스타터팩 만들기/ }),
-    );
-    expect(await screen.findByText("예시 프로젝트 목표")).toBeInTheDocument();
-    expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("rejects a malformed API response", async () => {
-    vi.stubGlobal(
-      "fetch",
-      mockApi(async () => Response.json({ message: "not a starter pack" })),
-    );
+  it("rejects a response in an unexpected shape", async () => {
+    const user = userEvent.setup();
+    stubFetch(() => Response.json({ unexpected: true }, { status: 201 }));
     render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: /반복 업무 줄이기/ }));
-    fireEvent.click(
-      screen.getByRole("button", { name: /예시 스타터팩 만들기/ }),
+    await user.type(
+      screen.getByLabelText("프로젝트 아이디어"),
+      "강의 자료를 찾아 답하는 서비스",
     );
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "결과 형식을 확인하지 못했어요",
-    );
-  });
+    await user.click(screen.getByRole("button", { name: "결정 시작하기" }));
 
-  it("saves and restores a draft, and appends results without replacing it", async () => {
-    localStorage.setItem(DRAFT_KEY, "# 내가 쓴 초안");
-    render(<App />);
-    expect(screen.getByLabelText(/Markdown 초안/)).toHaveValue(
-      "# 내가 쓴 초안",
-    );
-    fireEvent.click(screen.getByRole("button", { name: /회의 후속 작업/ }));
-    fireEvent.click(
-      screen.getByRole("button", { name: /예시 스타터팩 만들기/ }),
-    );
-    await screen.findByText("예시 프로젝트 목표");
-    fireEvent.click(
-      screen.getByRole("button", { name: /결과를 내 초안에 추가/ }),
-    );
-    const merged = (
-      screen.getByLabelText(/Markdown 초안/) as HTMLTextAreaElement
-    ).value;
-    expect(merged).toContain("# 내가 쓴 초안");
-    expect(merged).toContain(result.notice);
-    fireEvent.click(screen.getByRole("button", { name: "저장" }));
-    await waitFor(() =>
-      expect(localStorage.getItem(DRAFT_KEY)).toContain(result.notice),
-    );
-    cleanup();
-    render(<App />);
-    expect(screen.getByLabelText(/Markdown 초안/)).toHaveValue(
-      localStorage.getItem(DRAFT_KEY),
-    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("결과 형식");
   });
+});
 
-  it("keeps the draft when storage is unavailable", async () => {
-    vi.spyOn(localStorage, "setItem").mockImplementation(() => {
-      throw new Error("quota");
-    });
+describe("restoring", () => {
+  it("reopens the journey in the address and remembers it", async () => {
+    const items = stubStorage();
+    window.history.replaceState(null, "", `/?journey=${ID}`);
+    const mock = stubFetch(() => Response.json(journey()));
     render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "내 초안" }));
-    fireEvent.change(screen.getByLabelText(/Markdown 초안/), {
-      target: { value: "보존할 내용" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "저장" }));
+
     expect(
-      screen.getByText("저장하지 못했습니다. 초안을 다운로드해 주세요."),
-    ).toBeInTheDocument();
-    expect(screen.getByLabelText(/Markdown 초안/)).toHaveValue("보존할 내용");
+      await screen.findByRole("heading", { name: "사람 확인이 필요한가요?" }),
+    ).toBeVisible();
+    expect(mock.mock.calls[0][0]).toBe(`/api/v1/journeys/${ID}`);
+    expect(items.get(LAST_KEY)).toBe(ID);
+  });
+
+  it("reopens the last journey from storage", async () => {
+    stubStorage({ [LAST_KEY]: ID });
+    stubFetch(() => Response.json(journey()));
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "사람 확인이 필요한가요?" }),
+    ).toBeVisible();
+    expect(window.location.search).toContain(ID);
+  });
+
+  it("falls back to a new project when the journey no longer exists", async () => {
+    const items = stubStorage({ [LAST_KEY]: ID });
+    stubFetch(() =>
+      errorResponse(404, "journey_not_found", "여정을 찾을 수 없어요."),
+    );
+    render(<App />);
+
+    expect(await screen.findByLabelText("프로젝트 아이디어")).toBeVisible();
+    expect(items.has(LAST_KEY)).toBe(false);
+  });
+
+  it("keeps the saved journey when the server is only temporarily down", async () => {
+    const items = stubStorage({ [LAST_KEY]: ID });
+    stubFetch(() =>
+      errorResponse(503, "journey_failed", "지금은 처리하지 못했어요."),
+    );
+    render(<App />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("지금은");
+    expect(items.get(LAST_KEY)).toBe(ID);
+  });
+
+  it("works when browser storage is unavailable", async () => {
+    vi.stubGlobal("localStorage", {
+      getItem: () => {
+        throw new Error("blocked");
+      },
+      setItem: () => {
+        throw new Error("blocked");
+      },
+      removeItem: () => {
+        throw new Error("blocked");
+      },
+    });
+    await startWith(journey());
+
+    expect(
+      await screen.findByRole("heading", { name: "사람 확인이 필요한가요?" }),
+    ).toBeVisible();
+    expect(window.location.search).toContain(ID);
+  });
+});
+
+describe("decision card", () => {
+  it("is honest that the recommendation is a mock default", async () => {
+    await startWith(journey());
+
+    expect(await screen.findByText("추천: 없음")).toBeVisible();
+    expect(
+      screen.getByText(/내 프로젝트를 분석한 결과는 아니에요/),
+    ).toBeVisible();
+    expect(screen.queryByText(/신뢰도/)).not.toBeInTheDocument();
+    expect(screen.getByText(/연결된 강의 자료 없음/)).toBeVisible();
+    expect(screen.getByText("모델 미연결 상태입니다.")).toBeVisible();
+  });
+
+  it("sends the current revision with a selection", async () => {
+    const { user, mock } = await startWith(journey());
+
+    await user.click(await screen.findByRole("button", { name: "없음 선택" }));
+
+    expect(bodyOf(mock.mock.calls[1])).toEqual({
+      revision: 7,
+      action: { action: "select", option_id: "none" },
+    });
+  });
+
+  it("disables a blocked option and explains why", async () => {
+    await startWith(journey());
+
+    expect(
+      await screen.findByRole("button", { name: "승인 선택" }),
+    ).toBeDisabled();
+    expect(screen.getByText(/체크포인터가 필요합니다/)).toBeVisible();
+  });
+
+  it("offers no shortcut when comparison is needed", async () => {
+    await startWith(
+      journey({
+        prompt: decisionPrompt(
+          {},
+          {
+            recommendation: {
+              status: "needs_comparison",
+              option_id: null,
+              confidence: null,
+              reason: "",
+              decider: "jev",
+            },
+          },
+        ),
+      }),
+    );
+
+    expect(await screen.findByText(/비교 필요/)).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "추천대로 진행" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows confidence only from a real decider", async () => {
+    await startWith(
+      journey({
+        prompt: decisionPrompt(
+          {},
+          { recommendation: { ...recommendation, decider: "jev" } },
+        ),
+      }),
+    );
+
+    expect(await screen.findByText("신뢰도 90%")).toBeVisible();
+  });
+
+  it("shows what an option brings along", async () => {
+    await startWith(
+      journey({
+        prompt: decisionPrompt(
+          {},
+          {
+            options: [
+              optionView("none", "없음", {
+                implied_messages: ["서빙도 함께 정해집니다."],
+                warnings: ["GPU를 확인하세요."],
+              }),
+              optionView("b", "비"),
+            ],
+          },
+        ),
+      }),
+    );
+
+    expect(await screen.findByText("서빙도 함께 정해집니다.")).toBeVisible();
+    expect(screen.getByText("GPU를 확인하세요.")).toBeVisible();
+  });
+
+  it("renders text as text, not markup", async () => {
+    await startWith(
+      journey({
+        prompt: decisionPrompt({ error: "<img src=x onerror=alert(1)>" }),
+      }),
+    );
+
+    await screen.findByRole("alert");
+    expect(document.querySelector("img")).toBeNull();
+  });
+
+  it("asks a question and shows the answer", async () => {
+    const { user, mock } = await startWith(journey());
+    mock.mockImplementation(async () =>
+      Response.json(
+        journey({
+          revision: 9,
+          prompt: decisionPrompt({
+            qa: [
+              {
+                card_id: "agent.hitl",
+                question: "뭐예요?",
+                answer: "고정 응답",
+                answered_by: "mock",
+              },
+            ],
+          }),
+        }),
+      ),
+    );
+
+    await user.type(
+      await screen.findByLabelText("이 카드에 대해 질문하기"),
+      "뭐예요?",
+    );
+    await user.click(screen.getByRole("button", { name: "질문" }));
+
+    expect(bodyOf(mock.mock.calls[1]).action).toEqual({
+      action: "ask",
+      question: "뭐예요?",
+    });
+    expect(await screen.findByText("고정 응답")).toBeVisible();
+  });
+
+  it("can defer and accept the recommendation", async () => {
+    const { user, mock } = await startWith(journey());
+
+    await user.click(
+      await screen.findByRole("button", { name: "나중에 결정" }),
+    );
+    await waitFor(() => expect(mock).toHaveBeenCalledTimes(2));
+    expect(bodyOf(mock.mock.calls[1]).action).toEqual({ action: "defer" });
+
+    await user.click(screen.getByRole("button", { name: "추천대로 진행" }));
+    await waitFor(() => expect(mock).toHaveBeenCalledTimes(3));
+    expect(bodyOf(mock.mock.calls[2]).action).toEqual({
+      action: "accept_recommendation",
+    });
+  });
+
+  it("ignores a second click while a request is in flight", async () => {
+    const { user, mock } = await startWith(journey());
+    const button = await screen.findByRole("button", { name: "없음 선택" });
+    let release = (_: Response) => {};
+    mock.mockImplementation(
+      () => new Promise<Response>((resolve) => (release = resolve)),
+    );
+
+    await user.click(button);
+    await user.click(button);
+    expect(mock).toHaveBeenCalledTimes(2);
+    expect(button).toBeDisabled();
+
+    release(Response.json(journey({ revision: 8 })));
+    await waitFor(() => expect(button).toBeEnabled());
+  });
+
+  it("reloads the latest state after a stale submission", async () => {
+    const { user, mock } = await startWith(journey());
+    const newer = journey({
+      revision: 12,
+      prompt: decisionPrompt({}, { question: "최신 카드 질문" }),
+    });
+    mock.mockImplementation(async (_url: string, init?: RequestInit) =>
+      init?.method === "POST"
+        ? errorResponse(409, "stale_revision", "화면이 최신 상태가 아니에요.")
+        : Response.json(newer),
+    );
+
+    await user.click(await screen.findByRole("button", { name: "없음 선택" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "최신 카드 질문" }),
+    ).toBeVisible();
+    expect(screen.getByRole("alert")).toHaveTextContent("최신 상태가 아니에요");
+  });
+});
+
+describe("clarify", () => {
+  const prompt = {
+    type: "clarify",
+    round: 1,
+    questions: [
+      { field: "deployment_target", question: "어디까지 배포하나요?" },
+      { field: "expected_users", question: "몇 명이 쓰나요?" },
+      { field: "data_traits", question: "데이터 특징은요?" },
+    ],
+  };
+
+  it("converts answers to their types and leaves out blanks", async () => {
+    const { user, mock } = await startWith(journey({ prompt, revision: 3 }));
+
+    await user.selectOptions(
+      await screen.findByLabelText("어디까지 배포하나요?"),
+      "local_demo",
+    );
+    await user.type(screen.getByLabelText("몇 명이 쓰나요?"), "20");
+    await user.click(screen.getByRole("button", { name: "다음" }));
+
+    expect(bodyOf(mock.mock.calls[1])).toEqual({
+      revision: 3,
+      action: {
+        action: "clarify",
+        answers: { deployment_target: "local_demo", expected_users: 20 },
+      },
+    });
+  });
+
+  it("splits traits and allows skipping everything", async () => {
+    const { user, mock } = await startWith(journey({ prompt }));
+
+    await user.type(
+      await screen.findByLabelText("데이터 특징은요?"),
+      "문서 검색, 개인정보,",
+    );
+    await user.click(screen.getByRole("button", { name: "다음" }));
+    expect(bodyOf(mock.mock.calls[1]).action.answers).toEqual({
+      data_traits: ["문서 검색", "개인정보"],
+    });
+  });
+});
+
+describe("issues and completion", () => {
+  it("offers to reopen only cards the user decided", async () => {
+    const view = journey({
+      status: "needs_fix",
+      cards: [
+        ...cards("decided", "decided"),
+        {
+          ...cards()[0],
+          card_id: "mlops.x",
+          state: "implied",
+          question: "자동 질문",
+        },
+      ],
+      prompt: {
+        type: "issues",
+        issues: [
+          {
+            rule_id: "r",
+            severity: "error",
+            message: "함께 쓸 수 없어요",
+            card_ids: ["agent.hitl", "mlops.x"],
+          },
+          {
+            rule_id: "w",
+            severity: "warning",
+            message: "경고만",
+            card_ids: ["cloud.target"],
+          },
+        ],
+        error: null,
+      },
+    });
+    const { user, mock } = await startWith(view);
+
+    const reopen = await screen.findByRole("button", {
+      name: "다시 고르기: agent.hitl 질문",
+    });
+    expect(
+      screen.queryByRole("button", { name: /자동 질문/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("경고만")).not.toBeInTheDocument();
+
+    await user.click(reopen);
+    expect(bodyOf(mock.mock.calls[1]).action).toEqual({
+      action: "reopen",
+      card_id: "agent.hitl",
+    });
+  });
+
+  it("lists decisions and warnings, then starts over", async () => {
+    const items = stubStorage();
+    const { user } = await startWith(
+      journey({
+        status: "completed",
+        prompt: null,
+        cards: cards("decided", "decided"),
+        warnings: ["GPU를 확인하세요."],
+      }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "모든 결정을 마쳤어요" }),
+    ).toBeVisible();
+    expect(screen.getByText("GPU를 확인하세요.")).toBeVisible();
+    expect(items.get(LAST_KEY)).toBe(ID);
+
+    await user.click(screen.getByRole("button", { name: "새 프로젝트 시작" }));
+
+    expect(screen.getByLabelText("프로젝트 아이디어")).toBeVisible();
+    expect(items.has(LAST_KEY)).toBe(false);
+    expect(window.location.search).toBe("");
+  });
+
+  it("reopens a decided card from the progress rail", async () => {
+    const { user, mock } = await startWith(
+      journey({ cards: cards("decided", "current") }),
+    );
+
+    await user.click(
+      await screen.findByRole("button", { name: "Agent 설계 다시 고르기" }),
+    );
+
+    expect(bodyOf(mock.mock.calls[1]).action).toEqual({
+      action: "reopen",
+      card_id: "agent.hitl",
+    });
   });
 });

@@ -1,27 +1,92 @@
 import logging
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from typing import Annotated
-from uuid import uuid4
+from uuid import UUID
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import ValidationError
+from langgraph.types import Checkpointer
+from pydantic import BaseModel
 
 from app.config import Settings
-from app.providers.mock import MockProvider, StarterPackProvider
-from app.schemas import ErrorResponse, GenerateRequest, GenerateResponse, StarterPack
+from app.journey.persistence import open_checkpointer
+from app.journey.service import JourneyError, JourneyService, JourneyView
+from app.journey.services import JourneyDeps
+from app.journey.state import JourneyAction, ProjectSpec
+from app.registry.loader import load_registry
 
 logger = logging.getLogger(__name__)
 
 
-def get_provider() -> StarterPackProvider:
-    return MockProvider()
+class ErrorDetail(BaseModel):
+    code: str
+    message: str
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+class ErrorResponse(BaseModel):
+    error: ErrorDetail
+
+
+class ActionRequest(BaseModel):
+    revision: int
+    action: JourneyAction
+
+
+def _error(status: int, code: str, message: str) -> JSONResponse:
+    return JSONResponse(status_code=status, content={"error": {"code": code, "message": message}})
+
+
+def _guarded[T](journey_id: UUID | None, run: Callable[[], T]) -> T:
+    try:
+        return run()
+    except JourneyError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - never expose input or internals to the client
+        logger.error("Journey step failed journey_id=%s type=%s", journey_id, type(exc).__name__)
+        raise JourneyError(
+            503, "journey_failed", "지금은 처리하지 못했어요. 잠시 후 다시 시도해 주세요."
+        ) from None
+
+
+def get_journeys(request: Request) -> JourneyService:
+    service = request.app.state.journeys
+    if service is None:
+        raise JourneyError(
+            503, "persistence_unavailable", "저장소가 연결되어 있지 않아 여정을 시작할 수 없어요."
+        )
+    return service
+
+
+Journeys = Annotated[JourneyService, Depends(get_journeys)]
+ERROR_RESPONSES = {status: {"model": ErrorResponse} for status in (404, 409, 422, 503)}
+
+
+def create_app(
+    settings: Settings | None = None,
+    *,
+    checkpointer: Checkpointer = None,
+    deps: JourneyDeps | None = None,
+) -> FastAPI:
     settings = settings or Settings()
-    app = FastAPI(title="Project Starter Pack API", version="0.1.0")
+    registry = load_registry()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        if checkpointer is not None:
+            app.state.journeys = JourneyService(registry, checkpointer, deps)
+            yield
+        elif settings.database_url is not None:
+            with open_checkpointer(settings.database_url.get_secret_value()) as saver:
+                app.state.journeys = JourneyService(registry, saver, deps)
+                yield
+        else:
+            app.state.journeys = None
+            yield
+
+    app = FastAPI(title="Project Starter Pack API", version="0.2.0", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
@@ -32,74 +97,40 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.exception_handler(RequestValidationError)
     async def invalid_request(request: Request, exc: RequestValidationError):
         # Do not return/log the original input, which may contain personal information.
-        return JSONResponse(
-            status_code=422,
-            content={
-                "error": {
-                    "code": "invalid_input",
-                    "message": "문제는 앞뒤 공백을 제거한 뒤 10~3,000자, 참고 맥락은 2,000자 이내로 입력해 주세요.",
-                }
-            },
-        )
+        return _error(422, "invalid_input", "입력 내용을 확인해 주세요.")
+
+    @app.exception_handler(JourneyError)
+    async def journey_error(request: Request, exc: JourneyError):
+        return _error(exc.status, exc.code, exc.message)
 
     @app.get("/health")
-    async def health():
-        return {"status": "ok", "provider": settings.provider, "model_connected": False}
+    def health(request: Request):
+        return {
+            "status": "ok",
+            "provider": settings.provider,
+            "model_connected": False,
+            "journeys_available": getattr(request.app.state, "journeys", None) is not None,
+        }
+
+    # Sync routes on purpose: FastAPI runs them in a thread pool and the graph is synchronous.
+    @app.post(
+        "/api/v1/journeys", status_code=201, response_model=JourneyView, responses=ERROR_RESPONSES
+    )
+    def create_journey(spec: ProjectSpec, journeys: Journeys):
+        return _guarded(None, lambda: journeys.start(spec))
+
+    @app.get("/api/v1/journeys/{journey_id}", response_model=JourneyView, responses=ERROR_RESPONSES)
+    def get_journey(journey_id: UUID, journeys: Journeys):
+        return _guarded(journey_id, lambda: journeys.get(journey_id))
 
     @app.post(
-        "/api/v1/starter-packs/generate",
-        response_model=GenerateResponse,
-        responses={
-            422: {"model": ErrorResponse},
-            502: {"model": ErrorResponse},
-            503: {"model": ErrorResponse},
-            504: {"model": ErrorResponse},
-        },
+        "/api/v1/journeys/{journey_id}/decisions",
+        response_model=JourneyView,
+        responses=ERROR_RESPONSES,
     )
-    async def generate(
-        payload: GenerateRequest,
-        provider: Annotated[StarterPackProvider, Depends(get_provider)],
-    ):
-        request_id = uuid4()
-        try:
-            pack = StarterPack.model_validate(await provider.generate_structured(payload))
-        except TimeoutError:
-            return JSONResponse(
-                status_code=504,
-                content={
-                    "error": {
-                        "code": "generation_timeout",
-                        "message": "응답 시간이 초과되었습니다. 다시 시도해 주세요.",
-                    }
-                },
-            )
-        except ValidationError:
-            return JSONResponse(
-                status_code=502,
-                content={
-                    "error": {
-                        "code": "invalid_output",
-                        "message": "결과 형식을 확인하지 못했습니다. 다시 시도해 주세요.",
-                    }
-                },
-            )
-        except Exception:  # noqa: BLE001 - provider boundary; never expose input or secrets
-            logger.error("Generation failed request_id=%s", request_id)
-            return JSONResponse(
-                status_code=503,
-                content={
-                    "error": {
-                        "code": "generation_failed",
-                        "message": "현재 결과를 만들 수 없습니다. 잠시 후 다시 시도해 주세요.",
-                    }
-                },
-            )
-        return GenerateResponse(
-            request_id=request_id,
-            provider="mock",
-            is_mock=True,
-            notice="모델 미연결 · 고정 템플릿 예시이며 실제 분석 결과가 아닙니다.",
-            starter_pack=pack,
+    def act_on_journey(journey_id: UUID, payload: ActionRequest, journeys: Journeys):
+        return _guarded(
+            journey_id, lambda: journeys.act(journey_id, payload.revision, payload.action)
         )
 
     return app

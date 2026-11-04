@@ -37,7 +37,9 @@ class ProjectSpec(BaseModel):
     budget: str | None = Field(default=None, min_length=1, max_length=200)
     expected_users: int | None = Field(default=None, ge=0)
     weekly_hours: int | None = Field(default=None, ge=1)
-    data_traits: list[str] | None = None
+    data_traits: list[Annotated[str, Field(max_length=200)]] | None = Field(
+        default=None, max_length=20
+    )
     deployment_target: DeploymentTarget | None = None
 
     def missing_signals(self) -> list[str]:
@@ -85,6 +87,7 @@ class OptionView(BaseModel):
     note: str = ""
     blocked_reason: str | None = None
     implies: dict[CardId, str] = {}  # card_id -> option_id
+    implied_messages: list[str] = []
     warnings: list[str] = []
     artifacts: list[str] = []
 
@@ -180,8 +183,22 @@ class ReopenAction(_Action):
     card_id: CardId
 
 
+class ClarifyAction(_Action):
+    action: Literal["clarify"]
+    answers: dict[str, Any] = Field(max_length=len(CLARIFY_QUESTIONS))
+
+
 GateAction = Annotated[
     SelectAction | AcceptRecommendationAction | DeferAction | AskAction | ReopenAction,
+    Field(discriminator="action"),
+]
+JourneyAction = Annotated[
+    SelectAction
+    | AcceptRecommendationAction
+    | DeferAction
+    | AskAction
+    | ReopenAction
+    | ClarifyAction,
     Field(discriminator="action"),
 ]
 GATE_ACTION = TypeAdapter(GateAction)

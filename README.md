@@ -55,12 +55,14 @@ experiment 브랜치에는 01_jev, 02_reasoning_graph, 03_mcp_tool_use, 04_agent
 
 ## 로컬 실행
 
-모델은 연결되어 있지 않으며 고정 템플릿 예시만 반환한다.
+모델은 연결되어 있지 않다. 결정 카드의 추천은 카드 기본값이며 프로젝트를 분석한 결과가 아니다.
 
 ```bash
 # 로컬 환경 (uv, Node.js 22.12 이상)
 uv sync
 npm --prefix frontend ci
+cp .env.example .env          # 이미 있으면 건너뛴다
+docker compose up -d postgres # 여정 저장에 필요하다
 ./scripts/dev.sh
 
 # 또는 컨테이너
