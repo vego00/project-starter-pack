@@ -7,7 +7,8 @@ from app.journey.state import JourneyState
 from app.registry.loader import Registry
 from app.registry.schema import DecisionCard
 
-ADVISOR_VERSION = "advisor-v1"
+ADVISOR_VERSION = "advisor-v2"
+GCB_VERSION = "gcb-v1"
 QA_VERSION = "qa-v1"
 
 _DATA_RULE = (
@@ -32,8 +33,18 @@ ADVISOR_SYSTEM = f"""당신은 프로젝트 설계 선택지를 설명하는 조
 - 어떤 선택지가 낫다고 말하거나 결정을 대신하지 않습니다.
 - 제공된 내용에 없는 가격, 성능 수치, 출처를 만들지 않습니다.
 - 프로젝트 정보가 부족하면 어떤 정보에 따라 달라지는지 말합니다.
+- PROJECT에 goal, context, boundary가 있으면 그 기준으로 설명하고, boundary에 어긋날 수 있는 선택지는 어떤 점이 어긋나는지 짚습니다.
 - option_id는 OPTIONS에 있는 값을 그대로 쓰고, 모든 선택지를 한 번씩 다룹니다.
 {_DATA_RULE}"""
+
+GCB_SYSTEM = f"""사용자의 프로젝트 아이디어를 GCB 초안으로 정리합니다. 사용자가 확인하고 고칠 초안입니다.
+- goal: 프로젝트가 끝났을 때 누가 무엇을 할 수 있게 되는지를 "~할 수 있는 상태"로 끝나는 문장으로 씁니다. "만들어줘" 같은 명령이나 "구현", "구축", "개발" 같은 작업 이름으로 끝내지 않습니다. 구현 방법, 기술, 순서를 넣지 않습니다.
+- context: 왜 필요한지, 누가 쓰는지, 배경과 제약 중 아이디어에 적힌 것만 씁니다.
+- boundary: 결과가 충족해야 할 기준 중 아이디어에 적힌 것만 씁니다. 구현 방법을 넣지 않습니다.
+규칙:
+- 아이디어에 없는 사실, 수치, 사용자, 기준을 만들지 않습니다. 적힌 내용이 없으면 해당 칸은 빈 문자열로 둡니다.
+- 쉬운 한국어로 칸마다 1~3문장 이내로 씁니다.
+{_DATA_RULE.replace("PROJECT와 QUESTION은", "IDEA는")}"""
 
 QA_SYSTEM = f"""당신은 결정 카드에 대한 질문에 답합니다.
 규칙:
@@ -81,6 +92,10 @@ def advisor_user(state: JourneyState, card: DecisionCard, registry: Registry) ->
         f"CARD QUESTION: {payload['question']}\n\n"
         f"OPTIONS:\n{_dump(payload['options'])}"
     )
+
+
+def gcb_user(idea: str) -> str:
+    return f"IDEA:\n{idea}"
 
 
 def qa_user(state: JourneyState, card: DecisionCard, registry: Registry, question: str) -> str:

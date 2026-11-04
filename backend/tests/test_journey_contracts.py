@@ -17,6 +17,15 @@ def test_project_spec_reports_only_unanswered_signals():
     assert missing[0] == "has_gpu"
 
 
+def test_gcb_fields_are_optional_and_bounded():
+    spec = ProjectSpec(idea=IDEA, goal=" 목표 ", context="상황", boundary="기준")
+    assert spec.goal == "목표"
+    assert ProjectSpec(idea=IDEA).goal is None
+
+    with pytest.raises(ValidationError):
+        ProjectSpec(idea=IDEA, goal="가" * 1001)
+
+
 def test_no_gpu_is_an_answer_not_a_missing_signal():
     assert "has_gpu" not in ProjectSpec(idea=IDEA, has_gpu=False).missing_signals()
 

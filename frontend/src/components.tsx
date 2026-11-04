@@ -6,6 +6,7 @@ import type {
   CardStatus,
   ClarifyPrompt,
   DecisionPrompt,
+  GcbPrompt,
   IssuesPrompt,
   Journey,
 } from "./api";
@@ -92,6 +93,92 @@ export function StartForm({
           </button>
         ))}
       </div>
+    </form>
+  );
+}
+
+const MAX_GCB = 1000;
+const GCB_FIELDS = [
+  {
+    name: "goal",
+    label: "Goal: 끝났을 때 어떤 상태면 되나요?",
+    hint: "'만들어줘' 같은 명령이 아니라 달성된 상태로 적어요. 기술이나 방법은 적지 않아요.",
+    placeholder: "예: 수강생이 강의 내용을 출처와 함께 바로 찾을 수 있는 상태",
+  },
+  {
+    name: "context",
+    label: "Context: 판단에 필요한 상황은 무엇인가요?",
+    hint: "왜 필요한지, 누가 쓰는지, 배경과 제약을 적어요. 관련 없는 정보는 빼요.",
+    placeholder:
+      "예: 부트캠프 수강생이 복습할 때 쓴다. 자료가 여러 곳에 흩어져 있다.",
+  },
+  {
+    name: "boundary",
+    label: "Boundary: 결과가 꼭 지켜야 할 기준은 무엇인가요?",
+    hint: "결과가 갖춰야 할 조건을 적어요. 처리 순서나 방법은 적지 않아요.",
+    placeholder:
+      "예: 답변마다 출처를 표시한다. 개인정보를 외부로 보내지 않는다.",
+  },
+] as const;
+
+export function GcbForm({
+  prompt,
+  busy,
+  act,
+}: {
+  prompt: GcbPrompt;
+  busy: boolean;
+  act: Act;
+}) {
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const value = (name: string) => String(form.get(name) ?? "").trim();
+    act({
+      action: "gcb",
+      goal: value("goal"),
+      context: value("context"),
+      boundary: value("boundary"),
+    });
+  }
+
+  return (
+    <form className="panel" onSubmit={submit}>
+      <h2 tabIndex={-1}>프로젝트의 목표와 기준을 정리해요</h2>
+      {prompt.source === "llm" && (
+        <p className="muted">
+          AI가 아이디어를 읽고 쓴 초안이에요. 틀릴 수 있으니 직접 확인하고 고쳐
+          주세요.
+        </p>
+      )}
+      {prompt.source === "unavailable" && (
+        <p className="muted">AI 초안을 만들지 못했어요. 직접 적어 주세요.</p>
+      )}
+      <p className="muted">
+        뒤에 나오는 추천과 설명이 이 내용을 기준으로 해요. 모르면 비워도 돼요.
+      </p>
+      {prompt.error && (
+        <p className="alert" role="alert">
+          {prompt.error}
+        </p>
+      )}
+      {GCB_FIELDS.map((field) => (
+        <div className="field" key={field.name}>
+          <label htmlFor={`gcb-${field.name}`}>{field.label}</label>
+          <p className="muted hint">{field.hint}</p>
+          <textarea
+            id={`gcb-${field.name}`}
+            name={field.name}
+            rows={3}
+            maxLength={MAX_GCB}
+            defaultValue={prompt.draft[field.name]}
+            placeholder={field.placeholder}
+          />
+        </div>
+      ))}
+      <button className="primary" disabled={busy}>
+        다음
+      </button>
     </form>
   );
 }

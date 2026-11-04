@@ -6,16 +6,19 @@ from app.journey.deciders.base import DeciderResult
 from app.journey.deciders.mock import MockDecider
 from app.journey.graph import OwnershipError, _guarded, build_graph, journey_config, journey_input
 from app.journey.nodes import resume_command
+from app.journey.prompts import project_context
 from app.journey.services import JourneyDeps
-from app.journey.state import MAX_QUESTIONS_PER_CARD, Advice, JourneyState, ProjectSpec
+from app.journey.state import MAX_QUESTIONS_PER_CARD, Advice, GcbDraft, JourneyState, ProjectSpec
 from app.registry.loader import Registry, load_registry
 from langgraph.checkpoint.memory import InMemorySaver
 
 # Rule-bearing cards only, so each test states exactly the cards it walks through.
 REGISTRY = Registry(card for card in load_registry().cards if card.card_id != "agent.topology")
 IDEA = "민감한고객문의내용을 처리하는 멀티 에이전트 서비스"
+GOAL = "수강생이 근거와 함께 답을 찾을 수 있는 상태"
 COMPLETE_SPEC = {
     "idea": IDEA,
+    "goal": GOAL,
     "team_size": 4,
     "duration_weeks": 8,
     "budget": "월 5만원",
@@ -114,7 +117,7 @@ def test_complete_spec_skips_clarify():
 
 
 def test_missing_signals_are_asked_at_most_three_per_round():
-    journey = Journey({"idea": IDEA})
+    journey = Journey({"idea": IDEA, "goal": GOAL})
 
     assert journey.prompt["type"] == "clarify"
     assert journey.prompt["round"] == 1
@@ -126,7 +129,7 @@ def test_missing_signals_are_asked_at_most_three_per_round():
 
 
 def test_clarify_answers_update_spec_and_are_not_asked_again():
-    journey = Journey({"idea": IDEA})
+    journey = Journey({"idea": IDEA, "goal": GOAL})
     journey.send({"deployment_target": "local_demo", "has_gpu": False, "expected_users": 3})
 
     assert journey.state.project_spec.deployment_target == "local_demo"
@@ -139,7 +142,7 @@ def test_clarify_answers_update_spec_and_are_not_asked_again():
 
 
 def test_clarify_stops_after_two_rounds_even_if_unanswered():
-    journey = Journey({"idea": IDEA})
+    journey = Journey({"idea": IDEA, "goal": GOAL})
     journey.send({})
     assert journey.prompt["round"] == 2
     journey.send({})
@@ -150,13 +153,13 @@ def test_clarify_stops_after_two_rounds_even_if_unanswered():
 
 @pytest.mark.parametrize("payload", ["모름", None, ["x"], {}])
 def test_clarify_tolerates_non_object_answers(payload):
-    journey = Journey({"idea": IDEA}).send(payload)
+    journey = Journey({"idea": IDEA, "goal": GOAL}).send(payload)
 
     assert journey.prompt["round"] == 2
 
 
 def test_invalid_clarify_answer_is_dropped_and_asked_again():
-    journey = Journey({"idea": IDEA})
+    journey = Journey({"idea": IDEA, "goal": GOAL})
     journey.send({"deployment_target": "mars", "has_gpu": "maybe", "expected_users": 3, "x": 1})
 
     state = journey.state
@@ -168,7 +171,10 @@ def test_invalid_clarify_answer_is_dropped_and_asked_again():
 def test_decider_saying_sufficient_passes_clarify_despite_missing_signals():
     decider = MockDecider({"clarify.sufficient": DeciderResult(answer="yes", confidence=0.95)})
 
-    assert Journey({"idea": IDEA}, JourneyDeps(decider=decider)).prompt["type"] == "decision"
+    assert (
+        Journey({"idea": IDEA, "goal": GOAL}, JourneyDeps(decider=decider)).prompt["type"]
+        == "decision"
+    )
 
 
 @pytest.mark.parametrize(
@@ -178,7 +184,10 @@ def test_decider_saying_sufficient_passes_clarify_despite_missing_signals():
 def test_clarify_asks_when_decider_is_unusable(override):
     decider = MockDecider({"clarify.sufficient": override})
 
-    assert Journey({"idea": IDEA}, JourneyDeps(decider=decider)).prompt["type"] == "clarify"
+    assert (
+        Journey({"idea": IDEA, "goal": GOAL}, JourneyDeps(decider=decider)).prompt["type"]
+        == "clarify"
+    )
 
 
 # Recommender
@@ -576,3 +585,112 @@ def test_real_decider_explains_recommendation_from_card_signals():
     assert recommendation["decider"] == "jev"
     assert recommendation["option_id"] == "question"
     assert recommendation["reason"].startswith("이런 경우에 잘 맞아요")
+
+
+# GCB
+def test_idea_only_starts_at_gcb_with_an_empty_form_when_no_model_is_connected():
+    journey = Journey({"idea": IDEA})
+
+    assert journey.prompt["type"] == "gcb"
+    assert journey.prompt["source"] == "none"
+    assert journey.prompt["draft"] == {"goal": "", "context": "", "boundary": ""}
+
+
+def test_confirmed_gcb_reaches_the_spec_and_the_next_step():
+    journey = Journey({"idea": IDEA})
+
+    journey.send({"action": "gcb", "goal": "  목표 상태  ", "context": "상황", "boundary": ""})
+
+    spec = journey.state.project_spec
+    assert (spec.goal, spec.context, spec.boundary) == ("목표 상태", "상황", None)
+    assert journey.prompt["type"] == "clarify"
+
+
+def test_gcb_can_be_left_blank_without_asking_again():
+    journey = Journey({"idea": IDEA}).send({"action": "gcb"})
+
+    assert journey.state.project_spec.goal is None
+    assert journey.prompt["type"] == "clarify"
+    journey.send({"deployment_target": "local_demo"})
+    assert journey.prompt["round"] == 2
+
+
+@pytest.mark.parametrize(
+    "payload",
+    ["그냥 넘어가", None, {"action": "select"}, {"action": "gcb", "goal": "가" * 1001}],
+)
+def test_invalid_gcb_input_reasks_with_a_message(payload):
+    journey = Journey({"idea": IDEA}).send(payload)
+
+    assert journey.prompt["type"] == "gcb"
+    assert journey.prompt["error"]
+    assert journey.state.project_spec.goal is None
+
+
+class RecordingDrafter:
+    def __init__(self):
+        self.calls = 0
+
+    def draft(self, state):
+        self.calls += 1
+        return GcbDraft(
+            goal="초안 목표",
+            context="초안 상황",
+            source="llm",
+            model_id="m-1",
+            prompt_version="gcb-v1",
+            input_tokens=10,
+            output_tokens=5,
+        )
+
+
+def test_draft_is_offered_but_only_the_users_answer_counts():
+    drafter = RecordingDrafter()
+    journey = Journey({"idea": IDEA}, JourneyDeps(drafter=drafter))
+    assert journey.prompt["draft"]["goal"] == "초안 목표"
+    assert journey.prompt["source"] == "llm"
+
+    journey.send({"action": "gcb", "goal": "사용자가 고친 목표"})
+
+    spec = journey.state.project_spec
+    assert (spec.goal, spec.context) == ("사용자가 고친 목표", None)
+
+
+def test_model_drafts_once_even_after_invalid_input_and_clarify_rounds():
+    drafter = RecordingDrafter()
+    journey = Journey({"idea": IDEA}, JourneyDeps(drafter=drafter))
+
+    journey.send("잘못된 입력")
+    journey.send({"action": "gcb", "goal": "목표"})
+    journey.send({})
+    journey.send({})
+
+    assert drafter.calls == 1
+    event = next(e for e in journey.state.trace if e.node == "gcb_drafter")
+    assert (event.model_id, event.prompt_version) == ("m-1", "gcb-v1")
+    assert journey.prompt["type"] == "decision"
+
+
+def test_supplied_goal_skips_the_gcb_step():
+    drafter = RecordingDrafter()
+
+    journey = Journey(deps=JourneyDeps(drafter=drafter))
+
+    assert drafter.calls == 0
+    assert journey.prompt["type"] == "decision"
+
+
+def test_gcb_reaches_what_models_read():
+    seen = {}
+
+    class StubDecider:
+        name = "jev"
+
+        def decide(self, state, question):
+            seen["project"] = project_context(state, REGISTRY)["project"]
+            return DeciderResult(answer=question.choices[0], confidence=0.9)
+
+    spec = {**COMPLETE_SPEC, "goal": "목표", "boundary": "외부 전송 금지"}
+    Journey(spec, JourneyDeps(decider=StubDecider()))
+
+    assert (seen["project"]["goal"], seen["project"]["boundary"]) == ("목표", "외부 전송 금지")

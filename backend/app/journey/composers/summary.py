@@ -74,6 +74,12 @@ def compose_summary(
         lines += [MOCK_NOTICE, ""]
 
     lines += ["## 프로젝트", "", *_quote(spec.idea), ""]
+    for label, text in (
+        ("Goal (달성할 상태)", spec.goal),
+        ("Context (필요한 상황)", spec.context),
+        ("Boundary (결과 기준)", spec.boundary),
+    ):
+        lines += [f"**{label}**", "", *_quote(text or "미확인"), ""]
     lines += [f"- {label}: {_spec_value(n, getattr(spec, n))}" for n, label in SPEC_LABELS.items()]
     lines += ["", "## 결정", ""]
 

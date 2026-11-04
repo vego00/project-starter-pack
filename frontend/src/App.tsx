@@ -5,6 +5,7 @@ import {
   ClarifyForm,
   CompletedView,
   DecisionView,
+  GcbForm,
   IssuesView,
   ProgressRail,
   StartForm,
@@ -149,6 +150,9 @@ export default function App() {
         <main className="layout">
           <ProgressRail journey={journey} busy={busy} act={act} />
           <div>
+            {prompt?.type === "gcb" && (
+              <GcbForm prompt={prompt} busy={busy} act={act} />
+            )}
             {prompt?.type === "clarify" && (
               <ClarifyForm prompt={prompt} busy={busy} act={act} />
             )}

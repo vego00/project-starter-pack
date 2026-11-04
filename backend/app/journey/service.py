@@ -15,6 +15,7 @@ from app.journey.services import JourneyDeps
 from app.journey.state import (
     ClarifyAction,
     Decision,
+    GcbAction,
     JourneyAction,
     JourneyState,
     ProjectSpec,
@@ -72,9 +73,11 @@ def _resume_payload(action: JourneyAction) -> Any:
 def _allowed(prompt_type: str, action: JourneyAction) -> bool:
     if prompt_type == "clarify":
         return isinstance(action, ClarifyAction)
+    if prompt_type == "gcb":
+        return isinstance(action, GcbAction)
     if prompt_type == "issues":
         return isinstance(action, ReopenAction)
-    return not isinstance(action, ClarifyAction)
+    return not isinstance(action, ClarifyAction | GcbAction)
 
 
 class JourneyService:

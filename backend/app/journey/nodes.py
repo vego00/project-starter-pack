@@ -19,6 +19,7 @@ from app.journey.services import JourneyDeps
 from app.journey.state import (
     CLARIFY_QUESTIONS,
     GATE_ACTION,
+    GCB_ACTION,
     ISSUE_ACTION,
     MAX_CLARIFY_ROUNDS,
     MAX_QUESTIONS_PER_CARD,
@@ -90,10 +91,41 @@ def _recommendation_reason(card: DecisionCard, option_id: str, decider: str) -> 
 
 
 def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
+    def gcb_drafter(state: JourneyState) -> dict[str, Any]:
+        draft = deps.drafter.draft(state)
+        return {
+            "gcb_draft": draft,
+            "_trace": draft.model_dump(
+                include={"model_id", "prompt_version", "input_tokens", "output_tokens"}
+            ),
+        }
+
+    def gcb_gate(state: JourneyState) -> dict[str, Any]:
+        draft = state.gcb_draft
+        raw = _wait_for_user(
+            {
+                "type": "gcb",
+                "draft": draft.model_dump(include={"goal", "context", "boundary"}),
+                "source": draft.source,
+                "error": state.gate_error,
+            }
+        )
+        try:
+            action = GCB_ACTION.validate_python(raw)
+        except ValidationError:
+            return _reject("입력 내용을 확인해 주세요. 칸마다 1,000자까지 쓸 수 있어요.")
+        fields = action.model_dump(include={"goal", "context", "boundary"})
+        return {
+            "gcb_answer": {name: text for name, text in fields.items() if text},
+            "gate_outcome": "advance",
+            "gate_error": None,
+        }
+
     def intake(state: JourneyState) -> dict[str, Any]:
-        # S2 keeps the structured input as is; idea extraction by LLM arrives in S3.
         answers = {qa.field: qa.answer for qa in state.clarifications}
-        spec = ProjectSpec.model_validate({**state.project_spec.model_dump(), **answers})
+        spec = ProjectSpec.model_validate(
+            {**state.project_spec.model_dump(), **state.gcb_answer, **answers}
+        )
         return {"project_spec": spec}
 
     def clarify_gate(state: JourneyState) -> dict[str, Any]:
@@ -370,6 +402,8 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
         return _reopen(state, action.card_id)
 
     return {
+        "gcb_drafter": gcb_drafter,
+        "gcb_gate": gcb_gate,
         "intake": intake,
         "clarify_gate": clarify_gate,
         "clarify_question": clarify_question,

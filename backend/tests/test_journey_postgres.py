@@ -18,6 +18,7 @@ DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 SPEC = {
     "idea": "강의 자료를 찾아 답하는 멀티 에이전트 서비스",
+    "goal": "수강생이 근거와 함께 답을 찾을 수 있는 상태",
     "team_size": 4,
     "duration_weeks": 8,
     "budget": "월 5만원",

@@ -13,8 +13,10 @@ from langgraph.checkpoint.memory import InMemorySaver
 JOURNEYS = "/api/v1/journeys"
 REGISTRY = Registry(card for card in load_registry().cards if card.card_id != "agent.topology")
 IDEA = "민감한고객문의내용을 처리하는 멀티 에이전트 서비스"
+GOAL = "수강생이 근거와 함께 답을 찾을 수 있는 상태"
 SPEC = {
     "idea": IDEA,
+    "goal": GOAL,
     "team_size": 4,
     "duration_weeks": 8,
     "budget": "월 5만원",
@@ -116,7 +118,7 @@ def test_journey_survives_a_new_service_with_the_same_checkpointer():
 
 # Clarify
 def test_clarify_answers_including_skipping_all_of_them(client):
-    view = start(client, {"idea": IDEA})
+    view = start(client, {"idea": IDEA, "goal": GOAL})
     assert view["prompt"]["type"] == "clarify"
 
     response = act(client, view, action="clarify", answers={"deployment_target": "local_demo"})
@@ -125,6 +127,22 @@ def test_clarify_answers_including_skipping_all_of_them(client):
 
     view = act(client, view, action="clarify", answers={}).json()
     assert view["prompt"]["type"] == "decision"
+
+
+# GCB
+def test_gcb_step_through_the_api(client):
+    view = start(client, {"idea": IDEA})
+    assert view["prompt"]["type"] == "gcb"
+
+    rejected = act(client, view, action="clarify", answers={})
+    assert error_code(rejected) == "action_not_allowed"
+    too_long = act(client, view, action="gcb", goal="가" * 1001)
+    assert too_long.status_code == 422
+
+    view = act(client, view, action="gcb", goal="목표 상태").json()
+
+    assert view["prompt"]["type"] == "clarify"
+    assert error_code(act(client, view, action="gcb", goal="다시")) == "action_not_allowed"
 
 
 # Duplicate and stale submissions
@@ -156,7 +174,7 @@ def test_concurrent_submits_apply_exactly_once(client):
 
 # Wrong action for the step
 def test_actions_must_match_the_current_prompt(client):
-    clarifying = start(client, {"idea": IDEA})
+    clarifying = start(client, {"idea": IDEA, "goal": GOAL})
     response = act(client, clarifying, action="select", option_id="none")
     assert (response.status_code, error_code(response)) == (409, "action_not_allowed")
     assert client.get(f"{JOURNEYS}/{clarifying['journey_id']}").json() == clarifying

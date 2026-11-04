@@ -14,12 +14,22 @@ from app.journey.llm import GeminiLLM, StructuredLLM
 from app.journey.prompts import (
     ADVISOR_SYSTEM,
     ADVISOR_VERSION,
+    GCB_SYSTEM,
+    GCB_VERSION,
     QA_SYSTEM,
     QA_VERSION,
     advisor_user,
+    gcb_user,
     qa_user,
 )
-from app.journey.state import MAX_LLM_CALLS_PER_JOURNEY, Advice, Evidence, JourneyState
+from app.journey.state import (
+    MAX_GCB_CHARS,
+    MAX_LLM_CALLS_PER_JOURNEY,
+    Advice,
+    Evidence,
+    GcbDraft,
+    JourneyState,
+)
 from app.registry.evidence import EvidenceCatalog, load_catalog
 from app.registry.loader import Registry
 from app.registry.schema import DecisionCard
@@ -42,6 +52,10 @@ class Answer(BaseModel):
     output_tokens: int | None = None
 
 
+class GcbDrafter(Protocol):
+    def draft(self, state: JourneyState) -> GcbDraft: ...
+
+
 class Advisor(Protocol):
     def advise(self, state: JourneyState, card: DecisionCard) -> Advice: ...
 
@@ -55,11 +69,55 @@ class Responder(Protocol):
 
 
 def llm_calls_used(state: JourneyState) -> int:
-    return sum(event.node in ("advisor", "qa") and bool(event.model_id) for event in state.trace)
+    nodes = ("gcb_drafter", "advisor", "qa")
+    return sum(event.node in nodes and bool(event.model_id) for event in state.trace)
 
 
 def _card_advice(card: DecisionCard, source: str) -> Advice:
     return Advice(source=source, notes={option.id: option.summary for option in card.options})
+
+
+class MockGcbDrafter:
+    """No model, no draft: the user fills in the form, which needs no invented content."""
+
+    def draft(self, state: JourneyState) -> GcbDraft:
+        return GcbDraft()
+
+
+class GcbOutput(BaseModel):
+    goal: str
+    context: str = ""
+    boundary: str = ""
+
+
+class LLMGcbDrafter:
+    """A failure leaves an empty form: drafting helps the user but must not block them."""
+
+    def __init__(self, llm: StructuredLLM):
+        self._llm = llm
+
+    def draft(self, state: JourneyState) -> GcbDraft:
+        try:
+            result = self._llm.generate(
+                system=GCB_SYSTEM, user=gcb_user(state.project_spec.idea), schema=GcbOutput
+            )
+            fields = {
+                name: getattr(result.output, name).strip()
+                for name in ("goal", "context", "boundary")
+            }
+            if not fields["goal"] or any(len(text) > MAX_GCB_CHARS for text in fields.values()):
+                raise ValueError("draft has no goal or a field is too long")
+        except Exception as exc:  # noqa: BLE001 - model boundary; the prompt holds user text
+            logger.error("GCB draft failed type=%s", type(exc).__name__)
+            return GcbDraft(source="unavailable")
+        return GcbDraft(
+            **fields,
+            source="llm",
+            model_id=result.model_id,
+            prompt_version=GCB_VERSION,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+        )
 
 
 class MockAdvisor:
@@ -202,6 +260,7 @@ class JourneyDeps:
     advisor: Advisor = field(default_factory=MockAdvisor)
     retriever: Retriever = field(default_factory=EmptyRetriever)
     responder: Responder = field(default_factory=MockResponder)
+    drafter: GcbDrafter = field(default_factory=MockGcbDrafter)
 
     @property
     def recommendations_are_mock(self) -> bool:
@@ -228,6 +287,7 @@ def build_deps(settings: Settings, registry: Registry) -> JourneyDeps:
     return JourneyDeps(
         decider=decider,
         retriever=retriever,
+        drafter=LLMGcbDrafter(llm),
         advisor=LLMAdvisor(llm, registry),
         responder=LLMResponder(llm, registry),
     )

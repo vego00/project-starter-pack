@@ -18,6 +18,8 @@ RECURSION_LIMIT = 50  # Per run between two interrupts; a normal run takes far f
 
 GATE_WRITES = {"decisions", "gate_outcome", "gate_error"}
 NODE_WRITES: dict[str, set[str]] = {
+    "gcb_drafter": {"gcb_draft"},
+    "gcb_gate": {"gcb_answer", "gate_outcome", "gate_error"},
     "intake": {"project_spec"},
     "clarify_gate": {"clarify_passed"},
     "clarify_question": {"clarifications", "clarify_rounds"},
@@ -68,6 +70,15 @@ def _guarded(name: str, node: Node) -> Node:
     return run
 
 
+def _entry(state: JourneyState) -> str:
+    # A caller that already supplies a goal has done this step.
+    return "intake" if state.project_spec.goal else "gcb_drafter"
+
+
+def _after_gcb(state: JourneyState) -> str:
+    return "gcb_gate" if state.gate_outcome == "invalid" else "intake"
+
+
 def _after_clarify(state: JourneyState) -> str:
     return "constraint_engine" if state.clarify_passed else "clarify_question"
 
@@ -94,7 +105,9 @@ def build_graph(registry: Registry, *, checkpointer: Checkpointer, deps: Journey
     for name, node in nodes.items():
         graph.add_node(name, _guarded(name, node))
 
-    graph.add_edge(START, "intake")
+    graph.add_conditional_edges(START, _entry, ["gcb_drafter", "intake"])
+    graph.add_edge("gcb_drafter", "gcb_gate")
+    graph.add_conditional_edges("gcb_gate", _after_gcb, ["gcb_gate", "intake"])
     graph.add_edge("intake", "clarify_gate")
     graph.add_conditional_edges(
         "clarify_gate", _after_clarify, ["clarify_question", "constraint_engine"]
