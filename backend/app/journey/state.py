@@ -20,6 +20,7 @@ MAX_LLM_CALLS_PER_JOURNEY = 40  # Provisional cost ceiling; recalibrate from rea
 # Ordered by how many decisions the signal changes; only unanswered ones are asked.
 CLARIFY_QUESTIONS: dict[str, str] = {
     "deployment_target": "어디까지 배포할 계획인가요? (로컬 데모 / 소수 사용자 / 공개 서비스)",
+    "has_gpu": "모델을 직접 실행할 GPU 장비가 있나요?",
     "expected_users": "실제로 사용할 사람은 몇 명 정도인가요?",
     "budget": "모델 호출과 서버에 쓸 수 있는 예산은 어느 정도인가요?",
     "team_size": "함께 개발하는 인원은 몇 명인가요?",
@@ -42,6 +43,7 @@ class ProjectSpec(BaseModel):
         default=None, max_length=20
     )
     deployment_target: DeploymentTarget | None = None
+    has_gpu: bool | None = None
 
     def missing_signals(self) -> list[str]:
         return [name for name in CLARIFY_QUESTIONS if getattr(self, name) is None]

@@ -22,6 +22,7 @@ SPEC = {
     "weekly_hours": 20,
     "data_traits": ["문서 검색"],
     "deployment_target": "small_group",
+    "has_gpu": False,
 }
 
 

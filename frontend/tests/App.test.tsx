@@ -525,6 +525,27 @@ describe("clarify", () => {
     });
   });
 
+  it("sends a GPU answer as a boolean, including no", async () => {
+    const { user, mock } = await startWith(
+      journey({
+        prompt: {
+          ...prompt,
+          questions: [{ field: "has_gpu", question: "GPU가 있나요?" }],
+        },
+      }),
+    );
+
+    await user.selectOptions(
+      await screen.findByLabelText("GPU가 있나요?"),
+      "false",
+    );
+    await user.click(screen.getByRole("button", { name: "다음" }));
+
+    expect(bodyOf(mock.mock.calls[1]).action.answers).toEqual({
+      has_gpu: false,
+    });
+  });
+
   it("splits traits and allows skipping everything", async () => {
     const { user, mock } = await startWith(journey({ prompt }));
 

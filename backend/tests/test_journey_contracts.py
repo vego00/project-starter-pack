@@ -14,7 +14,11 @@ def test_project_spec_reports_only_unanswered_signals():
     missing = spec.missing_signals()
 
     assert "team_size" not in missing and "deployment_target" not in missing
-    assert missing[0] == "expected_users"
+    assert missing[0] == "has_gpu"
+
+
+def test_no_gpu_is_an_answer_not_a_missing_signal():
+    assert "has_gpu" not in ProjectSpec(idea=IDEA, has_gpu=False).missing_signals()
 
 
 @pytest.mark.parametrize(

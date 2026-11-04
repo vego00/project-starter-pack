@@ -17,6 +17,7 @@ LAYER_NAMES = {
 BY_LABELS = {"user": "직접 선택", "recommended": "추천 수락", "implied": "규칙으로 자동 확정"}
 SPEC_LABELS = {
     "deployment_target": "배포 목표",
+    "has_gpu": "GPU 장비",
     "expected_users": "사용자 수",
     "budget": "예산",
     "team_size": "팀 인원",
@@ -49,6 +50,8 @@ def _spec_value(name: str, value: object) -> str:
         return "미확인"
     if name == "deployment_target":
         return DEPLOYMENT_LABELS.get(str(value), str(value))
+    if isinstance(value, bool):
+        return "있음" if value else "없음"
     if isinstance(value, list):
         return ", ".join(_inline(item) for item in value) or "미확인"
     return _inline(str(value))

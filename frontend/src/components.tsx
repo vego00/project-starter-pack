@@ -106,6 +106,14 @@ function ClarifyField({ field, id }: { field: string; id: string }) {
         <option value="public_service">공개 서비스</option>
       </select>
     );
+  if (field === "has_gpu")
+    return (
+      <select id={id} name={field} defaultValue="">
+        <option value="">아직 모르겠어요</option>
+        <option value="true">있어요</option>
+        <option value="false">없어요</option>
+      </select>
+    );
   const numeric = [
     "expected_users",
     "team_size",
@@ -125,6 +133,7 @@ function toAnswer(field: string, raw: string): unknown {
       .split(",")
       .map((item) => item.trim())
       .filter(Boolean);
+  if (field === "has_gpu") return raw === "true";
   if (field === "budget" || field === "deployment_target") return raw;
   return Number(raw);
 }

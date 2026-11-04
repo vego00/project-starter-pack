@@ -108,6 +108,12 @@ def test_unanswered_signals_are_marked_unknown_not_guessed():
     assert "- 데이터 특징: 문서 검색, 개인정보" in answered
 
 
+def test_gpu_answer_is_stated_either_way():
+    assert "- GPU 장비: 없음" in compose(make_state({"idea": IDEA, "has_gpu": False}))
+    assert "- GPU 장비: 있음" in compose(make_state({"idea": IDEA, "has_gpu": True}))
+    assert "- GPU 장비: 미확인" in compose()
+
+
 def test_warnings_are_listed():
     warning = Conflict(rule_id="w", severity="warning", message="GPU를 확인하세요.", card_ids=[])
 

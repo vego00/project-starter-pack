@@ -8,7 +8,7 @@ import httpx
 import pytest
 from app.config import Settings
 from app.journey.deciders.base import DeciderQuestion, judge
-from app.journey.deciders.jev import API_BASE, NONE_FITS, JevDecider
+from app.journey.deciders.jev import NONE_FITS, ROUTES, JevDecider
 from app.journey.llm import GeminiLLM, LLMResult
 from app.journey.services import (
     AdvisorOutput,
@@ -26,7 +26,6 @@ from pydantic import ValidationError
 REGISTRY = load_registry()
 CARD = REGISTRY.card("agent.hitl")
 IDEA = "민감한고객문의내용을 처리하는 멀티 에이전트 서비스"
-MODEL = "typesafe-ai/jev-1.14.0"
 QUESTION = DeciderQuestion(
     id="recommend.agent.hitl",
     text="가장 맞는 선택지는?",
@@ -218,13 +217,34 @@ def test_gemini_tolerates_missing_usage():
 
 
 # Jev adapter
-def jev_client(handler):
-    return httpx.Client(base_url=API_BASE, transport=httpx.MockTransport(handler))
+OPENCODE = ROUTES["opencode"]
+VERCEL = ROUTES["vercel"]
 
 
-def jev_answer(choice="question", probability=0.8):
+def jev_client(route, handler):
+    return httpx.Client(base_url=route.base_url, transport=httpx.MockTransport(handler))
+
+
+def native_answer(choice="question", confidence=0.8):
+    """Shape observed from the live OpenCode endpoint on 2026-11-04."""
     return {
-        "model": MODEL,
+        "model": "jev-1.13-free",
+        "answers": {
+            "decision": {
+                "type": "choice",
+                "choice": choice,
+                "confidence": confidence,
+                "probabilities": {choice: confidence},
+            }
+        },
+        "usage": {"input_tokens": 313, "output_tokens": 31, "cost": 0},
+    }
+
+
+def gateway_answer(choice="question", probability=0.8):
+    """Shape from Vercel's documentation; not yet observed live."""
+    return {
+        "model": VERCEL.default_model,
         "answers": {
             "decision": {
                 "type": "choice",
@@ -236,80 +256,117 @@ def jev_answer(choice="question", probability=0.8):
     }
 
 
-def test_jev_sends_the_documented_request_shape():
+def decide(name, handler, **kwargs):
+    decider = JevDecider(name, REGISTRY, client=jev_client(ROUTES[name], handler), **kwargs)
+    return decider.decide(make_state(), QUESTION)
+
+
+def capture(answer):
     seen = {}
 
     def handler(request):
-        seen["path"] = request.url.path
-        seen["auth"] = request.headers["authorization"]
-        seen["body"] = json.loads(request.content)
-        return httpx.Response(200, json=jev_answer())
+        seen.update(
+            url=str(request.url),
+            auth=request.headers.get("authorization"),
+            body=json.loads(request.content),
+        )
+        return httpx.Response(200, json=answer)
 
-    outcome = JevDecider("key", MODEL, REGISTRY, jev_client(handler)).decide(make_state(), QUESTION)
+    return seen, handler
 
-    assert str(jev_client(handler).base_url).startswith("https://ai-gateway.vercel.sh")
-    assert seen["path"] == "/v1/evaluate"
-    assert seen["auth"] == "Bearer key"
-    body = seen["body"]
-    assert body["model"] == MODEL
-    assert body["providerOptions"] == {"gateway": {"zeroDataRetention": True}}
-    question = body["questions"]["decision"]
+
+def test_opencode_route_works_without_a_key():
+    seen, handler = capture(native_answer())
+
+    outcome = decide("opencode", handler)
+
+    assert seen["url"] == "https://opencode.ai/inference/systemone/v1/systemone"
+    assert seen["auth"] is None
+    assert seen["body"]["model"] == "jev-1.13-free"
+    assert "providerOptions" not in seen["body"]
+    assert (outcome.answer, outcome.confidence) == ("question", 0.8)
+    assert (outcome.input_tokens, outcome.output_tokens) == (313, 31)
+
+
+def test_opencode_route_sends_a_key_when_there_is_one():
+    seen, handler = capture(native_answer())
+
+    decide("opencode", handler, api_key="k", model="jev-1.13")
+
+    assert seen["auth"] == "Bearer k"
+    assert seen["body"]["model"] == "jev-1.13"
+
+
+def test_vercel_route_requires_zero_retention():
+    seen, handler = capture(gateway_answer())
+
+    outcome = decide("vercel", handler, api_key="k")
+
+    assert seen["url"] == "https://ai-gateway.vercel.sh/v1/evaluate"
+    assert seen["auth"] == "Bearer k"
+    assert seen["body"]["model"] == "typesafe-ai/jev-1.14.0"
+    assert seen["body"]["providerOptions"] == {"gateway": {"zeroDataRetention": True}}
+    assert (outcome.confidence, outcome.input_tokens, outcome.output_tokens) == (0.8, 12, 1)
+
+
+def test_both_routes_ask_the_same_question():
+    seen, handler = capture(native_answer())
+
+    decide("opencode", handler)
+
+    question = seen["body"]["questions"]["decision"]
     assert question["type"] == "choice"
     assert question["criteria"]["none"] == "개입 없음"
     assert NONE_FITS in question["criteria"]
-    assert body["state"]["project"]["idea"] == IDEA
-    assert (outcome.answer, outcome.confidence) == ("question", 0.8)
-    assert (outcome.model_id, outcome.input_tokens, outcome.output_tokens) == (MODEL, 12, 1)
+    assert seen["body"]["state"]["project"]["idea"] == IDEA
+    assert set(seen["body"]["state"]) == {"project", "decided"}
 
 
-def test_jev_state_holds_only_what_the_decision_needs():
-    seen = {}
-
-    def handler(request):
-        seen["state"] = json.loads(request.content)["state"]
-        return httpx.Response(200, json=jev_answer())
-
-    state = make_state(trace=[NodeEvent(node="n", latency_ms=1)])
-    JevDecider("k", "m", REGISTRY, jev_client(handler)).decide(state, QUESTION)
-
-    assert set(seen["state"]) == {"project", "decided"}
-
-
-def judged(handler):
-    return judge(JevDecider("k", "m", REGISTRY, jev_client(handler)), make_state(), QUESTION)
+def judged(handler, name="opencode"):
+    decider = JevDecider(name, REGISTRY, client=jev_client(ROUTES[name], handler))
+    return judge(decider, make_state(), QUESTION)
 
 
 def test_none_of_the_above_is_not_a_recommendation():
-    verdict = judged(lambda _: httpx.Response(200, json=jev_answer(NONE_FITS, 0.95)))
+    verdict = judged(lambda _: httpx.Response(200, json=native_answer(NONE_FITS, 0.95)))
 
     assert verdict.answer is None
     assert verdict.confidence == 0.95
 
 
-def test_missing_zero_retention_provider_is_no_answer_not_a_silent_retry():
+def test_low_confidence_is_not_a_recommendation():
+    assert judged(lambda _: httpx.Response(200, json=native_answer("none", 0.3))).answer is None
+
+
+def test_usage_cap_is_no_answer_and_is_not_retried():
     calls = []
 
     def handler(request):
         calls.append(request)
-        return httpx.Response(400, json={"error": {"type": "no_providers_available"}})
+        return httpx.Response(
+            429,
+            headers={"Retry-After": "67031"},
+            json={"type": "error", "error": {"type": "FreeUsageLimitError"}},
+        )
 
     assert judged(handler).answer is None
     assert len(calls) == 1
 
 
-def test_low_confidence_is_not_a_recommendation():
-    assert judged(lambda _: httpx.Response(200, json=jev_answer("none", 0.3))).answer is None
+def test_missing_zero_retention_provider_is_no_answer():
+    response = httpx.Response(403, json={"error": {"type": "permission_denied"}})
+
+    assert judged(lambda _: response, "vercel").answer is None
 
 
 @pytest.mark.parametrize(
     "response",
     [
         httpx.Response(401, json={"error": "bad key"}),
-        httpx.Response(429, json={}),
         httpx.Response(529, json={}),
         httpx.Response(200, json={"answers": {}}),
         httpx.Response(200, text="<html>"),
-        httpx.Response(200, json=jev_answer("none", 1.5)),
+        httpx.Response(200, json=native_answer("none", 1.5)),
     ],
 )
 def test_jev_failures_become_no_answer(response, caplog):
@@ -341,8 +398,9 @@ def test_mock_is_the_default_and_needs_no_keys():
         {"provider": "gemini"},
         {"provider": "gemini", "gemini_api_key": "k"},
         {"provider": "gemini", "gemini_model": "m"},
-        {"decider": "jev"},
-        {"decider": "jev", "ai_gateway_api_key": ""},
+        {"decider": "jev", "jev_route": "vercel"},
+        {"decider": "jev", "jev_route": "vercel", "ai_gateway_api_key": ""},
+        {"jev_route": "direct"},
         {"provider": "openai"},
         {"decider": "llm"},
     ],
@@ -352,6 +410,12 @@ def test_incomplete_model_settings_fail_at_startup(values):
         Settings(_env_file=None, **values)
 
 
+def test_free_jev_route_needs_no_key():
+    deps = build_deps(Settings(_env_file=None, decider="jev"), REGISTRY)
+
+    assert isinstance(deps.decider, JevDecider)
+
+
 def test_keys_are_hidden_from_repr():
     settings = Settings(
         _env_file=None,
@@ -359,7 +423,9 @@ def test_keys_are_hidden_from_repr():
         gemini_api_key="secret-g",
         gemini_model="m",
         decider="jev",
+        jev_route="vercel",
         ai_gateway_api_key="secret-t",
+        opencode_api_key="secret-o",
     )
 
     assert "secret-" not in repr(settings)
@@ -373,6 +439,7 @@ def test_real_settings_build_real_adapters():
             gemini_api_key="k",
             gemini_model="m",
             decider="jev",
+            jev_route="vercel",
             ai_gateway_api_key="t",
         ),
         REGISTRY,
