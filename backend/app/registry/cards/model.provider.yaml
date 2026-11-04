@@ -1,0 +1,63 @@
+card_id: model.provider
+version: 1
+layer: model
+question: 어떤 경로로 LLM을 사용할까요?
+options:
+  - id: gemini
+    name: Gemini
+    summary: Google의 모델을 API로 호출합니다.
+    pros: [GPU 없이 시작할 수 있습니다]
+    cons: [입력 데이터가 외부로 전송됩니다]
+    learning_difficulty: low
+    ops_burden: low
+    cost_nature: 호출량 기반
+  - id: openai
+    name: OpenAI
+    summary: OpenAI의 모델을 API로 호출합니다.
+    pros: [GPU 없이 시작할 수 있습니다]
+    cons: [입력 데이터가 외부로 전송됩니다]
+    learning_difficulty: low
+    ops_burden: low
+    cost_nature: 호출량 기반
+  - id: upstage
+    name: Upstage
+    summary: Upstage의 모델을 API로 호출합니다.
+    pros: [GPU 없이 시작할 수 있습니다]
+    cons: [입력 데이터가 외부로 전송됩니다]
+    learning_difficulty: low
+    ops_burden: low
+    cost_nature: 호출량 기반
+  - id: openrouter
+    name: OpenRouter 경유
+    summary: 하나의 API로 여러 회사의 모델을 호출합니다.
+    pros: [모델 비교와 교체가 쉽습니다]
+    cons: [중간 서비스가 하나 더 생깁니다]
+    learning_difficulty: low
+    ops_burden: low
+    cost_nature: 호출량 기반
+  - id: ollama
+    name: Ollama 로컬
+    summary: 내 장비에서 모델을 직접 실행합니다.
+    pros: [데이터를 외부로 보내지 않습니다]
+    cons: [장비 성능에 따라 품질과 속도가 제한됩니다]
+    learning_difficulty: medium
+    ops_burden: high
+    cost_nature: 장비 비용
+signals:
+  gemini: [GPU 없음, 데이터 외부 전송 허용]
+  openai: [GPU 없음, 데이터 외부 전송 허용]
+  upstage: [GPU 없음, 데이터 외부 전송 허용]
+  openrouter: [여러 모델 비교 필요]
+  ollama: [GPU 보유, 데이터 외부 전송 불가]
+implies:
+  # S2 제안: Notion 10 §3에 아직 없는 규칙
+  - id: ollama-provider-means-ollama-serving
+    when:
+      - {card: model.provider, in: [ollama]}
+    then: {card: mlops.model_serving, option: ollama}
+    message: Ollama를 쓰면 모델 서빙도 Ollama 컨테이너로 정해집니다.
+default_recommendation:
+  option: gemini
+  reason: 로컬 GPU 없이 API로 시작할 수 있습니다. 모델은 이후 교체할 수 있습니다.
+learning_refs: [llm-provider, model-selection]
+div_refs: [P3]
