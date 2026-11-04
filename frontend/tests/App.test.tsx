@@ -375,6 +375,35 @@ describe("decision card", () => {
     expect(await screen.findByText(text)).toBeVisible();
   });
 
+  it("labels linked notes as personal notes, not lecture originals", async () => {
+    await startWith(
+      journey({
+        prompt: decisionPrompt(
+          {},
+          {
+            evidence: [
+              {
+                source_id: "note-1",
+                title: "AX Work",
+                kind: "personal_note",
+                location: "Ch. 2",
+                why: "사람의 책임을 다룹니다.",
+                url: "https://example.com/note",
+              },
+            ],
+          },
+        ),
+      }),
+    );
+
+    const link = await screen.findByRole("link", { name: "AX Work" });
+    expect(link).toHaveAttribute("href", "https://example.com/note");
+    expect(
+      screen.getByText(/개인 필기이며 강의 원문이 아니에요/),
+    ).toBeVisible();
+    expect(screen.queryByText(/연결된 강의 자료 없음/)).not.toBeInTheDocument();
+  });
+
   it("shows what an option brings along", async () => {
     await startWith(
       journey({

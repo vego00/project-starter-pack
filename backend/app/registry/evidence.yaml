@@ -1,0 +1,26 @@
+# Hand-reviewed links from a card's learning_refs to lecture notes.
+# Location and pointer only: note text stays in Notion and is never sent to a model.
+# Only add a link after reading that part of the source.
+sources:
+  - source_id: note-ax-work-2026-10-28
+    title: LG전자 AX Work
+    kind: personal_note
+    url: https://app.notion.com/p/2f696199efb383fb9d330125bf85b9e2
+    checked_on: 2026-11-04
+    permission: owner_only
+  - source_id: note-meta-thinking-2026-10-29
+    title: AX Work - 메타 사고
+    kind: personal_note
+    url: https://app.notion.com/p/8f996199efb38226b9660105bac17f43
+    checked_on: 2026-11-04
+    permission: owner_only
+
+links:
+  - source_id: note-ax-work-2026-10-28
+    topics: [human-in-the-loop]
+    location: Ch. 2 Role Shift
+    why: 사람이 맡을 일과 Agent에 맡길 일을 나누고, 최종 결정과 책임은 사람에게 둔다는 내용입니다.
+  - source_id: note-meta-thinking-2026-10-29
+    topics: [multi-agent-architecture]
+    location: 6~7. Team Agentic Work 오케스트레이션
+    why: 역할별로 전문 에이전트를 나누고 오케스트레이터가 결과를 조율한 실습입니다. 코드 구현 예시는 아닙니다.

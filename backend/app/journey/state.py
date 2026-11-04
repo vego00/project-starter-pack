@@ -86,9 +86,14 @@ class Advice(BaseModel):
 
 
 class Evidence(BaseModel):
+    """A pointer to a source, not its text. `kind` keeps notes from passing as lecture originals."""
+
     source_id: str
     title: str
-    excerpt: str
+    kind: str
+    location: str
+    why: str
+    url: str | None = None
 
 
 class OptionView(BaseModel):

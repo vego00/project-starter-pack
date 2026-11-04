@@ -1,6 +1,8 @@
 """Decision summary: a deterministic Markdown document built only from recorded decisions."""
 
-from app.journey.state import JourneyState
+from collections.abc import Mapping, Sequence
+
+from app.journey.state import Evidence, JourneyState
 from app.registry.loader import Registry
 
 ARTIFACT_KEY = "decision_summary"
@@ -57,7 +59,14 @@ def _spec_value(name: str, value: object) -> str:
     return _inline(str(value))
 
 
-def compose_summary(state: JourneyState, registry: Registry, *, is_mock: bool) -> str:
+def compose_summary(
+    state: JourneyState,
+    registry: Registry,
+    *,
+    is_mock: bool,
+    evidence: Mapping[str, Sequence[Evidence]] | None = None,
+) -> str:
+    evidence = evidence or {}
     spec = state.project_spec
     decisions = state.all_decisions
     lines = ["# 프로젝트 결정 요약", ""]
@@ -83,7 +92,10 @@ def compose_summary(state: JourneyState, registry: Registry, *, is_mock: bool) -
             lines += [f"- **장점:** {' / '.join(option.pros)}"]
             lines += [f"- **감수할 점:** {' / '.join(option.cons)}"]
         others = [other.name for other in card.options if other.id != decision.option_id]
-        lines += [f"- **고르지 않은 선택지:** {', '.join(others)}", ""]
+        lines += [f"- **고르지 않은 선택지:** {', '.join(others)}"]
+        for item in evidence.get(card.card_id, ()):
+            lines += [f"- **참고 필기:** {item.title} ({item.location}). {item.why}"]
+        lines += [""]
         components += card.artifacts.get(decision.option_id, ())
 
     lines += ["## 확인할 점", ""]
@@ -97,7 +109,13 @@ def compose_summary(state: JourneyState, registry: Registry, *, is_mock: bool) -
             f"- 답하지 않은 항목: {', '.join(unknown)}. 값이 정해지면 결정을 다시 확인하세요."
         ]
     lines += ["- 카드의 장단점은 초안이며 공식 문서로 다시 확인이 필요합니다."]
-    lines += ["- 강의 자료 근거는 아직 연결되어 있지 않습니다.", ""]
+    if any(evidence.values()):
+        lines += [
+            "- 참고 필기는 개인 필기이며 강의 원문이 아닙니다. 일부 카드에만 연결되어 있습니다.",
+            "",
+        ]
+    else:
+        lines += ["- 강의 자료 근거는 아직 연결되어 있지 않습니다.", ""]
 
     if components:
         lines += ["## 추가될 구성 요소", ""]
