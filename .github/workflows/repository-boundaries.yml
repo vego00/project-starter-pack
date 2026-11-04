@@ -1,0 +1,22 @@
+name: Repository boundaries
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  boundaries:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject tracked docs and experiments
+        shell: bash
+        run: |
+          files="$(git ls-files -- docs experiments)"
+          if [ -n "$files" ]; then
+            echo "main must not track docs/ or experiments/"
+            printf '%s\n' "$files"
+            exit 1
+          fi

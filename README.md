@@ -30,13 +30,26 @@
 
 우선 에이전트를 설계하는 과정에 학습 지식을 연결한다. 생성된 에이전트가 실행 중 지식을 검색하는 기능은 실행 단계에서 확장한다. 구체적인 검색 기술과 모델은 아직 미확정이다.
 
-## 문서 읽는 순서
+## 문서 관리
 
-| 문서 | 내용 |
+상세 기획·설계·로드맵은 노션에서 관리한다. 노션 링크는 추후 연결한다. 기존 docs 내용은 [이전 커밋](https://github.com/vego00/project-starter-pack/tree/e7a14043bf6383df81d865314714bc9c76254576/docs)에 보존되어 있으며, 노션 이전 완료 여부는 미확인이다.
+
+## 저장소 구조와 브랜치
+
+| 경로 | 용도 |
 | --- | --- |
-| [제품 구상](docs/01-product-concept.md) | 목적, 사용자 가설, MVP 범위, 사용 시나리오 |
-| [시스템 설계](docs/02-system-design.md) | 생성 흐름, 역할, 상태, 결과물 계약, 실패 처리 |
-| [검증과 로드맵](docs/03-validation-roadmap.md) | 평가 사례, 완료 조건, 구현 순서, 미결정 사항 |
+| frontend/ | 사용자 웹 UI |
+| backend/ | API와 서비스 로직 |
+| agents/ | 재사용 가능한 에이전트 구성 |
+| benchmarks/datasets/, benchmarks/evaluators/ | 평가 데이터와 평가기 |
+| infrastructure/docker/, infrastructure/kubernetes/ | 환경·배포 구성 공간 |
+| reports/ | 기계 생성 평가 결과 |
+| tests/ | 테스트 |
+| experiments/ | experiment 브랜치 전용 실험 |
+
+experiment 브랜치에는 01_jev, 02_reasoning_graph, 03_mcp_tool_use, 04_agent_serving 실험 폴더를 둔다. main에는 experiments/를 추적하지 않는다. 검증된 결과만 제품 경로로 옮겨 반영하며 실험 브랜치를 통째로 병합하지 않는다. .gitignore만으로 추적 파일 유입을 막을 수 없으므로 CI에서도 main의 experiments/ 유입을 검사한다.
+
+현재 폴더는 .gitkeep만 포함한 준비 구조이며, 기능 구현 또는 인프라 도입 확정을 의미하지 않는다.
 
 ## 초기 산출물 제안
 
