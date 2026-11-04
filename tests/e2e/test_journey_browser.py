@@ -104,6 +104,14 @@ def test_seven_cards_to_completion_with_reload_and_restart(page: Page):
     expect(page.get_by_text("7 / 7")).to_be_visible()
     shot(page, "5-completed")
 
+    with page.expect_download() as download:
+        page.get_by_role("link", name="결정 요약 다운로드").click()
+    assert download.value.suggested_filename == "decision-summary.md"
+    document = Path(download.value.path()).read_text(encoding="utf-8")
+    assert document.startswith("# 프로젝트 결정 요약")
+    assert IDEA in document
+    assert "승인 interrupt (직접 선택)" in document
+
 
 def test_questions_defer_and_reopen(page: Page):
     start(page)

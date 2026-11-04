@@ -11,6 +11,7 @@ from typing import Any
 from langgraph.types import Command, interrupt
 from pydantic import ValidationError
 
+from app.journey.composers.summary import ARTIFACT_KEY, compose_summary
 from app.journey.constraints import evaluate, preview
 from app.journey.controller import next_card
 from app.journey.deciders.base import DeciderQuestion, judge
@@ -331,6 +332,10 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
             "status": "needs_fix" if has_errors else "completed",
         }
 
+    def composer(state: JourneyState) -> dict[str, Any]:
+        is_mock = getattr(deps.decider, "name", "") == "mock"
+        return {"artifacts": {ARTIFACT_KEY: compose_summary(state, registry, is_mock=is_mock)}}
+
     def issue_gate(state: JourneyState) -> dict[str, Any]:
         raw = _wait_for_user(
             {
@@ -358,5 +363,6 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
         "decision_gate": decision_gate,
         "qa": qa,
         "reviewer": reviewer,
+        "composer": composer,
         "issue_gate": issue_gate,
     }

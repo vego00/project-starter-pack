@@ -8,6 +8,7 @@ from weakref import WeakValueDictionary
 from langgraph.types import Checkpointer, StateSnapshot
 from pydantic import BaseModel
 
+from app.journey.composers.summary import ARTIFACT_KEY
 from app.journey.graph import build_graph, journey_config, journey_input
 from app.journey.nodes import resume_command
 from app.journey.services import JourneyDeps
@@ -114,6 +115,14 @@ class JourneyService:
             config = journey_config(journey_id)
             self._graph.invoke(resume_command(_resume_payload(action)), config)
             return self._view(journey_id, self._snapshot(journey_id))
+
+    def summary(self, journey_id: UUID) -> str:
+        with self._lock(journey_id):
+            values = self._snapshot(journey_id).values
+        document = values.get("artifacts", {}).get(ARTIFACT_KEY)
+        if document is None:
+            raise JourneyError(409, "summary_unavailable", "결정을 모두 마치면 받을 수 있어요.")
+        return document
 
     def _lock(self, journey_id: UUID) -> Any:
         with self._locks_guard:

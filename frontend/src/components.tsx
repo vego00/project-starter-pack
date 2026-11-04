@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
+import { summaryUrl } from "./api";
 import type {
   Action,
   CardStatus,
@@ -433,7 +434,20 @@ export function CompletedView({
           </li>
         ))}
       </ol>
-      <button onClick={onRestart}>새 프로젝트 시작</button>
+      <p className="muted">
+        요약 문서에는 결정 이유와 감수할 점, 먼저 확인할 일이 들어 있어요.
+        팀원과 함께 읽어 보세요.
+      </p>
+      <div className="row">
+        <a
+          className="button primary"
+          href={summaryUrl(journey.journey_id)}
+          download="decision-summary.md"
+        >
+          결정 요약 다운로드
+        </a>
+        <button onClick={onRestart}>새 프로젝트 시작</button>
+      </div>
     </section>
   );
 }

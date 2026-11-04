@@ -589,6 +589,9 @@ describe("issues and completion", () => {
     ).toBeVisible();
     expect(screen.getByText("GPU를 확인하세요.")).toBeVisible();
     expect(items.get(LAST_KEY)).toBe(ID);
+    expect(
+      screen.getByRole("link", { name: "결정 요약 다운로드" }),
+    ).toHaveAttribute("href", `/api/v1/journeys/${ID}/summary.md`);
 
     await user.click(screen.getByRole("button", { name: "새 프로젝트 시작" }));
 

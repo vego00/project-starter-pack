@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from langgraph.types import Checkpointer
 from pydantic import BaseModel
 
@@ -131,6 +131,18 @@ def create_app(
     def act_on_journey(journey_id: UUID, payload: ActionRequest, journeys: Journeys):
         return _guarded(
             journey_id, lambda: journeys.act(journey_id, payload.revision, payload.action)
+        )
+
+    @app.get("/api/v1/journeys/{journey_id}/summary.md", responses=ERROR_RESPONSES)
+    def get_summary(journey_id: UUID, journeys: Journeys):
+        document = _guarded(journey_id, lambda: journeys.summary(journey_id))
+        return Response(
+            content=document,
+            media_type="text/markdown; charset=utf-8",
+            headers={
+                "Content-Disposition": 'attachment; filename="decision-summary.md"',
+                "X-Content-Type-Options": "nosniff",
+            },
         )
 
     return app

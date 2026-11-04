@@ -30,6 +30,7 @@ NODE_WRITES: dict[str, set[str]] = {
     "decision_gate": GATE_WRITES | {"deferred_cards", "pending_question"},
     "qa": {"qa_history"},
     "reviewer": {"review_issues", "status"},
+    "composer": {"artifacts"},
     "issue_gate": GATE_WRITES,
 }
 
@@ -80,7 +81,7 @@ def _after_decision(state: JourneyState) -> str:
 
 
 def _after_review(state: JourneyState) -> str:
-    return "issue_gate" if state.status == "needs_fix" else END
+    return "issue_gate" if state.status == "needs_fix" else "composer"
 
 
 def _after_issue(state: JourneyState) -> str:
@@ -108,7 +109,8 @@ def build_graph(registry: Registry, *, checkpointer: Checkpointer, deps: Journey
         "decision_gate", _after_decision, ["qa", "decision_gate", "constraint_engine"]
     )
     graph.add_edge("qa", "decision_gate")
-    graph.add_conditional_edges("reviewer", _after_review, ["issue_gate", END])
+    graph.add_conditional_edges("reviewer", _after_review, ["issue_gate", "composer"])
+    graph.add_edge("composer", END)
     graph.add_conditional_edges("issue_gate", _after_issue, ["issue_gate", "constraint_engine"])
     return graph.compile(checkpointer=checkpointer)
 

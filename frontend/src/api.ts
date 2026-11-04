@@ -169,6 +169,10 @@ export function getJourney(id: string): Promise<Journey> {
   return request(`/api/v1/journeys/${id}`);
 }
 
+export function summaryUrl(id: string): string {
+  return `/api/v1/journeys/${id}/summary.md`;
+}
+
 export function sendAction(journey: Journey, action: Action): Promise<Journey> {
   return request(`/api/v1/journeys/${journey.journey_id}/decisions`, {
     method: "POST",

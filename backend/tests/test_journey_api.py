@@ -210,6 +210,55 @@ def test_warnings_are_listed_on_the_finished_journey(client):
     assert len(view["warnings"]) == 1
 
 
+# Summary document
+def finish(client, spec=SPEC):
+    view = start(client, spec)
+    if view["prompt"]["type"] == "clarify":
+        view = act(client, view, action="clarify", answers={}).json()
+        view = act(client, view, action="clarify", answers={}).json()
+    while view["prompt"]:
+        view = select(client, view, view["prompt"]["card"]["recommendation"]["option_id"])
+    return view
+
+
+def test_summary_downloads_as_markdown_once_finished(client):
+    view = finish(client)
+
+    response = client.get(f"{JOURNEYS}/{view['journey_id']}/summary.md")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "text/markdown; charset=utf-8"
+    assert "attachment" in response.headers["content-disposition"]
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.text.startswith("# 프로젝트 결정 요약")
+
+
+def test_summary_is_unavailable_before_finishing(client):
+    view = start(client)
+
+    response = client.get(f"{JOURNEYS}/{view['journey_id']}/summary.md")
+
+    assert (response.status_code, error_code(response)) == (409, "summary_unavailable")
+
+
+def test_summary_of_unknown_journey_is_not_found(client):
+    assert client.get(f"{JOURNEYS}/{uuid4()}/summary.md").status_code == 404
+
+
+def test_summary_is_rewritten_after_an_issue_is_fixed(client):
+    view = start(client)
+    for option_id in ("none", "gemini", "postgres", "sync", "none", "external_api"):
+        view = select(client, view, option_id)
+    view = act(client, view, action="reopen", card_id="model.provider").json()
+    view = select(client, select(client, view, "ollama"), "local")
+    url = f"{JOURNEYS}/{view['journey_id']}/summary.md"
+    assert client.get(url).status_code == 409
+
+    act(client, view, action="reopen", card_id="mlops.model_serving")
+
+    assert "Ollama 컨테이너 (규칙으로 자동 확정)" in client.get(url).text
+
+
 # Errors
 @pytest.mark.parametrize(
     "spec",
