@@ -25,6 +25,7 @@ SPEC = {
     "weekly_hours": 20,
     "data_traits": ["문서 검색"],
     "deployment_target": "small_group",
+    "has_gpu": False,
 }
 
 needs_postgres = pytest.mark.skipif(not DATABASE_URL, reason="TEST_DATABASE_URL is not set")

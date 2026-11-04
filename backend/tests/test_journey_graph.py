@@ -23,6 +23,7 @@ COMPLETE_SPEC = {
     "weekly_hours": 20,
     "data_traits": ["문서 검색"],
     "deployment_target": "small_group",
+    "has_gpu": False,
 }
 
 
@@ -119,20 +120,21 @@ def test_missing_signals_are_asked_at_most_three_per_round():
     assert journey.prompt["round"] == 1
     assert [q["field"] for q in journey.prompt["questions"]] == [
         "deployment_target",
+        "has_gpu",
         "expected_users",
-        "budget",
     ]
 
 
 def test_clarify_answers_update_spec_and_are_not_asked_again():
     journey = Journey({"idea": IDEA})
-    journey.send({"deployment_target": "local_demo", "expected_users": 3, "budget": "없음"})
+    journey.send({"deployment_target": "local_demo", "has_gpu": False, "expected_users": 3})
 
     assert journey.state.project_spec.deployment_target == "local_demo"
+    assert journey.state.project_spec.has_gpu is False
     assert [q["field"] for q in journey.prompt["questions"]] == [
+        "budget",
         "team_size",
         "duration_weeks",
-        "weekly_hours",
     ]
 
 
@@ -155,11 +157,11 @@ def test_clarify_tolerates_non_object_answers(payload):
 
 def test_invalid_clarify_answer_is_dropped_and_asked_again():
     journey = Journey({"idea": IDEA})
-    journey.send({"deployment_target": "mars", "expected_users": -1, "budget": "없음", "x": 1})
+    journey.send({"deployment_target": "mars", "has_gpu": "maybe", "expected_users": 3, "x": 1})
 
     state = journey.state
     assert state.project_spec.deployment_target is None
-    assert [qa.field for qa in state.clarifications] == ["budget"]
+    assert [qa.field for qa in state.clarifications] == ["expected_users"]
     assert journey.prompt["questions"][0]["field"] == "deployment_target"
 
 

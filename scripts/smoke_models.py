@@ -10,8 +10,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 import httpx  # noqa: E402
 from app.config import Settings  # noqa: E402
 from app.journey.deciders.base import DeciderQuestion  # noqa: E402
-from app.journey.deciders.jev import JevDecider  # noqa: E402
 from app.journey.llm import GeminiLLM  # noqa: E402
+from app.journey.services import build_deps  # noqa: E402
 from app.journey.state import JourneyState, ProjectSpec  # noqa: E402
 from app.registry.loader import load_registry  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
@@ -59,11 +59,11 @@ def main() -> int:
         results.append(check("gemini", gemini))
     else:
         print("gemini: SKIPPED (APP_GEMINI_API_KEY or APP_GEMINI_MODEL is empty)")
-    if settings.ai_gateway_api_key:
+    if settings.decider == "jev" or settings.jev_route == "opencode" or settings.ai_gateway_api_key:
         state = JourneyState(journey_id=uuid4(), project_spec=ProjectSpec(idea=IDEA))
-        decider = JevDecider(
-            settings.ai_gateway_api_key.get_secret_value(), settings.jev_model, load_registry()
-        )
+        decider = build_deps(
+            settings.model_copy(update={"decider": "jev"}), load_registry()
+        ).decider
         question = DeciderQuestion(
             id="smoke",
             text="이 프로젝트에 문서 검색이 필요한가요?",
@@ -78,9 +78,9 @@ def main() -> int:
                 f"confidence={result.confidence:.2f} in={result.input_tokens}"
             )
 
-        results.append(check("jev", jev))
+        results.append(check(f"jev[{settings.jev_route}]", jev))
     else:
-        print("jev: SKIPPED (APP_AI_GATEWAY_API_KEY is empty)")
+        print("jev: SKIPPED (route needs a key)")
     return 0 if all(results) else 1
 
 

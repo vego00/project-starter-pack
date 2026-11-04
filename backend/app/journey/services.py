@@ -184,8 +184,13 @@ class JourneyDeps:
 def build_deps(settings: Settings, registry: Registry) -> JourneyDeps:
     decider: Decider = MockDecider()
     if settings.decider == "jev":
+        key = settings.ai_gateway_api_key if settings.jev_route == "vercel" else None
+        key = key or (settings.opencode_api_key if settings.jev_route == "opencode" else None)
         decider = JevDecider(
-            settings.ai_gateway_api_key.get_secret_value(), settings.jev_model, registry
+            settings.jev_route,
+            registry,
+            api_key=key.get_secret_value() if key else None,
+            model=settings.jev_model,
         )
     if settings.provider != "gemini":
         return JourneyDeps(decider=decider)
