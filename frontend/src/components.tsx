@@ -312,9 +312,22 @@ export function DecisionView({
         ) : (
           <strong>비교 필요: 하나를 추천할 근거가 부족해요.</strong>
         )}
+        {card.evidence.map((item) => (
+          <p className="evidence" key={`${item.source_id}-${item.location}`}>
+            <strong>내 강의 필기:</strong>{" "}
+            {item.url ? (
+              <a href={item.url} target="_blank" rel="noreferrer">
+                {item.title}
+              </a>
+            ) : (
+              item.title
+            )}{" "}
+            ({item.location}) · {item.why}
+          </p>
+        ))}
         <p className="muted">
           {card.evidence.length > 0
-            ? `참고 자료: ${card.evidence.map((item) => item.title).join(", ")}`
+            ? "개인 필기이며 강의 원문이 아니에요."
             : "연결된 강의 자료 없음"}
           {card.div_refs.length > 0 &&
             ` · 근거가 된 DiV 문제: ${card.div_refs.join(", ")}`}

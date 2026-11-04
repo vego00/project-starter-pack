@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     opencode_api_key: SecretStr | None = None
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
     database_url: SecretStr | None = None
+    # Notes are private until sharing is permitted: "owner" is for the note owner's own instance.
+    evidence_scope: Literal["none", "owner"] = "none"
 
     @field_validator(
         "gemini_api_key",

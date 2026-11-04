@@ -4,7 +4,7 @@ from uuid import uuid4
 import pytest
 from app.journey.composers.summary import compose_summary
 from app.journey.constraints import Conflict, evaluate
-from app.journey.state import Decision, JourneyState, ProjectSpec
+from app.journey.state import Decision, Evidence, JourneyState, ProjectSpec
 from app.registry.loader import Registry, load_registry
 
 REGISTRY = Registry(card for card in load_registry().cards if card.card_id != "agent.topology")
@@ -106,6 +106,25 @@ def test_unanswered_signals_are_marked_unknown_not_guessed():
     assert "- 팀 인원: 4" in answered
     assert "- 배포 목표: 소수 사용자" in answered
     assert "- 데이터 특징: 문서 검색, 개인정보" in answered
+
+
+def test_linked_notes_appear_on_their_card_labelled_as_notes():
+    item = Evidence(
+        source_id="n",
+        title="AX Work",
+        kind="personal_note",
+        location="Ch. 2",
+        why="사람의 책임을 다룹니다.",
+    )
+
+    document = compose_summary(
+        make_state(), REGISTRY, is_mock=True, evidence={"agent.hitl": [item], "cloud.target": []}
+    )
+
+    section = document.split("### 모델:")[0]
+    assert "**참고 필기:** AX Work (Ch. 2). 사람의 책임을 다룹니다." in section
+    assert "개인 필기이며 강의 원문이 아닙니다" in document
+    assert "강의 자료 근거는 아직 연결되어 있지 않습니다" not in document
 
 
 def test_gpu_answer_is_stated_either_way():

@@ -20,6 +20,7 @@ from app.journey.prompts import (
     qa_user,
 )
 from app.journey.state import MAX_LLM_CALLS_PER_JOURNEY, Advice, Evidence, JourneyState
+from app.registry.evidence import EvidenceCatalog, load_catalog
 from app.registry.loader import Registry
 from app.registry.schema import DecisionCard
 
@@ -126,6 +127,32 @@ class EmptyRetriever:
         return []
 
 
+class CuratedRetriever:
+    """Reviewed links only. A search-based retriever can replace it behind the same port."""
+
+    def __init__(self, catalog: EvidenceCatalog):
+        self._catalog = catalog
+
+    def retrieve(self, state: JourneyState, card: DecisionCard) -> list[Evidence]:
+        wanted = set(card.learning_refs)
+        found = []
+        for link in self._catalog.links:
+            if wanted.isdisjoint(link.topics):
+                continue
+            source = self._catalog.source(link.source_id)
+            found.append(
+                Evidence(
+                    source_id=source.source_id,
+                    title=source.title,
+                    kind=source.kind,
+                    location=link.location,
+                    why=link.why,
+                    url=source.url,
+                )
+            )
+        return found
+
+
 class MockResponder:
     def answer(self, state: JourneyState, card: DecisionCard, question: str) -> Answer:
         return Answer(
@@ -192,11 +219,15 @@ def build_deps(settings: Settings, registry: Registry) -> JourneyDeps:
             api_key=key.get_secret_value() if key else None,
             model=settings.jev_model,
         )
+    retriever: Retriever = EmptyRetriever()
+    if settings.evidence_scope == "owner":
+        retriever = CuratedRetriever(load_catalog(registry))
     if settings.provider != "gemini":
-        return JourneyDeps(decider=decider)
+        return JourneyDeps(decider=decider, retriever=retriever)
     llm = GeminiLLM(settings.gemini_api_key.get_secret_value(), settings.gemini_model)
     return JourneyDeps(
         decider=decider,
+        retriever=retriever,
         advisor=LLMAdvisor(llm, registry),
         responder=LLMResponder(llm, registry),
     )

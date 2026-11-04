@@ -349,7 +349,10 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
         }
 
     def composer(state: JourneyState) -> dict[str, Any]:
-        document = compose_summary(state, registry, is_mock=deps.recommendations_are_mock)
+        evidence = {card.card_id: deps.retriever.retrieve(state, card) for card in registry.cards}
+        document = compose_summary(
+            state, registry, is_mock=deps.recommendations_are_mock, evidence=evidence
+        )
         return {"artifacts": {ARTIFACT_KEY: document}}
 
     def issue_gate(state: JourneyState) -> dict[str, Any]:

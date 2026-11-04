@@ -51,7 +51,10 @@ const promptSchema = z.discriminatedUnion("type", [
         z.object({
           source_id: z.string(),
           title: z.string(),
-          excerpt: z.string(),
+          kind: z.string(),
+          location: z.string(),
+          why: z.string(),
+          url: z.string().nullable(),
         }),
       ),
       div_refs: z.array(z.string()),
