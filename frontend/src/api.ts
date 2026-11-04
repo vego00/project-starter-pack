@@ -34,6 +34,16 @@ const issueSchema = z.object({
 
 const promptSchema = z.discriminatedUnion("type", [
   z.object({
+    type: z.literal("gcb"),
+    draft: z.object({
+      goal: z.string(),
+      context: z.string(),
+      boundary: z.string(),
+    }),
+    source: z.string(),
+    error: z.string().nullable(),
+  }),
+  z.object({
     type: z.literal("clarify"),
     round: z.number(),
     questions: z.array(z.object({ field: z.string(), question: z.string() })),
@@ -100,6 +110,7 @@ const journeySchema = z.object({
 export type Journey = z.infer<typeof journeySchema>;
 export type Prompt = NonNullable<Journey["prompt"]>;
 export type DecisionPrompt = Extract<Prompt, { type: "decision" }>;
+export type GcbPrompt = Extract<Prompt, { type: "gcb" }>;
 export type ClarifyPrompt = Extract<Prompt, { type: "clarify" }>;
 export type IssuesPrompt = Extract<Prompt, { type: "issues" }>;
 export type CardStatus = Journey["cards"][number];
@@ -110,7 +121,8 @@ export type Action =
   | { action: "defer" }
   | { action: "ask"; question: string }
   | { action: "reopen"; card_id: string }
-  | { action: "clarify"; answers: Record<string, unknown> };
+  | { action: "clarify"; answers: Record<string, unknown> }
+  | { action: "gcb"; goal: string; context: string; boundary: string };
 
 export class ApiError extends Error {
   constructor(

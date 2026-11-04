@@ -524,6 +524,76 @@ describe("decision card", () => {
   });
 });
 
+describe("gcb", () => {
+  const prompt = {
+    type: "gcb",
+    draft: { goal: "", context: "", boundary: "" },
+    source: "none",
+    error: null,
+  };
+
+  it("sends what the user wrote, trimmed", async () => {
+    const { user, mock } = await startWith(journey({ prompt, revision: 2 }));
+
+    await user.type(await screen.findByLabelText(/^Goal:/), "  달성된 상태  ");
+    await user.type(screen.getByLabelText(/^Boundary:/), "출처 표시");
+    await user.click(screen.getByRole("button", { name: "다음" }));
+
+    expect(bodyOf(mock.mock.calls[1])).toEqual({
+      revision: 2,
+      action: {
+        action: "gcb",
+        goal: "달성된 상태",
+        context: "",
+        boundary: "출처 표시",
+      },
+    });
+  });
+
+  it("prefills an AI draft, says so, and sends the user's edits", async () => {
+    const { user, mock } = await startWith(
+      journey({
+        prompt: {
+          ...prompt,
+          source: "llm",
+          draft: { goal: "초안 목표", context: "초안 상황", boundary: "" },
+        },
+      }),
+    );
+
+    expect(
+      await screen.findByText(/AI가 아이디어를 읽고 쓴 초안/),
+    ).toBeVisible();
+    const goal = screen.getByLabelText(/^Goal:/);
+    expect(goal).toHaveValue("초안 목표");
+
+    await user.clear(goal);
+    await user.type(goal, "고친 목표");
+    await user.click(screen.getByRole("button", { name: "다음" }));
+
+    expect(bodyOf(mock.mock.calls[1]).action.goal).toBe("고친 목표");
+    expect(bodyOf(mock.mock.calls[1]).action.context).toBe("초안 상황");
+  });
+
+  it("explains an unavailable draft and shows the error", async () => {
+    await startWith(
+      journey({
+        prompt: { ...prompt, source: "unavailable", error: "확인해 주세요" },
+      }),
+    );
+
+    expect(await screen.findByText(/AI 초안을 만들지 못했어요/)).toBeVisible();
+    expect(screen.getByRole("alert")).toHaveTextContent("확인해 주세요");
+  });
+
+  it("guides toward a state, not a command or a method", async () => {
+    await startWith(journey({ prompt }));
+
+    expect(await screen.findByText(/달성된 상태로 적어요/)).toBeVisible();
+    expect(screen.getByText(/처리 순서나 방법은 적지 않아요/)).toBeVisible();
+  });
+});
+
 describe("clarify", () => {
   const prompt = {
     type: "clarify",

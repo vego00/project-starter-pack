@@ -16,6 +16,7 @@ BASE_URL = os.environ.get("E2E_BASE_URL")
 SCREENSHOTS = os.environ.get("E2E_SCREENSHOT_DIR")
 RESTART_CMD = os.environ.get("E2E_RESTART_CMD")
 CHROMIUM_PATH = os.environ.get("E2E_CHROMIUM_PATH")
+GOAL = "수강생이 강의 내용을 출처와 함께 바로 찾을 수 있는 상태"
 IDEA = "부트캠프 강의 자료를 찾아 질문에 답하고 출처를 알려주는 서비스를 만들고 싶어요."
 
 pytestmark = pytest.mark.skipif(not BASE_URL, reason="E2E_BASE_URL is not set")
@@ -48,7 +49,15 @@ def start(page: Page) -> None:
     page.get_by_role("button", name="결정 시작하기").click()
 
 
+def confirm_gcb(page: Page, goal: str = "") -> None:
+    expect(page.get_by_role("heading", name="프로젝트의 목표와 기준을 정리해요")).to_be_visible()
+    if goal:
+        page.get_by_label("Goal: 끝났을 때 어떤 상태면 되나요?").fill(goal)
+    page.get_by_role("button", name="다음").click()
+
+
 def skip_clarify(page: Page) -> None:
+    confirm_gcb(page)
     for _ in range(2):
         expect(page.get_by_role("heading", name="프로젝트를 조금 더 알려 주세요")).to_be_visible()
         page.get_by_role("button", name="다음").click()
@@ -65,6 +74,8 @@ def choose(page: Page, heading: str, option: str) -> None:
 def test_all_cards_to_completion_with_reload_and_restart(page: Page):
     shot(page, "1-start")
     start(page)
+    shot(page, "1b-gcb")
+    confirm_gcb(page, GOAL)
 
     expect(page.get_by_role("heading", name="프로젝트를 조금 더 알려 주세요")).to_be_visible()
     page.get_by_label("어디까지 배포할 계획인가요?").select_option("small_group")
@@ -111,6 +122,7 @@ def test_all_cards_to_completion_with_reload_and_restart(page: Page):
     document = Path(download.value.path()).read_text(encoding="utf-8")
     assert document.startswith("# 프로젝트 결정 요약")
     assert IDEA in document
+    assert GOAL in document
     assert "승인 interrupt (직접 선택)" in document
 
 

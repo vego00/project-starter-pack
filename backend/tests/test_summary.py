@@ -127,6 +127,24 @@ def test_linked_notes_appear_on_their_card_labelled_as_notes():
     assert "강의 자료 근거는 아직 연결되어 있지 않습니다" not in document
 
 
+def test_gcb_opens_the_document_and_unknown_is_marked():
+    spec = {"idea": IDEA, "goal": "목표 상태", "boundary": "외부 전송 금지"}
+
+    document = compose(make_state(spec))
+
+    project = document.split("## 결정")[0]
+    assert "> 목표 상태" in project
+    assert "> 외부 전송 금지" in project
+    assert "**Context (필요한 상황)**\n\n> 미확인" in project
+
+
+def test_gcb_text_cannot_add_document_structure():
+    document = compose(make_state({"idea": IDEA, "goal": "목표\n## 가짜 제목"}))
+
+    headings = [line for line in document.splitlines() if line.startswith("#")]
+    assert not any("가짜" in line for line in headings)
+
+
 def test_gpu_answer_is_stated_either_way():
     assert "- GPU 장비: 없음" in compose(make_state({"idea": IDEA, "has_gpu": False}))
     assert "- GPU 장비: 있음" in compose(make_state({"idea": IDEA, "has_gpu": True}))

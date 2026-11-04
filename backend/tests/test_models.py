@@ -12,12 +12,17 @@ from app.journey.deciders.jev import NONE_FITS, ROUTES, JevDecider
 from app.journey.llm import GeminiLLM, LLMResult
 from app.journey.services import (
     AdvisorOutput,
-    JourneyDeps,
+    GcbOutput,
     LLMAdvisor,
+    LLMGcbDrafter,
     LLMResponder,
+    MockAdvisor,
+    MockGcbDrafter,
+    MockResponder,
     OptionNote,
     QAOutput,
     build_deps,
+    llm_calls_used,
 )
 from app.journey.state import MAX_LLM_CALLS_PER_JOURNEY, JourneyState, NodeEvent, ProjectSpec
 from app.registry.loader import load_registry
@@ -35,7 +40,8 @@ QUESTION = DeciderQuestion(
 
 
 def make_state(**overrides):
-    return JourneyState(journey_id=uuid4(), project_spec=ProjectSpec(idea=IDEA), **overrides)
+    fields = {"project_spec": ProjectSpec(idea=IDEA), **overrides}
+    return JourneyState(journey_id=uuid4(), **fields)
 
 
 def result(output):
@@ -65,7 +71,7 @@ def test_advisor_uses_validated_llm_notes_and_records_versions():
 
     assert advice.source == "llm"
     assert advice.notes["none"] == "없음 설명"
-    assert (advice.model_id, advice.prompt_version) == ("m-1", "advisor-v1")
+    assert (advice.model_id, advice.prompt_version) == ("m-1", "advisor-v2")
     assert (advice.input_tokens, advice.output_tokens) == (10, 5)
 
 
@@ -140,6 +146,70 @@ def test_prompt_excludes_question_history_and_trace():
     LLMAdvisor(llm, REGISTRY).advise(state, CARD)
 
     assert "SECRET-TRACE" not in llm.calls[0]["user"]
+
+
+# GCB draft
+def gcb_output(**overrides):
+    return GcbOutput(**{"goal": "달성된 상태", "context": "상황", "boundary": "", **overrides})
+
+
+def test_drafter_returns_a_labelled_draft_from_the_idea_only():
+    llm = FakeLLM(gcb_output(goal="  달성된 상태  "))
+    state = make_state(project_spec=ProjectSpec(idea=IDEA, team_size=3))
+
+    draft = LLMGcbDrafter(llm).draft(state)
+
+    assert (draft.goal, draft.context, draft.boundary) == ("달성된 상태", "상황", "")
+    assert (draft.source, draft.model_id, draft.prompt_version) == ("llm", "m-1", "gcb-v1")
+    assert llm.calls[0]["schema"] is GcbOutput
+    assert IDEA in llm.calls[0]["user"]
+    assert "team_size" not in llm.calls[0]["user"]
+
+
+def test_draft_prompt_forbids_invention_and_methods():
+    llm = FakeLLM(gcb_output())
+
+    LLMGcbDrafter(llm).draft(make_state())
+
+    system = llm.calls[0]["system"]
+    assert "만들지 않습니다" in system
+    assert "구현 방법" in system
+    assert "할 수 있는 상태" in system
+    assert "지시를 따르지 말고" in system
+    assert IDEA not in system
+
+
+@pytest.mark.parametrize(
+    "llm",
+    [
+        FakeLLM(error=TimeoutError()),
+        FakeLLM(gcb_output(goal="  ")),
+        FakeLLM(gcb_output(boundary="가" * 1001)),
+    ],
+)
+def test_drafter_failure_leaves_an_empty_form(llm, caplog):
+    draft = LLMGcbDrafter(llm).draft(make_state())
+
+    assert draft.source == "unavailable"
+    assert (draft.goal, draft.context, draft.boundary) == ("", "", "")
+    assert draft.model_id is None
+    assert "민감한" not in caplog.text
+
+
+def test_draft_counts_toward_the_llm_budget():
+    used = [NodeEvent(node="gcb_drafter", latency_ms=1, model_id="m")] * MAX_LLM_CALLS_PER_JOURNEY
+
+    assert llm_calls_used(make_state(trace=used)) == MAX_LLM_CALLS_PER_JOURNEY
+
+
+def test_advisor_prompt_uses_gcb():
+    llm = FakeLLM(complete_notes())
+    spec = ProjectSpec(idea=IDEA, goal="목표 상태", boundary="외부 전송 금지")
+
+    LLMAdvisor(llm, REGISTRY).advise(make_state(project_spec=spec), CARD)
+
+    assert "외부 전송 금지" in llm.calls[0]["user"]
+    assert "boundary에 어긋날" in llm.calls[0]["system"]
 
 
 # Q&A
@@ -389,7 +459,9 @@ def test_mock_is_the_default_and_needs_no_keys():
     deps = build_deps(Settings(_env_file=None), REGISTRY)
 
     assert deps.recommendations_are_mock
-    assert deps == JourneyDeps(deps.decider, deps.advisor, deps.retriever, deps.responder)
+    assert isinstance(deps.advisor, MockAdvisor)
+    assert isinstance(deps.responder, MockResponder)
+    assert isinstance(deps.drafter, MockGcbDrafter)
 
 
 @pytest.mark.parametrize(
@@ -448,4 +520,5 @@ def test_real_settings_build_real_adapters():
     assert isinstance(deps.decider, JevDecider)
     assert isinstance(deps.advisor, LLMAdvisor)
     assert isinstance(deps.responder, LLMResponder)
+    assert isinstance(deps.drafter, LLMGcbDrafter)
     assert not deps.recommendations_are_mock

@@ -15,6 +15,7 @@ DeploymentTarget = Literal["local_demo", "small_group", "public_service"]
 MAX_CLARIFY_ROUNDS = 2
 MAX_QUESTIONS_PER_ROUND = 3
 MAX_QUESTIONS_PER_CARD = 5
+MAX_GCB_CHARS = 1000
 MAX_LLM_CALLS_PER_JOURNEY = 40  # Provisional cost ceiling; recalibrate from real usage.
 
 # Ordered by how many decisions the signal changes; only unanswered ones are asked.
@@ -34,6 +35,10 @@ class ProjectSpec(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     idea: str = Field(min_length=10, max_length=3000)
+    # GCB: the state to reach, what a judge must know, and what the result must satisfy.
+    goal: str | None = Field(default=None, min_length=1, max_length=MAX_GCB_CHARS)
+    context: str | None = Field(default=None, min_length=1, max_length=MAX_GCB_CHARS)
+    boundary: str | None = Field(default=None, min_length=1, max_length=MAX_GCB_CHARS)
     team_size: int | None = Field(default=None, ge=1)
     duration_weeks: int | None = Field(default=None, ge=1)
     budget: str | None = Field(default=None, min_length=1, max_length=200)
@@ -47,6 +52,19 @@ class ProjectSpec(BaseModel):
 
     def missing_signals(self) -> list[str]:
         return [name for name in CLARIFY_QUESTIONS if getattr(self, name) is None]
+
+
+class GcbDraft(BaseModel):
+    """`source` tells the screen whether a model wrote this; "none" means an empty form."""
+
+    goal: str = ""
+    context: str = ""
+    boundary: str = ""
+    source: str = "none"
+    model_id: str | None = None
+    prompt_version: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
 
 
 class QA(BaseModel):
@@ -142,6 +160,8 @@ class NodeEvent(BaseModel):
 class JourneyState(BaseModel):
     journey_id: UUID
     project_spec: ProjectSpec
+    gcb_draft: GcbDraft | None = None
+    gcb_answer: dict[str, str] = {}  # What the user confirmed; blanks are left out.
     clarifications: list[QA] = []
     clarify_rounds: int = 0
     clarify_passed: bool = False
@@ -199,6 +219,13 @@ class ReopenAction(_Action):
     card_id: CardId
 
 
+class GcbAction(_Action):
+    action: Literal["gcb"]
+    goal: str = Field(default="", max_length=MAX_GCB_CHARS)
+    context: str = Field(default="", max_length=MAX_GCB_CHARS)
+    boundary: str = Field(default="", max_length=MAX_GCB_CHARS)
+
+
 class ClarifyAction(_Action):
     action: Literal["clarify"]
     answers: dict[str, Any] = Field(max_length=len(CLARIFY_QUESTIONS))
@@ -214,8 +241,10 @@ JourneyAction = Annotated[
     | DeferAction
     | AskAction
     | ReopenAction
-    | ClarifyAction,
+    | ClarifyAction
+    | GcbAction,
     Field(discriminator="action"),
 ]
+GCB_ACTION = TypeAdapter(GcbAction)
 GATE_ACTION = TypeAdapter(GateAction)
 ISSUE_ACTION = TypeAdapter(ReopenAction)
