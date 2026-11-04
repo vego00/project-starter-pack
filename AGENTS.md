@@ -17,28 +17,42 @@
 
 **이 저장소의 개발·설계 작업은 노션에 정리된 최신 프로젝트 문서를 기준으로 수행한다.** GitHub는 코드·테스트·실행 설정의 원본이고, Notion은 PRD·아키텍처·계약·스프린트·평가·의사결정 문서의 원본이다.
 
-### 반드시 확인할 문서
+### 반드시 확인할 문서 — 신규 Notion 구조 (2026-11-04 마이그레이션)
 
-- **프로젝트 메인 / 아키텍처 및 문서 인덱스:** [Project Starter Pack | Architecture & Docs](https://app.notion.com/p/40e96199efb381f089bcf91b83c5ac7c)
-- **현재 개발 작업과 우선순위:** [00 · Development — Sprint 01 & Getting Started](https://app.notion.com/p/40e96199efb38174b86aeaf4a003be14)
-- **제품 목표·범위·pain point 근거:** [01 · Product — Vision, PRD & GCB](https://app.notion.com/p/40e96199efb381908064e3f56df109e1)
-- **시스템 컴포넌트·데이터 흐름:** [02 · Architecture — System Design](https://app.notion.com/p/40e96199efb381d4915efe94a6f44170)
-- **현재 기준 내부 파이프라인 (Decision Journey):** [02-1 · Multi-Agent Pipeline — Decision Journey (LangGraph + Jev)](https://app.notion.com/p/40e96199efb3819fa563f0c748bf817f)
-- **결정 카드·의존성 규칙:** [10 · Decision Registry — 레이어별 선택지·의존성 카탈로그](https://app.notion.com/p/40e96199efb381a3b60fd9f4e5b9511d)
-- **강의 방법론·부트캠프 강의 RAG:** [03 · Methodology — RAG & Registry](https://app.notion.com/p/40e96199efb38171b503f62526591c85)
-- **계약 (ProjectSpec·DecisionCard·Decision·JourneyState, 구 TaskSpec·AgentBlueprint):** [04 · Contracts](https://app.notion.com/p/40e96199efb3819c9893c5d34a24dc2c)
-- **실행·도구·권한:** [05 · Runtime — MCP, Permissions & Recovery](https://app.notion.com/p/40e96199efb3815c9d1bf42962cecc1e)
-- **데이터·인프라 기술 선택:** [06 · Data & Infrastructure — Stack & Migration](https://app.notion.com/p/40e96199efb381acb4d8d8925259a2d5)
-- **벤치마크·실험:** [07 · Evaluation — Benchmarks & Experiments](https://app.notion.com/p/40e96199efb381aa8332c65450591c2e)
-- **연구 백로그:** [08 · Research — Reasoning & Comparison Backlog](https://app.notion.com/p/40e96199efb381ee9357fc4df385e1d2)
-- **로드맵·결정 기록:** [09 · Delivery — Roadmap & ADR](https://app.notion.com/p/40e96199efb381afa905f5ec8fbd7632)
+- **프로젝트 메인 / 3개 작업 트랙:** [Project Starter Pack · New Home](https://app.notion.com/p/40e96199efb381fda58feba2bbb873f4)
+- **현재 작업의 단일 원본:** [Unified Backlog — 전체 Issue DB](https://app.notion.com/p/bd9c1a9f0cc64a32a8b470f480fa604f)
+- **S1~S5 단계 설명·완료 기준:** [Roadmap DB](https://app.notion.com/p/ecf1e1bb415648ab860aa29c67d01877)
+- **Jira-style 개발 현황:** [Development Dashboard](https://app.notion.com/p/40e96199efb38144a776e30049163472)
+
+**Track 1 · 서비스 설계 파이프라인 (서비스 기능 설계)**
+
+- [모듈 메인 · Service Design Pipeline](https://app.notion.com/p/40e96199efb38142a587f476773c568d)
+- [PRD / GCB / Source](https://app.notion.com/p/40e96199efb381c79c27eeb4fc2c7aa7) · [Journey & Decision 계약](https://app.notion.com/p/40e96199efb3813ea695e70f00fb4ff9)
+- [LangGraph Orchestration / Recovery](https://app.notion.com/p/40e96199efb3810ba85cec14fddc0d79) · [Gemini/Jev 추천](https://app.notion.com/p/40e96199efb3815880a2eaaac538402c)
+- [Methodology Registry & RAG](https://app.notion.com/p/40e96199efb381368427f2b4aba3508b) · [Evaluation / Experiments](https://app.notion.com/p/40e96199efb38168a721d635d166f2cd)
+
+**Track 2 · 배포 설계 파이프라인 (사용자 프로젝트용 산출물)**
+
+- [모듈 메인 · Deployment Design Pipeline](https://app.notion.com/p/40e96199efb3815ba47bd95636b22b83)
+- [Deployment Decision Registry](https://app.notion.com/p/40e96199efb381e79f73f7a6d0a302d8) · [Compatibility & Constraint](https://app.notion.com/p/40e96199efb38196a0eff19b77a83cc6)
+- [Scaffold / ADR Composer](https://app.notion.com/p/40e96199efb381e2a859c29e5c0244cc) · [Build / Delivery Validation](https://app.notion.com/p/40e96199efb381a3a2d6c027b6198a72)
+- [Cloud & MLOps Mapping](https://app.notion.com/p/40e96199efb381fb9a6bd84ad46176ed)
+
+**Track 3 · 스타터 자체 개발·배포 (실제 서비스 운영)**
+
+- [모듈 메인 · Starter Platform Engineering](https://app.notion.com/p/40e96199efb3817498d6c3bd7a727c95)
+- [System Architecture](https://app.notion.com/p/40e96199efb38194b04fc9720bf7e486) · [Frontend](https://app.notion.com/p/40e96199efb381e99713c5b89c62039f) · [Backend API](https://app.notion.com/p/40e96199efb381199d82e4d2fb88d728)
+- [Agent / Model Providers](https://app.notion.com/p/40e96199efb381f99893d1a3fccc7a8c) · [PostgreSQL & Persistence](https://app.notion.com/p/40e96199efb381c2b774fe624a2d3f00)
+- [uv Workspace / Docker](https://app.notion.com/p/40e96199efb3813c8c60f49f337cf1a6) · [CI / Release / Operations](https://app.notion.com/p/40e96199efb38118ba28ede3fcb7e372)
+
+이전 Notion 메인(Architecture & Docs)과 해당 하위 문서는 **마이그레이션 전 참고 이력**으로만 간주한다. 최신 의사결정·구현 계약은 위 신규 모듈을 기준으로 한다. 세 모듈은 **개발 작업 구분**이며 서로 독립 배포된 MSA 서비스 3개라는 뜻이 아니다.
 
 ### 작업 규칙
 
-1. **개발 요청을 받으면 먼저 메인 페이지와 현재 Sprint 문서를 확인**하고, 작업 범위와 Definition of Done을 파악한다. 해당 영역을 수정할 때는 연결된 세부 노션 문서를 추가로 읽는다. 모든 하위 문서를 매번 불필요하게 전부 읽지는 않는다.
+1. **개발 요청을 받으면 먼저 새 메인 페이지, Roadmap DB, Unified Backlog의 현재 단계/작업을 확인**하고, 작업 범위와 Definition of Done을 파악한다. 해당 영역을 수정할 때는 연결된 세부 노션 문서를 추가로 읽는다. 모든 하위 문서를 매번 불필요하게 전부 읽지는 않는다.
 2. 구현 전 노션의 **확정된 요구사항 / 제안 / 가설 / 미결정 사항**을 구분한다. 설계 후보를 확정 스택으로 오해하지 않는다.
-3. **현재 단계의 미완료 작업을 우선**한다. 사용자 지시가 별도로 없는 한 Roadmap 단계 순서로 진행한다: S1 로컬 골격(FE/BE·Docker Compose·CI) → S2 Journey 핵심(계약·결정 카드·Constraint Engine·LangGraph interrupt·PostgreSQL 체크포인터) → S3 추천·근거(Layer Advisor·Jev·강의 RAG·문서 Composer) → S4 골격 템플릿·Redis Queue/Worker → S5 클라우드 배포·K8s. 뒤 단계 기술을 이유 없이 앞당기지 않는다.
-4. 구현 중 설계 결정을 바꿀 필요가 생기면 관련 Notion 설계·ADR·Sprint 문서에 **변경 이유, 영향 범위, 검증 결과**를 남기는 것을 원칙으로 한다. Notion 편집이 불가능하면 변경 제안을 명시하고 동기화되지 않았다고 보고한다.
+3. **현재 단계의 미완료 작업을 우선**한다. 사용자 지시가 별도로 없는 한 Roadmap 단계 순서로 진행한다: S1 로컬 골격(FE/BE·Docker Compose·CI) → S2 Journey 핵심(계약·결정 카드·Constraint Engine·LangGraph interrupt·PostgreSQL 체크포인터) → S3 추천·근거(Layer Advisor·Jev·강의 RAG·문서 Composer) → S4 골격 템플릿·Redis Queue/Worker → S5 클라우드 배포·사용자 실험(K8s는 선택). 뒤 단계 기술을 이유 없이 앞당기지 않는다.
+4. 구현 중 설계 결정을 바꿀 필요가 생기면 관련 신규 모듈 문서·ADR·Unified Backlog에 **변경 이유, 영향 범위, 검증 결과**를 남기는 것을 원칙으로 한다. Notion 편집이 불가능하면 변경 제안을 명시하고 동기화되지 않았다고 보고한다.
 5. GitHub `README.md`·`AGENTS.md`는 진입점/실행 지침을 유지한다. **상세한 docs를 GitHub와 Notion에 따로 중복 작성·독립 편집하지 않는다.** 별도 Markdown 스냅샷은 명시적 요청이 있을 때만 생성한다.
 6. 노션 연결이나 권한이 없어 자료를 읽지 못했다면 **읽었다고 주장하지 않는다.** 이용 가능한 저장소 자료와 사용자 지시로 가능한 작업만 진행하고, 미확인 문서·충돌·가정을 보고한다.
 7. 사용자 최신 지시가 이전 노션 설계와 충돌할 경우 최신 지시에 맞게 작업하되, 해당 차이와 노션 갱신 필요성을 기록한다. 기존 코드를 기준 없이 덮어쓰지 않는다.
@@ -47,7 +61,7 @@
 
 1. README.md와 작업에 관련된 노션 문서를 확인하고 현재 파일·브랜치·변경사항을 확인한다.
 2. 사용자 변경사항을 보존하고 요청 범위에 필요한 수정만 수행한다.
-3. 현재는 설계와 초기 개발 스프린트 단계다. 문서 작업 요청을 임의로 제품 구현·배포로 확대하지 않는다. 구현 요청이 들어오면 현재 스프린트 완료 조건과 요청 범위에서 진행한다.
+3. 현재 Roadmap은 S1·S2 완료 기록과 S3 진행 중 상태다. S1·S2는 기존 문서상 완료이며 이번 작업에서 코드를 재검증한 뜻은 아니다. 문서 작업 요청을 임의로 제품 구현·배포로 확대하지 않는다. 구현 요청이 들어오면 Unified Backlog의 완료 조건과 요청 범위에서 진행한다.
 4. 최신 사용자 지시와 확정된 목표를 오래된 제안·가정보다 우선한다.
 5. 상세 기획·설계 문서는 노션에서 관리한다. 접근할 수 없으면 확인하지 못한 내용을 명시하며 기존 가정을 확정하지 않는다.
 6. 확정 사항: 오케스트레이션 LangGraph, 분기·추천 판단 Jev(+LLM Fallback), 컨테이너 Docker/Compose(S1부터). 미확정: LLM Provider, 벡터 저장소(pgvector vs Qdrant), Queue 라이브러리, 트레이싱 도구, 클라우드(GCP vs AWS), K8s 형태. 후보를 확정 사항처럼 구현하지 않는다.
@@ -83,7 +97,7 @@
 - 역할별 입력·출력, 도구 권한, 완료 조건, 실패 처리, 평가 기준을 명시한다.
 - 요구사항과 설계·평가·개발 작업을 연결한다. 수정 시 영향받는 항목을 함께 점검한다.
 - 구조화 출력은 형식과 의미를 각각 검증한다. 재시도·실행 시간·호출 비용에 한도를 둔다.
-- 스타터팩이 추천하는 스택을 스스로 단계적으로 적용한다(Dogfooding). 모든 서비스는 Docker Compose로 기동 가능해야 하며, 선택 서비스는 Compose 프로필(core / rag / queue / local-llm)로 분리한다. 이미지 태그는 고정 버전을 쓰고 `latest`를 쓰지 않는다.
+- 스타터팩이 추천하는 스택을 스스로 단계적으로 적용한다(Dogfooding). 모든 로컬 서비스는 Docker Compose로 기동 가능하도록 설계하며, 선택 서비스는 Compose 프로필(core / rag / queue / local-llm)로 분리한다. 이미지 태그는 고정 버전을 쓰고 `latest`를 쓰지 않는다.
 - DB·큐·캐시·K8s는 Roadmap 단계에 맞춰 추가한다. Kubernetes나 자체 모델 서빙을 배포 전제조건으로 삼지 않으며, K8s 작업은 "필요"와 "학습 목적"을 구분해 기록한다.
 - 기존 코드와 의존성·버전 규칙이 있으면 따른다. 실제 실행하지 않은 기능을 완료로 보고하지 않는다.
 
