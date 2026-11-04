@@ -1,0 +1,38 @@
+card_id: cloud.target
+version: 1
+layer: cloud
+question: 어디에 배포할까요?
+options:
+  - id: local
+    name: 로컬만
+    summary: 클라우드 없이 내 장비에서 실행합니다.
+    pros: [비용과 클라우드 권한 문제가 없습니다]
+    cons: [다른 사용자가 접속해 쓰기 어렵습니다]
+    learning_difficulty: low
+    ops_burden: low
+    cost_nature: 추가 비용 없음
+  - id: gcp
+    name: GCP
+    summary: Google Cloud에 배포합니다.
+    pros: [실제 사용자에게 서비스를 제공할 수 있습니다]
+    cons: [비용 상한과 비밀정보 관리를 준비해야 합니다]
+    learning_difficulty: medium
+    ops_burden: medium
+    cost_nature: 사용량 기반 클라우드 비용
+  - id: aws
+    name: AWS
+    summary: AWS에 배포합니다.
+    pros: [실제 사용자에게 서비스를 제공할 수 있습니다]
+    cons: [비용 상한과 비밀정보 관리를 준비해야 합니다]
+    learning_difficulty: medium
+    ops_burden: medium
+    cost_nature: 사용량 기반 클라우드 비용
+signals:
+  local: [로컬 데모, 예산 없음]
+  gcp: [GCP 크레딧·경험, 팀 표준]
+  aws: [AWS 크레딧·경험, 팀 표준]
+default_recommendation:
+  option: local
+  reason: 배포 신호가 없으면 비용이 생기지 않는 로컬에서 시작합니다.
+learning_refs: [cloud-deployment]
+div_refs: [P7]

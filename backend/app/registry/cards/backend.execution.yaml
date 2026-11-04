@@ -1,0 +1,40 @@
+card_id: backend.execution
+version: 1
+layer: backend
+question: 에이전트 작업을 어떻게 실행할까요?
+options:
+  - id: sync
+    name: 요청 내 동기 실행
+    summary: API 요청 안에서 작업을 끝내고 응답합니다.
+    pros: [구조가 가장 단순합니다]
+    cons: [오래 걸리는 작업은 타임아웃 위험이 있습니다]
+    learning_difficulty: low
+    ops_burden: low
+    cost_nature: 추가 비용 없음
+  - id: background
+    name: 백그라운드 태스크
+    summary: 요청에 먼저 응답하고 같은 프로세스에서 작업을 이어갑니다.
+    pros: [별도 서비스 없이 긴 작업을 처리합니다]
+    cons: [프로세스가 죽으면 진행 중인 작업이 사라집니다]
+    learning_difficulty: medium
+    ops_burden: low
+    cost_nature: 추가 비용 없음
+  - id: queue
+    name: Queue + Worker
+    summary: Redis 기반 큐에 작업을 넣고 별도 Worker가 처리합니다.
+    pros: [재시도와 실패 복구, 동시 요청 분산이 가능합니다]
+    cons: [브로커와 Worker까지 운영해야 합니다]
+    learning_difficulty: high
+    ops_burden: high
+    cost_nature: 브로커·Worker 운영 비용
+signals:
+  sync: [작업이 짧음, 동시 요청 적음]
+  background: [작업이 길지만 유실을 감수할 수 있음]
+  queue: [작업이 김, 동시 요청 많음, 실패 복구 필요]
+artifacts:
+  queue: ["compose:worker", "compose:redis"]
+default_recommendation:
+  option: sync
+  reason: 작업 시간과 동시 요청 신호가 없으면 단순한 구조에서 시작합니다.
+learning_refs: [async-task-queue, redis]
+div_refs: [P4, P5]

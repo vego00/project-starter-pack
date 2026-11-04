@@ -1,0 +1,38 @@
+card_id: data.checkpointer
+version: 1
+layer: data
+question: 에이전트 실행 상태를 어디에 저장할까요?
+options:
+  - id: memory
+    name: 메모리
+    summary: 실행 상태를 프로세스 메모리에만 둡니다.
+    pros: [별도 서비스 없이 바로 동작합니다]
+    cons: [재시작하면 진행 중인 상태가 사라집니다]
+    learning_difficulty: low
+    ops_burden: low
+    cost_nature: 추가 비용 없음
+  - id: postgres
+    name: PostgreSQL 체크포인터
+    summary: 실행 상태를 PostgreSQL에 저장해 중단한 곳부터 이어갑니다.
+    pros: [재시작 후에도 이어서 실행할 수 있습니다]
+    cons: [DB를 운영하고 백업해야 합니다]
+    learning_difficulty: medium
+    ops_burden: medium
+    cost_nature: DB 운영 비용
+  - id: other
+    name: 기타
+    summary: 다른 저장소를 직접 지정합니다.
+    pros: [이미 쓰는 저장소를 활용할 수 있습니다]
+    cons: [체크포인터 지원 여부를 직접 확인해야 합니다]
+    learning_difficulty: high
+    ops_burden: medium
+    cost_nature: 저장소에 따라 다름
+signals:
+  memory: [로컬 데모, 재시작 후 재개 불필요]
+  postgres: [중단·재개 필요, 사람 확인 대기, 다중 사용자]
+  other: [팀 표준 저장소가 이미 있음]
+default_recommendation:
+  option: postgres
+  reason: 재시작 시 상태가 사라지면 나중에 구조를 다시 고쳐야 합니다. (DiV P4)
+learning_refs: [langgraph-checkpointer, postgresql]
+div_refs: [P4]

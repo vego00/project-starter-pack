@@ -39,7 +39,7 @@
 | 경로 | 용도 |
 | --- | --- |
 | pyproject.toml, uv.lock | uv 워크스페이스, 공통 개발 도구, 의존성 잠금 |
-| compose.yaml | FE·BE 로컬 컨테이너 실행 |
+| compose.yaml | FE·BE·PostgreSQL 로컬 컨테이너 실행 |
 | frontend/ | 사용자 웹 UI (npm) |
 | backend/ | API와 서비스 로직 (워크스페이스 멤버) |
 | agents/ | 재사용 가능한 에이전트 구성 (추후 멤버 추가) |
@@ -55,12 +55,14 @@ experiment 브랜치에는 01_jev, 02_reasoning_graph, 03_mcp_tool_use, 04_agent
 
 ## 로컬 실행
 
-모델은 연결되어 있지 않으며 고정 템플릿 예시만 반환한다.
+모델은 연결되어 있지 않다. 결정 카드의 추천은 카드 기본값이며 프로젝트를 분석한 결과가 아니다.
 
 ```bash
 # 로컬 환경 (uv, Node.js 22.12 이상)
 uv sync
 npm --prefix frontend ci
+cp .env.example .env          # 이미 있으면 건너뛴다
+docker compose up -d postgres # 여정 저장에 필요하다
 ./scripts/dev.sh
 
 # 또는 컨테이너

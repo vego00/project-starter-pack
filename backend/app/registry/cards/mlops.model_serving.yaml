@@ -1,0 +1,48 @@
+card_id: mlops.model_serving
+version: 1
+layer: mlops
+question: 모델을 어떻게 서빙할까요?
+options:
+  - id: external_api
+    name: 외부 API만
+    summary: 모델 서버를 직접 운영하지 않고 API만 호출합니다.
+    pros: [서빙 인프라를 운영하지 않아도 됩니다]
+    cons: [호출 비용과 외부 서비스 상태에 영향을 받습니다]
+    learning_difficulty: low
+    ops_burden: low
+    cost_nature: 호출량 기반
+  - id: ollama
+    name: Ollama 컨테이너
+    summary: Ollama를 컨테이너로 띄워 모델을 직접 실행합니다.
+    pros: [구성이 비교적 간단하고 데이터를 내부에 둡니다]
+    cons: [모델 파일과 장비 자원을 직접 관리해야 합니다]
+    learning_difficulty: medium
+    ops_burden: medium
+    cost_nature: 장비 비용
+  - id: vllm
+    name: vLLM 등 자체 GPU 서빙
+    summary: GPU 서버에 서빙 엔진을 직접 운영합니다.
+    pros: [처리량과 설정을 직접 조정할 수 있습니다]
+    cons: [GPU 비용과 운영 부담이 가장 큽니다]
+    learning_difficulty: high
+    ops_burden: high
+    cost_nature: GPU 비용
+signals:
+  external_api: [GPU 없음, 운영 인력 적음]
+  ollama: [데이터 외부 전송 불가, 소규모 사용]
+  vllm: [GPU 보유, 높은 처리량 필요]
+conflicts:
+  # Notion 10 §3의 ollama ∧ cloud.compute=serverless를 이번 카드 묶음의 cloud.target으로 표현
+  - id: self-serving-on-cloud
+    severity: warning
+    when:
+      - {card: mlops.model_serving, in: [ollama, vllm]}
+      - {card: cloud.target, not_in: [local]}
+    message: 클라우드에서 모델을 직접 서빙하려면 GPU와 모델 로딩 제약을 먼저 확인하세요.
+artifacts:
+  ollama: ["compose:ollama"]
+default_recommendation:
+  option: external_api
+  reason: GPU 보유 신호가 없으면 서빙 인프라를 운영하지 않는 쪽이 안전합니다.
+learning_refs: [model-serving]
+div_refs: [P3]
