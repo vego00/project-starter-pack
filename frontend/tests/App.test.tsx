@@ -736,6 +736,38 @@ describe("issues and completion", () => {
     expect(window.location.search).toBe("");
   });
 
+  it("shows the design and offers the build package", async () => {
+    await startWith(
+      journey({
+        status: "completed",
+        prompt: null,
+        cards: cards("decided", "decided"),
+        design: {
+          status: "failed",
+          source: "template",
+          error: "맞춤 설계를 만들지 못했어요.",
+          nodes: [{ id: "worker", kind: "agent", responsibility: "초안을 쓴다" }],
+          first_task: "뼈대 연결하기",
+          first_task_check: "결과가 돌아온다",
+          unknowns: ["아직 정하지 않은 결정: Agent 구조"],
+          warnings: [],
+          files: ["BUILD.md", "CLAUDE.md"],
+        },
+      }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "빌드 묶음을 만들었어요" }),
+    ).toBeVisible();
+    expect(screen.getByText("맞춤 설계를 만들지 못했어요.")).toBeVisible();
+    expect(screen.getByText("초안을 쓴다")).toBeVisible();
+    expect(screen.getByText("뼈대 연결하기")).toBeVisible();
+    expect(screen.getByText("아직 정하지 않은 결정: Agent 구조")).toBeVisible();
+    expect(
+      screen.getByRole("link", { name: "빌드 묶음 다운로드" }),
+    ).toHaveAttribute("href", `/api/v1/journeys/${ID}/package.zip`);
+  });
+
   it("tells apart two cards of the same layer in the progress rail", async () => {
     const twoInLayer = [
       { ...cards()[0], card_id: "agent.a", title: "Agent 구조" },

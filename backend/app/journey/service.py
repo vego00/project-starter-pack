@@ -9,8 +9,10 @@ from langgraph.types import Checkpointer, StateSnapshot
 from pydantic import BaseModel
 
 from app.journey.composers.summary import ARTIFACT_KEY
+from app.journey.design import ServiceDesign
 from app.journey.graph import build_graph, journey_config, journey_input
 from app.journey.nodes import resume_command
+from app.journey.package import build_package, package_zip
 from app.journey.services import JourneyDeps
 from app.journey.state import (
     ClarifyAction,
@@ -49,6 +51,24 @@ class CardStatus(BaseModel):
     rationale: str = ""
 
 
+class DesignNodeView(BaseModel):
+    id: str
+    kind: str
+    responsibility: str
+
+
+class DesignView(BaseModel):
+    status: str
+    source: str
+    error: str | None
+    nodes: list[DesignNodeView]
+    first_task: str
+    first_task_check: str
+    unknowns: list[str]
+    warnings: list[str]
+    files: list[str]
+
+
 class JourneyView(BaseModel):
     journey_id: UUID
     # Echoed back on each action, so a double click or stale tab cannot answer the wrong card.
@@ -59,6 +79,7 @@ class JourneyView(BaseModel):
     cards: list[CardStatus]
     warnings: list[str]
     notice: str | None
+    design: DesignView | None = None
 
 
 def _pending_prompt(snapshot: StateSnapshot) -> dict[str, Any] | None:
@@ -131,6 +152,35 @@ class JourneyService:
             raise JourneyError(409, "summary_unavailable", "결정을 모두 마치면 받을 수 있어요.")
         return document
 
+    def package(self, journey_id: UUID) -> bytes:
+        with self._lock(journey_id):
+            state = JourneyState.model_validate(self._snapshot(journey_id).values)
+        if state.design.current is None:
+            raise JourneyError(409, "package_unavailable", "결정을 모두 마치면 받을 수 있어요.")
+        files = build_package(state.design.current, self._registry, state.project_spec.idea)
+        return package_zip(files)
+
+    def _design_view(self, state: JourneyState) -> DesignView | None:
+        design: ServiceDesign | None = state.design.current
+        if design is None:
+            return None
+        files = build_package(design, self._registry, state.project_spec.idea)
+        issues = [i.message for i in design.validation or [] if i.severity == "warning"]
+        return DesignView(
+            status=state.design.status,
+            source=design.provenance.source,
+            error=state.design.error,
+            nodes=[
+                DesignNodeView(id=node.id, kind=node.kind, responsibility=node.responsibility)
+                for node in design.nodes
+            ],
+            first_task=design.tasks[0].title,
+            first_task_check=design.tasks[0].verify_by,
+            unknowns=[unknown.text for unknown in design.unknowns],
+            warnings=[*design.warnings, *issues],
+            files=sorted(files),
+        )
+
     def _lock(self, journey_id: UUID) -> Any:
         with self._locks_guard:
             lock = self._locks.get(journey_id)
@@ -195,4 +245,5 @@ class JourneyService:
             cards=self._card_statuses(state),
             warnings=[c.message for c in state.conflicts if c.severity == "warning"],
             notice=self._notice(),
+            design=self._design_view(state),
         )

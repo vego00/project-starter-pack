@@ -106,6 +106,26 @@ const journeySchema = z.object({
   ),
   warnings: z.array(z.string()),
   notice: z.string().nullable(),
+  design: z
+    .object({
+      status: z.string(),
+      source: z.string(),
+      error: z.string().nullable(),
+      nodes: z.array(
+        z.object({
+          id: z.string(),
+          kind: z.string(),
+          responsibility: z.string(),
+        }),
+      ),
+      first_task: z.string(),
+      first_task_check: z.string(),
+      unknowns: z.array(z.string()),
+      warnings: z.array(z.string()),
+      files: z.array(z.string()),
+    })
+    .nullable()
+    .optional(),
 });
 
 export type Journey = z.infer<typeof journeySchema>;
@@ -134,8 +154,8 @@ export class ApiError extends Error {
   }
 }
 
-// Preparing a card can include model calls, each bounded on the server.
-const REQUEST_TIMEOUT_MS = 60000;
+// The last decision also generates the design: up to two long model calls on the server.
+const REQUEST_TIMEOUT_MS = 300000;
 const OFFLINE =
   "서버에 연결할 수 없어요. 백엔드 실행 상태를 확인하고 다시 시도해 주세요.";
 
@@ -186,6 +206,10 @@ export function startJourney(idea: string): Promise<Journey> {
 
 export function getJourney(id: string): Promise<Journey> {
   return request(`/api/v1/journeys/${id}`);
+}
+
+export function packageUrl(id: string): string {
+  return `/api/v1/journeys/${id}/package.zip`;
 }
 
 export function summaryUrl(id: string): string {

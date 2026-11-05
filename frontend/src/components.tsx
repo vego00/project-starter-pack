@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { summaryUrl } from "./api";
+import { packageUrl, summaryUrl } from "./api";
 import type {
   Action,
   CardStatus,
@@ -547,6 +547,12 @@ export function IssuesView({
   );
 }
 
+const NODE_KIND: Record<string, string> = {
+  agent: "에이전트",
+  code: "코드",
+  human: "사람 확인",
+};
+
 export function CompletedView({
   journey,
   onRestart,
@@ -555,12 +561,65 @@ export function CompletedView({
   onRestart: () => void;
 }) {
   const heading = useFocusedHeading();
+  const design = journey.design;
   return (
     <section className="panel">
       <h2 ref={heading} tabIndex={-1}>
-        모든 결정을 마쳤어요
+        {design ? "빌드 묶음을 만들었어요" : "모든 결정을 마쳤어요"}
       </h2>
       <p className="muted">{journey.idea}</p>
+      {design && (
+        <>
+          {design.error && (
+            <p className="note warn">
+              <strong>참고용</strong> {design.error}
+            </p>
+          )}
+          <h3>에이전트 구성</h3>
+          <ol className="summary">
+            {design.nodes.map((node) => (
+              <li key={node.id}>
+                <span className="eyebrow">{NODE_KIND[node.kind] ?? node.kind}</span>
+                <strong>{node.id}</strong>
+                <span>{node.responsibility}</span>
+              </li>
+            ))}
+          </ol>
+          <h3>첫 작업</h3>
+          <p>{design.first_task}</p>
+          <p className="muted">완료 확인: {design.first_task_check}</p>
+          {design.unknowns.length > 0 && (
+            <>
+              <h3>먼저 확인할 것</h3>
+              <ul>
+                {design.unknowns.map((unknown) => (
+                  <li key={unknown}>{unknown}</li>
+                ))}
+              </ul>
+            </>
+          )}
+          {design.warnings.map((warning) => (
+            <p className="note warn" key={warning}>
+              <strong>확인 필요</strong> {warning}
+            </p>
+          ))}
+          <p className="muted">
+            압축을 풀고 Claude Code나 Codex에 <code>BUILD.md</code>대로
+            만들어 달라고 요청하세요. 파일 {design.files.length}개가 들어
+            있어요.
+          </p>
+          <div className="row">
+            <a
+              className="button primary"
+              href={packageUrl(journey.journey_id)}
+              download="starter-pack.zip"
+            >
+              빌드 묶음 다운로드
+            </a>
+          </div>
+          <h3>내가 고른 기술</h3>
+        </>
+      )}
       {journey.warnings.map((warning) => (
         <p className="note warn" key={warning}>
           <strong>확인 필요</strong> {warning}
@@ -587,7 +646,7 @@ export function CompletedView({
       </p>
       <div className="row">
         <a
-          className="button primary"
+          className={design ? "button" : "button primary"}
           href={summaryUrl(journey.journey_id)}
           download="decision-summary.md"
         >

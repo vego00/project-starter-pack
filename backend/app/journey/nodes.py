@@ -15,13 +15,15 @@ from app.journey.composers.summary import ARTIFACT_KEY, compose_summary
 from app.journey.constraints import evaluate, preview
 from app.journey.controller import next_card
 from app.journey.deciders.base import DeciderQuestion, judge
-from app.journey.services import JourneyDeps
+from app.journey.design_generator import MAX_ATTEMPTS, generate_design
+from app.journey.services import JourneyDeps, llm_calls_used
 from app.journey.state import (
     CLARIFY_QUESTIONS,
     GATE_ACTION,
     GCB_ACTION,
     ISSUE_ACTION,
     MAX_CLARIFY_ROUNDS,
+    MAX_LLM_CALLS_PER_JOURNEY,
     MAX_QUESTIONS_PER_CARD,
     MAX_QUESTIONS_PER_ROUND,
     QA,
@@ -387,6 +389,18 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
         )
         return {"artifacts": {ARTIFACT_KEY: document}}
 
+    def designer(state: JourneyState) -> dict[str, Any]:
+        remaining = MAX_LLM_CALLS_PER_JOURNEY - llm_calls_used(state)
+        outcome = generate_design(
+            state, registry, deps.designer, attempts=min(MAX_ATTEMPTS, remaining)
+        )
+        return {
+            "design": outcome.design,
+            "_trace": outcome.model_dump(
+                include={"model_id", "prompt_version", "input_tokens", "output_tokens"}
+            ),
+        }
+
     def issue_gate(state: JourneyState) -> dict[str, Any]:
         raw = _wait_for_user(
             {
@@ -417,5 +431,6 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
         "qa": qa,
         "reviewer": reviewer,
         "composer": composer,
+        "designer": designer,
         "issue_gate": issue_gate,
     }

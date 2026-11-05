@@ -101,7 +101,7 @@ def test_journeys_are_isolated_and_setup_is_repeatable():
         graph.invoke(journey_input(second, spec), journey_config(second))
         missing = graph.get_state(journey_config(uuid4()))
 
-    assert step(first, "resume", select("single"))["decisions"] == ["agent.topology"]
+    assert step(first, "resume", select("supervisor"))["decisions"] == ["agent.topology"]
     assert step(second, "resume", select("pipeline"))["card_id"] == "agent.hitl"
     assert missing.values == {}
 

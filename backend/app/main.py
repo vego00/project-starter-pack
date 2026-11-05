@@ -149,6 +149,18 @@ def create_app(
             },
         )
 
+    @app.get("/api/v1/journeys/{journey_id}/package.zip", responses=ERROR_RESPONSES)
+    def get_package(journey_id: UUID, journeys: Journeys):
+        archive = _guarded(journey_id, lambda: journeys.package(journey_id))
+        return Response(
+            content=archive,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": 'attachment; filename="starter-pack.zip"',
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+
     return app
 
 
