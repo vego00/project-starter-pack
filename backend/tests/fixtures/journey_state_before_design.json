@@ -1,0 +1,1130 @@
+{
+ "in_progress": {
+  "journey_id": "00000000-0000-4000-8000-000000000001",
+  "project_spec": {
+   "idea": "강의 자료를 찾아 답하는 멀티 에이전트 서비스",
+   "goal": "수강생이 근거와 함께 답을 찾을 수 있는 상태",
+   "context": null,
+   "boundary": null,
+   "team_size": 4,
+   "duration_weeks": 8,
+   "budget": "월 5만원",
+   "expected_users": 20,
+   "weekly_hours": 20,
+   "data_traits": [
+    "문서 검색"
+   ],
+   "deployment_target": "small_group",
+   "has_gpu": false
+  },
+  "clarify_passed": true,
+  "decisions": {
+   "agent.topology": {
+    "card_id": "agent.topology",
+    "card_version": 1,
+    "option_id": "pipeline",
+    "by": "user",
+    "rationale": "",
+    "at": "2026-11-05T01:45:15.653199Z"
+   }
+  },
+  "implied": {},
+  "pending_cards": [
+   "agent.hitl",
+   "model.provider",
+   "data.checkpointer",
+   "backend.execution",
+   "devops.orchestration",
+   "mlops.model_serving",
+   "cloud.target"
+  ],
+  "deferred_cards": [],
+  "blocked_options": {},
+  "conflicts": [],
+  "current_card_id": "agent.hitl",
+  "advice": {
+   "source": "mock",
+   "notes": {
+    "none": "에이전트가 처음부터 끝까지 사람 개입 없이 실행합니다.",
+    "question": "정보가 부족할 때 실행을 멈추고 사용자에게 묻습니다.",
+    "approval": "외부 쓰기처럼 되돌리기 어려운 행동 전에 승인을 받습니다."
+   },
+   "model_id": null,
+   "prompt_version": null,
+   "input_tokens": null,
+   "output_tokens": null
+  },
+  "recommendation": {
+   "status": "recommended",
+   "option_id": "none",
+   "confidence": 0.9,
+   "reason": "확인이 필요하다는 신호가 없으면 가장 단순한 구성에서 시작합니다.",
+   "decider": "mock"
+  },
+  "evidence": [],
+  "current_card": {
+   "card_id": "agent.hitl",
+   "version": 1,
+   "layer": "agent",
+   "question": "에이전트가 실행 중간에 사람의 확인을 받아야 하나요?",
+   "options": [
+    {
+     "option": {
+      "id": "none",
+      "name": "없음",
+      "summary": "에이전트가 처음부터 끝까지 사람 개입 없이 실행합니다.",
+      "pros": [
+       "구현과 상태 관리가 가장 단순합니다"
+      ],
+      "cons": [
+       "잘못된 결과나 외부 쓰기를 중간에 막을 수 없습니다"
+      ],
+      "learning_difficulty": "low",
+      "ops_burden": "low",
+      "cost_nature": "추가 비용 없음"
+     },
+     "note": "에이전트가 처음부터 끝까지 사람 개입 없이 실행합니다.",
+     "blocked_reason": null,
+     "implies": {},
+     "implied_messages": [],
+     "warnings": [],
+     "artifacts": []
+    },
+    {
+     "option": {
+      "id": "question",
+      "name": "실행 중 질문",
+      "summary": "정보가 부족할 때 실행을 멈추고 사용자에게 묻습니다.",
+      "pros": [
+       "모호한 입력에서 추측을 줄입니다"
+      ],
+      "cons": [
+       "답을 기다리는 동안 상태를 저장해야 합니다"
+      ],
+      "learning_difficulty": "medium",
+      "ops_burden": "medium",
+      "cost_nature": "상태 저장소 운영 비용"
+     },
+     "note": "정보가 부족할 때 실행을 멈추고 사용자에게 묻습니다.",
+     "blocked_reason": null,
+     "implies": {},
+     "implied_messages": [],
+     "warnings": [],
+     "artifacts": []
+    },
+    {
+     "option": {
+      "id": "approval",
+      "name": "승인 후 실행",
+      "summary": "외부 쓰기처럼 되돌리기 어려운 행동 전에 승인을 받습니다.",
+      "pros": [
+       "되돌리기 어려운 행동을 사람이 통제합니다"
+      ],
+      "cons": [
+       "승인 대기와 거절 후 흐름까지 설계해야 합니다"
+      ],
+      "learning_difficulty": "medium",
+      "ops_burden": "medium",
+      "cost_nature": "상태 저장소 운영 비용"
+     },
+     "note": "외부 쓰기처럼 되돌리기 어려운 행동 전에 승인을 받습니다.",
+     "blocked_reason": null,
+     "implies": {},
+     "implied_messages": [],
+     "warnings": [],
+     "artifacts": []
+    }
+   ],
+   "recommendation": {
+    "status": "recommended",
+    "option_id": "none",
+    "confidence": 0.9,
+    "reason": "확인이 필요하다는 신호가 없으면 가장 단순한 구성에서 시작합니다.",
+    "decider": "mock"
+   },
+   "evidence": [],
+   "advice_source": "mock",
+   "learning_refs": [
+    "langgraph-interrupt",
+    "human-in-the-loop"
+   ],
+   "div_refs": []
+  },
+  "gate_outcome": "advance",
+  "gate_error": null,
+  "pending_question": null,
+  "trace": [
+   {
+    "node": "intake",
+    "latency_ms": 0.11102499956905376,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "clarify_gate",
+    "latency_ms": 0.026089999664691277,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "constraint_engine",
+    "latency_ms": 0.19827000051009236,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "controller",
+    "latency_ms": 0.011605000509007368,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "advisor",
+    "latency_ms": 0.4087009992872481,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "recommender",
+    "latency_ms": 0.3265850000389037,
+    "decider": "mock",
+    "confidence": 0.9,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "retriever",
+    "latency_ms": 0.016572000276937615,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "present",
+    "latency_ms": 0.7421840000461088,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "decision_gate",
+    "latency_ms": 0.5734879996452946,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "constraint_engine",
+    "latency_ms": 0.12464000064937863,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "controller",
+    "latency_ms": 0.014737999663338996,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "advisor",
+    "latency_ms": 0.08020200039027259,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "recommender",
+    "latency_ms": 0.1948769995578914,
+    "decider": "mock",
+    "confidence": 0.9,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "retriever",
+    "latency_ms": 0.01253300069947727,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "present",
+    "latency_ms": 0.4414949999045348,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   }
+  ]
+ },
+ "completed": {
+  "journey_id": "00000000-0000-4000-8000-000000000001",
+  "project_spec": {
+   "idea": "강의 자료를 찾아 답하는 멀티 에이전트 서비스",
+   "goal": "수강생이 근거와 함께 답을 찾을 수 있는 상태",
+   "context": null,
+   "boundary": null,
+   "team_size": 4,
+   "duration_weeks": 8,
+   "budget": "월 5만원",
+   "expected_users": 20,
+   "weekly_hours": 20,
+   "data_traits": [
+    "문서 검색"
+   ],
+   "deployment_target": "small_group",
+   "has_gpu": false
+  },
+  "clarify_passed": true,
+  "decisions": {
+   "agent.topology": {
+    "card_id": "agent.topology",
+    "card_version": 1,
+    "option_id": "pipeline",
+    "by": "user",
+    "rationale": "",
+    "at": "2026-11-05T01:45:15.653199Z"
+   },
+   "agent.hitl": {
+    "card_id": "agent.hitl",
+    "card_version": 1,
+    "option_id": "none",
+    "by": "user",
+    "rationale": "",
+    "at": "2026-11-05T01:45:15.682472Z"
+   },
+   "model.provider": {
+    "card_id": "model.provider",
+    "card_version": 1,
+    "option_id": "gemini",
+    "by": "user",
+    "rationale": "",
+    "at": "2026-11-05T01:45:15.695474Z"
+   },
+   "data.checkpointer": {
+    "card_id": "data.checkpointer",
+    "card_version": 1,
+    "option_id": "postgres",
+    "by": "user",
+    "rationale": "",
+    "at": "2026-11-05T01:45:15.702918Z"
+   },
+   "backend.execution": {
+    "card_id": "backend.execution",
+    "card_version": 1,
+    "option_id": "sync",
+    "by": "user",
+    "rationale": "",
+    "at": "2026-11-05T01:45:15.711062Z"
+   },
+   "devops.orchestration": {
+    "card_id": "devops.orchestration",
+    "card_version": 1,
+    "option_id": "none",
+    "by": "user",
+    "rationale": "",
+    "at": "2026-11-05T01:45:15.718749Z"
+   },
+   "mlops.model_serving": {
+    "card_id": "mlops.model_serving",
+    "card_version": 1,
+    "option_id": "external_api",
+    "by": "user",
+    "rationale": "",
+    "at": "2026-11-05T01:45:15.726373Z"
+   },
+   "cloud.target": {
+    "card_id": "cloud.target",
+    "card_version": 1,
+    "option_id": "local",
+    "by": "user",
+    "rationale": "",
+    "at": "2026-11-05T01:45:15.734034Z"
+   }
+  },
+  "implied": {},
+  "pending_cards": [],
+  "deferred_cards": [],
+  "blocked_options": {},
+  "conflicts": [],
+  "current_card_id": "cloud.target",
+  "advice": {
+   "source": "mock",
+   "notes": {
+    "local": "클라우드 없이 내 장비에서 실행합니다.",
+    "gcp": "Google Cloud에 배포합니다.",
+    "aws": "AWS에 배포합니다."
+   },
+   "model_id": null,
+   "prompt_version": null,
+   "input_tokens": null,
+   "output_tokens": null
+  },
+  "recommendation": {
+   "status": "recommended",
+   "option_id": "local",
+   "confidence": 0.9,
+   "reason": "배포 신호가 없으면 비용이 생기지 않는 로컬에서 시작합니다.",
+   "decider": "mock"
+  },
+  "evidence": [],
+  "current_card": {
+   "card_id": "cloud.target",
+   "version": 1,
+   "layer": "cloud",
+   "question": "어디에 배포할까요?",
+   "options": [
+    {
+     "option": {
+      "id": "local",
+      "name": "로컬만",
+      "summary": "클라우드 없이 내 장비에서 실행합니다.",
+      "pros": [
+       "비용과 클라우드 권한 문제가 없습니다"
+      ],
+      "cons": [
+       "다른 사용자가 접속해 쓰기 어렵습니다"
+      ],
+      "learning_difficulty": "low",
+      "ops_burden": "low",
+      "cost_nature": "추가 비용 없음"
+     },
+     "note": "클라우드 없이 내 장비에서 실행합니다.",
+     "blocked_reason": null,
+     "implies": {},
+     "implied_messages": [],
+     "warnings": [],
+     "artifacts": []
+    },
+    {
+     "option": {
+      "id": "gcp",
+      "name": "GCP",
+      "summary": "Google Cloud에 배포합니다.",
+      "pros": [
+       "실제 사용자에게 서비스를 제공할 수 있습니다"
+      ],
+      "cons": [
+       "비용 상한과 비밀정보 관리를 준비해야 합니다"
+      ],
+      "learning_difficulty": "medium",
+      "ops_burden": "medium",
+      "cost_nature": "사용량 기반 클라우드 비용"
+     },
+     "note": "Google Cloud에 배포합니다.",
+     "blocked_reason": null,
+     "implies": {},
+     "implied_messages": [],
+     "warnings": [],
+     "artifacts": []
+    },
+    {
+     "option": {
+      "id": "aws",
+      "name": "AWS",
+      "summary": "AWS에 배포합니다.",
+      "pros": [
+       "실제 사용자에게 서비스를 제공할 수 있습니다"
+      ],
+      "cons": [
+       "비용 상한과 비밀정보 관리를 준비해야 합니다"
+      ],
+      "learning_difficulty": "medium",
+      "ops_burden": "medium",
+      "cost_nature": "사용량 기반 클라우드 비용"
+     },
+     "note": "AWS에 배포합니다.",
+     "blocked_reason": null,
+     "implies": {},
+     "implied_messages": [],
+     "warnings": [],
+     "artifacts": []
+    }
+   ],
+   "recommendation": {
+    "status": "recommended",
+    "option_id": "local",
+    "confidence": 0.9,
+    "reason": "배포 신호가 없으면 비용이 생기지 않는 로컬에서 시작합니다.",
+    "decider": "mock"
+   },
+   "evidence": [],
+   "advice_source": "mock",
+   "learning_refs": [
+    "cloud-deployment"
+   ],
+   "div_refs": [
+    "P7"
+   ]
+  },
+  "gate_outcome": "advance",
+  "gate_error": null,
+  "pending_question": null,
+  "review_issues": [],
+  "status": "completed",
+  "artifacts": {
+   "decision_summary": "# 프로젝트 결정 요약\n\n> 이 문서의 추천은 모델 없이 카드 기본값으로 만들었으며, 이 프로젝트를 분석한 결과가 아닙니다.\n\n## 프로젝트\n\n> 강의 자료를 찾아 답하는 멀티 에이전트 서비스\n\n**Goal (달성할 상태)**\n\n> 수강생이 근거와 함께 답을 찾을 수 있는 상태\n\n**Context (필요한 상황)**\n\n> 미확인\n\n**Boundary (결과 기준)**\n\n> 미확인\n\n- 배포 목표: 소수 사용자\n- GPU 장비: 없음\n- 사용자 수: 20\n- 예산: 월 5만원\n- 팀 인원: 4\n- 기간(주): 8\n- 주간 작업 시간: 20\n- 데이터 특징: 문서 검색\n\n## 결정\n\n### Agent 설계: 에이전트를 어떤 구조로 구성할까요?\n\n- **선택:** 고정 파이프라인 (직접 선택)\n- **장점:** 실행 순서가 고정되어 재현과 평가가 쉽습니다\n- **감수할 점:** 입력에 따라 흐름을 크게 바꾸기 어렵습니다\n- **고르지 않은 선택지:** Single Agent, Supervisor 라우팅, 계층형 (Supervisor + Subgraph)\n\n### Agent 설계: 에이전트가 실행 중간에 사람의 확인을 받아야 하나요?\n\n- **선택:** 없음 (직접 선택)\n- **장점:** 구현과 상태 관리가 가장 단순합니다\n- **감수할 점:** 잘못된 결과나 외부 쓰기를 중간에 막을 수 없습니다\n- **고르지 않은 선택지:** 실행 중 질문, 승인 후 실행\n\n### 모델: 어떤 경로로 LLM을 사용할까요?\n\n- **선택:** Gemini (직접 선택)\n- **장점:** GPU 없이 시작할 수 있습니다\n- **감수할 점:** 입력 데이터가 외부로 전송됩니다\n- **고르지 않은 선택지:** OpenAI, Upstage, OpenRouter 경유, Ollama 로컬\n\n### 데이터·검색: 에이전트 실행 상태를 어디에 저장할까요?\n\n- **선택:** PostgreSQL 체크포인터 (직접 선택)\n- **장점:** 재시작 후에도 이어서 실행할 수 있습니다\n- **감수할 점:** DB를 운영하고 백업해야 합니다\n- **고르지 않은 선택지:** 메모리, 기타\n\n### 백엔드·실행: 에이전트 작업을 어떻게 실행할까요?\n\n- **선택:** 요청 내 동기 실행 (직접 선택)\n- **장점:** 구조가 가장 단순합니다\n- **감수할 점:** 오래 걸리는 작업은 타임아웃 위험이 있습니다\n- **고르지 않은 선택지:** 백그라운드 태스크, Queue + Worker\n\n### DevOps: 컨테이너 오케스트레이션이 필요한가요?\n\n- **선택:** 불필요 (Compose 유지) (직접 선택)\n- **장점:** 배우고 운영할 것이 가장 적습니다\n- **감수할 점:** 여러 서버로 확장하거나 무중단 배포를 하기 어렵습니다\n- **고르지 않은 선택지:** 로컬 K8s 학습 (kind·K3s), 단일 VM K3s, 관리형 K8s (GKE·EKS)\n\n### MLOps: 모델을 어떻게 서빙할까요?\n\n- **선택:** 외부 API만 (직접 선택)\n- **장점:** 서빙 인프라를 운영하지 않아도 됩니다\n- **감수할 점:** 호출 비용과 외부 서비스 상태에 영향을 받습니다\n- **고르지 않은 선택지:** Ollama 컨테이너, vLLM 등 자체 GPU 서빙\n\n### Cloud: 어디에 배포할까요?\n\n- **선택:** 로컬만 (직접 선택)\n- **장점:** 비용과 클라우드 권한 문제가 없습니다\n- **감수할 점:** 다른 사용자가 접속해 쓰기 어렵습니다\n- **고르지 않은 선택지:** GCP, AWS\n\n## 확인할 점\n\n- 규칙 검사에서 경고가 없습니다.\n- 카드의 장단점은 초안이며 공식 문서로 다시 확인이 필요합니다.\n- 강의 자료 근거는 아직 연결되어 있지 않습니다.\n\n## 다음 행동\n\n1. 팀원과 이 문서를 읽고, 각 결정의 이유를 설명할 수 있는지 확인합니다.\n2. 위 '확인할 점'을 먼저 해결합니다.\n3. 비용이 드는 선택은 공식 가격을 확인한 뒤 상한을 정합니다.\n"
+  },
+  "trace": [
+   {
+    "node": "intake",
+    "latency_ms": 0.11102499956905376,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "clarify_gate",
+    "latency_ms": 0.026089999664691277,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "constraint_engine",
+    "latency_ms": 0.19827000051009236,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "controller",
+    "latency_ms": 0.011605000509007368,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "advisor",
+    "latency_ms": 0.4087009992872481,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "recommender",
+    "latency_ms": 0.3265850000389037,
+    "decider": "mock",
+    "confidence": 0.9,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "retriever",
+    "latency_ms": 0.016572000276937615,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "present",
+    "latency_ms": 0.7421840000461088,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "decision_gate",
+    "latency_ms": 0.5734879996452946,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "constraint_engine",
+    "latency_ms": 0.12464000064937863,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "controller",
+    "latency_ms": 0.014737999663338996,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "advisor",
+    "latency_ms": 0.08020200039027259,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "recommender",
+    "latency_ms": 0.1948769995578914,
+    "decider": "mock",
+    "confidence": 0.9,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "retriever",
+    "latency_ms": 0.01253300069947727,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "present",
+    "latency_ms": 0.4414949999045348,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "decision_gate",
+    "latency_ms": 0.20584899993991712,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "constraint_engine",
+    "latency_ms": 0.11336200077494141,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "controller",
+    "latency_ms": 0.007774999176035635,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "advisor",
+    "latency_ms": 0.02473600034136325,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "recommender",
+    "latency_ms": 0.05769699964730535,
+    "decider": "mock",
+    "confidence": 0.9,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "retriever",
+    "latency_ms": 0.003563999598554801,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "present",
+    "latency_ms": 0.2066790002572816,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "decision_gate",
+    "latency_ms": 0.2644930000315071,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "constraint_engine",
+    "latency_ms": 0.05074099954072153,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "controller",
+    "latency_ms": 0.0028670001483988017,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "advisor",
+    "latency_ms": 0.03287900017312495,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "recommender",
+    "latency_ms": 0.05555600000661798,
+    "decider": "mock",
+    "confidence": 0.9,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "retriever",
+    "latency_ms": 0.0031500003387918696,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "present",
+    "latency_ms": 0.12410100043780403,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "decision_gate",
+    "latency_ms": 0.05561099987971829,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "constraint_engine",
+    "latency_ms": 0.036252000427339226,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "controller",
+    "latency_ms": 0.0030080000215093605,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "advisor",
+    "latency_ms": 0.022211999748833477,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "recommender",
+    "latency_ms": 0.06243799998628674,
+    "decider": "mock",
+    "confidence": 0.9,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "retriever",
+    "latency_ms": 0.0027399992177379318,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "present",
+    "latency_ms": 0.31264900007954566,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "decision_gate",
+    "latency_ms": 0.05900799988012295,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "constraint_engine",
+    "latency_ms": 0.03399399975023698,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "controller",
+    "latency_ms": 0.004738999450637493,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "advisor",
+    "latency_ms": 0.025098000151047017,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "recommender",
+    "latency_ms": 0.05258900000626454,
+    "decider": "mock",
+    "confidence": 0.9,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "retriever",
+    "latency_ms": 0.0030649998734588735,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "present",
+    "latency_ms": 0.1394099999743048,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "decision_gate",
+    "latency_ms": 0.0645240006633685,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "constraint_engine",
+    "latency_ms": 0.039216000004671514,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "controller",
+    "latency_ms": 0.0031580002541886643,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "advisor",
+    "latency_ms": 0.02149600004486274,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "recommender",
+    "latency_ms": 0.049295999815512914,
+    "decider": "mock",
+    "confidence": 0.9,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "retriever",
+    "latency_ms": 0.004739000360132195,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "present",
+    "latency_ms": 0.10635800026648212,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "decision_gate",
+    "latency_ms": 0.059404999774415046,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "constraint_engine",
+    "latency_ms": 0.03724799989868188,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "controller",
+    "latency_ms": 0.002632999894558452,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "advisor",
+    "latency_ms": 0.01872100074251648,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "recommender",
+    "latency_ms": 0.04672599970945157,
+    "decider": "mock",
+    "confidence": 0.9,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "retriever",
+    "latency_ms": 0.0025769995772861876,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "present",
+    "latency_ms": 0.11005499982275069,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "decision_gate",
+    "latency_ms": 0.06421700072678505,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "constraint_engine",
+    "latency_ms": 0.043602000005193986,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "reviewer",
+    "latency_ms": 0.004337000063969754,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   },
+   {
+    "node": "composer",
+    "latency_ms": 0.10323699916625628,
+    "decider": null,
+    "confidence": null,
+    "model_id": null,
+    "prompt_version": null,
+    "input_tokens": null,
+    "output_tokens": null
+   }
+  ]
+ }
+}
