@@ -54,7 +54,7 @@ conflicts:
     when:
       - {card: devops.orchestration, not_in: [none]}
       - {card: data.checkpointer, in: [memory]}
-    message: 여러 Pod에서 메모리에 상태를 두면 재시작할 때 상태가 사라집니다. (DiV P4)
+    message: 여러 Pod에서 메모리에 상태를 두면 재시작할 때 상태가 사라집니다.
 default_recommendation:
   option: none
   reason: 다중 인스턴스 신호가 없으면 Compose로 충분합니다.

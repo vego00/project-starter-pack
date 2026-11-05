@@ -42,6 +42,15 @@ export const MAX_IDEA = 3000;
 
 type Act = (action: Action) => void;
 
+// The button that was pressed is gone after a screen change, so keyboard users need a new place.
+function useFocusedHeading(screenKey?: string | number) {
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    heading.current?.focus();
+  }, [screenKey]);
+  return heading;
+}
+
 export function StartForm({
   busy,
   onStart,
@@ -130,6 +139,8 @@ export function GcbForm({
   busy: boolean;
   act: Act;
 }) {
+  const heading = useFocusedHeading();
+
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -144,7 +155,9 @@ export function GcbForm({
 
   return (
     <form className="panel" onSubmit={submit}>
-      <h2 tabIndex={-1}>프로젝트의 목표와 기준을 정리해요</h2>
+      <h2 ref={heading} tabIndex={-1}>
+        프로젝트의 목표와 기준을 정리해요
+      </h2>
       {prompt.source === "llm" && (
         <p className="muted">
           AI가 아이디어를 읽고 쓴 초안이에요. 틀릴 수 있으니 직접 확인하고 고쳐
@@ -234,6 +247,8 @@ export function ClarifyForm({
   busy: boolean;
   act: Act;
 }) {
+  const heading = useFocusedHeading(prompt.round);
+
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -248,7 +263,9 @@ export function ClarifyForm({
   return (
     // Fields are uncontrolled, so a new round must start from an empty form.
     <form className="panel" key={prompt.round} onSubmit={submit}>
-      <h2 tabIndex={-1}>프로젝트를 조금 더 알려 주세요</h2>
+      <h2 ref={heading} tabIndex={-1}>
+        프로젝트를 조금 더 알려 주세요
+      </h2>
       <p className="muted">
         결정에 영향을 주는 내용만 물어봐요. 모르면 비워 두어도 돼요. (질문{" "}
         {prompt.round}/2회)
@@ -280,7 +297,9 @@ function OptionCard({
   const { option } = view;
   const blocked = view.blocked_reason !== null;
   return (
-    <article className={`option${blocked ? " blocked" : ""}`}>
+    <article
+      className={`option${blocked ? " blocked" : ""}${recommended ? " recommended" : ""}`}
+    >
       <header>
         <h3>{option.name}</h3>
         {recommended && <span className="badge">추천</span>}
@@ -349,7 +368,7 @@ export function DecisionView({
 }) {
   const { card } = prompt;
   const [question, setQuestion] = useState("");
-  const heading = useRef<HTMLHeadingElement>(null);
+  const heading = useFocusedHeading(card.card_id);
   const recommendation = card.recommendation;
   const recommended = card.options.find(
     (view) => view.option.id === recommendation.option_id,
@@ -357,7 +376,6 @@ export function DecisionView({
 
   useEffect(() => {
     setQuestion("");
-    heading.current?.focus();
   }, [card.card_id]);
 
   function ask(event: FormEvent) {
@@ -416,9 +434,16 @@ export function DecisionView({
           {card.evidence.length > 0
             ? "개인 필기이며 강의 원문이 아니에요."
             : "연결된 강의 자료 없음"}
-          {card.div_refs.length > 0 &&
-            ` · 근거가 된 DiV 문제: ${card.div_refs.join(", ")}`}
         </p>
+        {recommended && (
+          <button
+            className="primary accept"
+            disabled={busy}
+            onClick={() => act({ action: "accept_recommendation" })}
+          >
+            추천대로 진행
+          </button>
+        )}
       </div>
       {card.advice_source === "llm" && (
         <p className="muted">
@@ -443,14 +468,6 @@ export function DecisionView({
         ))}
       </div>
       <div className="row">
-        {recommended && (
-          <button
-            disabled={busy}
-            onClick={() => act({ action: "accept_recommendation" })}
-          >
-            추천대로 진행
-          </button>
-        )}
         <button disabled={busy} onClick={() => act({ action: "defer" })}>
           나중에 결정
         </button>
@@ -492,10 +509,13 @@ export function IssuesView({
   busy: boolean;
   act: Act;
 }) {
+  const heading = useFocusedHeading();
   const errors = prompt.issues.filter((issue) => issue.severity === "error");
   return (
     <section className="panel">
-      <h2 tabIndex={-1}>함께 쓸 수 없는 결정이 있어요</h2>
+      <h2 ref={heading} tabIndex={-1}>
+        함께 쓸 수 없는 결정이 있어요
+      </h2>
       <p className="muted">아래 결정 중 하나를 다시 골라 주세요.</p>
       {prompt.error && (
         <p className="alert" role="alert">
@@ -534,9 +554,12 @@ export function CompletedView({
   journey: Journey;
   onRestart: () => void;
 }) {
+  const heading = useFocusedHeading();
   return (
     <section className="panel">
-      <h2 tabIndex={-1}>모든 결정을 마쳤어요</h2>
+      <h2 ref={heading} tabIndex={-1}>
+        모든 결정을 마쳤어요
+      </h2>
       <p className="muted">{journey.idea}</p>
       {journey.warnings.map((warning) => (
         <p className="note warn" key={warning}>

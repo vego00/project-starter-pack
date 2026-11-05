@@ -373,7 +373,7 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
         }
 
     def reviewer(state: JourneyState) -> dict[str, Any]:
-        # S2 covers rule conflicts only; LLM review of context mismatches arrives in S3.
+        # Rule conflicts only: no LLM review of context mismatches yet.
         has_errors = any(conflict.severity == "error" for conflict in state.conflicts)
         return {
             "review_issues": state.conflicts,

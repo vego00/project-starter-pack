@@ -34,6 +34,6 @@ signals:
   other: [팀 표준 저장소가 이미 있음]
 default_recommendation:
   option: postgres
-  reason: 재시작 시 상태가 사라지면 나중에 구조를 다시 고쳐야 합니다. (DiV P4)
+  reason: 재시작 시 상태가 사라지면 나중에 구조를 다시 고쳐야 합니다.
 learning_refs: [langgraph-checkpointer, postgresql]
 div_refs: [P4]
