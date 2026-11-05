@@ -8,6 +8,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from app.journey.constraints import Conflict
+from app.journey.design import DesignState
 from app.registry.schema import CardOption
 
 CardId = str
@@ -184,6 +185,7 @@ class JourneyState(BaseModel):
     review_issues: list[Conflict] = []
     status: Literal["in_progress", "needs_fix", "completed"] = "in_progress"
     artifacts: dict[str, str] = {}
+    design: DesignState = DesignState()
     trace: Annotated[list[NodeEvent], operator.add] = []
 
     @property
