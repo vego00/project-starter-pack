@@ -178,3 +178,24 @@
 - docs/는 노션 관리 문서의 로컬 작업 공간이며 모든 브랜치에서 Git 추적 대상에서 제외한다.
 - README.md와 AGENTS.md는 저장소에 유지한다. reports/는 기계 생성 평가 결과용이며 상세 해석·기획 문서는 노션에 작성한다.
 - frontend/, backend/, agents/, benchmarks/, infrastructure/, tests/는 공통 경로다. 빈 폴더는 .gitkeep으로 유지하며 구현 완료를 의미하지 않는다.
+
+## 12. 개발 에이전트 품질 지침과 프로젝트 스킬
+
+이 절은 개발 보조 에이전트의 작업 방식이다. 제품의 런타임 Agent 프롬프트나 추천 로직을 변경하지 않는다.
+
+- 코딩 전 요청 범위·중요한 가정·검증 가능한 완료 조건을 확인한다. 필요한 최소 수정만 수행하고 관련 없는 리팩터링을 섞지 않는다.
+- UI·문구·주석은 실제 사용자 행동과 정보 전달에 필요한 내용으로 구성한다. 가짜 지표·후기·작동하지 않는 버튼으로 완성도를 꾸미지 않는다.
+- 진행 보고는 결과와 막힌 점부터 짧게 전달하되, 검증 범위·불확실성·사용 조건을 생략하지 않는다.
+- 완료·수정·테스트 통과·배포 성공은 최종 변경 상태의 관찰 가능한 근거로만 보고한다. mock 검증과 실제 모델 호출, PR 생성과 main 병합을 구분한다.
+- 스킬은 필요한 것만 읽는다. 아래 링크는 이 저장소에 포함된 개발 지침이며, 제품 코드인 `agents/`와 구분한다.
+
+| 상황 | 읽을 스킬 |
+| --- | --- |
+| 코드 구현·버그 수정·리뷰·리팩터링 | [.agents/skills/focused-implementation/SKILL.md](.agents/skills/focused-implementation/SKILL.md) |
+| UI·제품 문구·요약 결과·주석 작성 및 리뷰 | [.agents/skills/product-quality/SKILL.md](.agents/skills/product-quality/SKILL.md) |
+| 진행·결과·검증·인계 보고 | [.agents/skills/concise-reporting/SKILL.md](.agents/skills/concise-reporting/SKILL.md) |
+| 완료 주장·커밋·PR 생성 전 | [.agents/skills/verification-before-completion/SKILL.md](.agents/skills/verification-before-completion/SKILL.md) |
+
+프로젝트 로컬 스킬을 지원하는 도구는 `.agents/skills/`에서 발견할 수 있다. 자동 발견을 지원하지 않는 도구도 이 표의 관련 파일을 직접 읽는다. 전역 설치나 플러그인 설치를 전제하지 않는다.
+
+외부 참고 자료와 프로젝트별 조정은 [출처 기록](.agents/skills/SOURCES.md)에 있다. 원본의 고정 출력 형식·반복 확인 질문·항상 전체 검사 같은 규칙을 이 프로젝트에 강제하지 않는다. 상위 지침과 최신 사용자 요청, 본 문서의 노션 우선·3개 트랙·대용량 다운로드 제한을 유지한다.
