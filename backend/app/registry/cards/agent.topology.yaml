@@ -2,6 +2,7 @@ card_id: agent.topology
 version: 1
 layer: agent
 order: 10
+title: Agent 구조
 question: 에이전트를 어떤 구조로 구성할까요?
 options:
   - id: single

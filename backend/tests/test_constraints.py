@@ -133,6 +133,7 @@ def make_card(card_id, **rules):
             "card_id": card_id,
             "version": 1,
             "layer": card_id.split(".")[0],
+            "title": "t",
             "question": "q",
             "options": [option("a"), option("b")],
             "default_recommendation": {"option": "a", "reason": "r"},

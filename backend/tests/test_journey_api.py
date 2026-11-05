@@ -4,7 +4,9 @@ from uuid import uuid4
 
 import pytest
 from app.config import Settings
+from app.journey.deciders.base import DeciderResult
 from app.journey.services import JourneyDeps, MockResponder
+from app.journey.state import Advice
 from app.main import create_app
 from app.registry.loader import Registry, load_registry
 from fastapi.testclient import TestClient
@@ -94,6 +96,35 @@ def test_view_is_labelled_as_mock_and_lists_cards_in_order(client):
     ]
     assert view["cards"][0]["state"] == "current"
     assert view["cards"][1]["state"] == "pending"
+
+
+def test_notice_names_only_the_part_without_a_model():
+    class StubAdvisor:
+        def advise(self, state, card):
+            return Advice(source="llm", notes={o.id: "설명" for o in card.options})
+
+    class RealDecider:
+        name = "jev"
+
+        def decide(self, state, question):
+            return DeciderResult(answer=question.choices[0], confidence=0.9)
+
+    with make_client(JourneyDeps(advisor=StubAdvisor())) as client:
+        notice = start(client)["notice"]
+    assert "모델 미연결" not in notice
+    assert "추천은 아직 카드의 기본값" in notice
+
+    with make_client(JourneyDeps(decider=RealDecider(), advisor=StubAdvisor())) as client:
+        assert start(client)["notice"] is None
+
+
+def test_cards_of_one_layer_have_distinct_titles_in_the_view():
+    app = create_app(Settings(_env_file=None), checkpointer=InMemorySaver())
+    with TestClient(app) as client:
+        view = start(client)
+
+    agent_cards = [card for card in view["cards"] if card["layer"] == "agent"]
+    assert [card["title"] for card in agent_cards] == ["Agent 구조", "사람 확인"]
 
 
 def test_get_returns_the_same_prompt_without_advancing(client):

@@ -1,4 +1,4 @@
-"""Decider: narrow judgement behind one interface (Jev / LLM / Mock, Notion 02-1 §5)."""
+"""Decider: narrow judgement behind one interface (Jev / LLM / Mock)."""
 
 import logging
 from typing import TYPE_CHECKING, Protocol
