@@ -17,36 +17,26 @@
 
 **이 저장소의 개발·설계 작업은 노션에 정리된 최신 프로젝트 문서를 기준으로 수행한다.** GitHub는 코드·테스트·실행 설정의 원본이고, Notion은 PRD·아키텍처·계약·스프린트·평가·의사결정 문서의 원본이다.
 
-### 반드시 확인할 문서 — 신규 Notion 구조 (2026-11-04 마이그레이션)
+### 반드시 확인할 문서: 신규 Notion 구조 (2026-11-05 마이그레이션)
 
-- **프로젝트 메인 / 3개 작업 트랙:** [Project Starter Pack · New Home](https://app.notion.com/p/40e96199efb381fda58feba2bbb873f4)
-- **현재 작업의 단일 원본:** [Unified Backlog — 전체 Issue DB](https://app.notion.com/p/bd9c1a9f0cc64a32a8b470f480fa604f)
+- **프로젝트 메인:** [Project Starter Pack](https://app.notion.com/p/40f96199efb380ddb7ddeac8ca9d82dd)
+- **현재 작업의 단일 원본:** [Unified Backlog](https://app.notion.com/p/40f96199efb381e387c2e4ffbfbeedf9)
 - **S1~S5 단계 설명·완료 기준:** [Roadmap DB](https://app.notion.com/p/ecf1e1bb415648ab860aa29c67d01877)
-- **Jira-style 개발 현황:** [Development Dashboard](https://app.notion.com/p/40e96199efb38144a776e30049163472)
+- [Product Definition](https://app.notion.com/p/40e96199efb381c79c27eeb4fc2c7aa7) · [ADR & Open Questions](https://app.notion.com/p/40e96199efb381b7870afe652522a060)
 
-**Track 1 · 서비스 설계 파이프라인 (서비스 기능 설계)**
+**Track 1 · 서비스 설계 (서비스 기능 설계):** [Service Design Pipeline](https://app.notion.com/p/40f96199efb380b2a208db985bdde40c)
 
-- [모듈 메인 · Service Design Pipeline](https://app.notion.com/p/40e96199efb38142a587f476773c568d)
-- [PRD / GCB / Source](https://app.notion.com/p/40e96199efb381c79c27eeb4fc2c7aa7) · [Journey & Decision 계약](https://app.notion.com/p/40e96199efb3813ea695e70f00fb4ff9)
-- [LangGraph Orchestration / Recovery](https://app.notion.com/p/40e96199efb3810ba85cec14fddc0d79) · [Gemini/Jev 추천](https://app.notion.com/p/40e96199efb3815880a2eaaac538402c)
-- [Methodology Registry & RAG](https://app.notion.com/p/40e96199efb381368427f2b4aba3508b) · [Evaluation / Experiments](https://app.notion.com/p/40e96199efb38168a721d635d166f2cd)
+- [Multi-Agent Service Design](https://app.notion.com/p/40f96199efb381f086c6c5a567d8ba50) (S3.5 기준 문서)
+- [Journey & Decision Contract](https://app.notion.com/p/40e96199efb3813ea695e70f00fb4ff9) · [Model & Recommendation](https://app.notion.com/p/40e96199efb3815880a2eaaac538402c)
+- [Knowledge](https://app.notion.com/p/40e96199efb381368427f2b4aba3508b) · [Evaluation](https://app.notion.com/p/40e96199efb38168a721d635d166f2cd)
 
-**Track 2 · 배포 설계 파이프라인 (사용자 프로젝트용 산출물)**
+**Track 2 · 배포 설계 (사용자 프로젝트용 산출물):** [Deployment Design Pipeline](https://app.notion.com/p/40f96199efb38087b3becd6ab4edb948)
 
-- [모듈 메인 · Deployment Design Pipeline](https://app.notion.com/p/40e96199efb3815ba47bd95636b22b83)
-- [Deployment Decision Registry](https://app.notion.com/p/40e96199efb381e79f73f7a6d0a302d8) · [Compatibility & Constraint](https://app.notion.com/p/40e96199efb38196a0eff19b77a83cc6)
-- [Scaffold / ADR Composer](https://app.notion.com/p/40e96199efb381e2a859c29e5c0244cc) · [Build / Delivery Validation](https://app.notion.com/p/40e96199efb381a3a2d6c027b6198a72)
-- [Cloud & MLOps Mapping](https://app.notion.com/p/40e96199efb381fb9a6bd84ad46176ed)
+**Track 3 · 스타터 자체 개발·배포 (실제 서비스 운영):** [Starter Platform Engineering](https://app.notion.com/p/40f96199efb380c0a12cc3f22d6331da)
 
-**Track 3 · 스타터 자체 개발·배포 (실제 서비스 운영)**
+- [Tool Runtime (Later)](https://app.notion.com/p/40e96199efb381398cb3e7fbb83d6096)
 
-- [모듈 메인 · Starter Platform Engineering](https://app.notion.com/p/40e96199efb3817498d6c3bd7a727c95)
-- [System Architecture](https://app.notion.com/p/40e96199efb38194b04fc9720bf7e486) · [Frontend](https://app.notion.com/p/40e96199efb381e99713c5b89c62039f) · [Backend API](https://app.notion.com/p/40e96199efb381199d82e4d2fb88d728)
-- [Agent / Model Providers](https://app.notion.com/p/40e96199efb381f99893d1a3fccc7a8c) · [PostgreSQL & Persistence](https://app.notion.com/p/40e96199efb381c2b774fe624a2d3f00)
-- [uv Workspace / Docker](https://app.notion.com/p/40e96199efb3813c8c60f49f337cf1a6) · [CI / Release / Operations](https://app.notion.com/p/40e96199efb38118ba28ede3fcb7e372)
-- [Tool/MCP Permissions & Recovery (Later)](https://app.notion.com/p/40e96199efb381398cb3e7fbb83d6096) · [Architecture Decision Records / Open Questions](https://app.notion.com/p/40e96199efb381b7870afe652522a060)
-
-이전 Notion 메인(Architecture & Docs)과 해당 하위 문서는 **마이그레이션 전 참고 이력**으로만 간주한다. 최신 의사결정·구현 계약은 위 신규 모듈을 기준으로 한다. 세 모듈은 **개발 작업 구분**이며 서로 독립 배포된 MSA 서비스 3개라는 뜻이 아니다.
+`보관 · 이전 구조` 아래의 페이지(옛 Home, Architecture & Docs, 옛 Documentation Registry, 옛 Backlog)는 **마이그레이션 전 참고 이력**으로만 간주한다. 세 트랙은 **개발 작업 구분**이며 서로 독립 배포된 MSA 서비스 3개라는 뜻이 아니다.
 
 ### 작업 규칙
 
