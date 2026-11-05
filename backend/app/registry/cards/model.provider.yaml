@@ -1,6 +1,7 @@
 card_id: model.provider
 version: 1
 layer: model
+title: 모델 제공자
 question: 어떤 경로로 LLM을 사용할까요?
 options:
   - id: gemini
@@ -50,7 +51,7 @@ signals:
   openrouter: [여러 모델 비교 필요]
   ollama: [GPU 보유, 데이터 외부 전송 불가]
 implies:
-  # S2 제안: Notion 10 §3에 아직 없는 규칙
+  # S2 제안: Decision Registry에 아직 없는 규칙
   - id: ollama-provider-means-ollama-serving
     when:
       - {card: model.provider, in: [ollama]}

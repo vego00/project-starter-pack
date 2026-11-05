@@ -1,4 +1,6 @@
-"""Runs against a live stack: `docker compose up -d --wait`, then set E2E_BASE_URL.
+"""Runs against a live mock stack, then set E2E_BASE_URL:
+`APP_PROVIDER=mock APP_DECIDER=mock APP_EVIDENCE_SCOPE=none docker compose up -d --wait`
+(shell values override .env, which may point at real models).
 
 Optional: E2E_SCREENSHOT_DIR saves screens; E2E_RESTART_CMD restarts the backend mid-journey;
 E2E_CHROMIUM_PATH uses an already installed Chromium instead of the version Playwright expects.
@@ -9,6 +11,7 @@ import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 
+import httpx
 import pytest
 from playwright.sync_api import Browser, Page, expect, sync_playwright
 
@@ -20,6 +23,14 @@ GOAL = "수강생이 강의 내용을 출처와 함께 바로 찾을 수 있는 
 IDEA = "부트캠프 강의 자료를 찾아 질문에 답하고 출처를 알려주는 서비스를 만들고 싶어요."
 
 pytestmark = pytest.mark.skipif(not BASE_URL, reason="E2E_BASE_URL is not set")
+
+
+@pytest.fixture(scope="module", autouse=True)
+def require_mock_stack() -> None:
+    """These tests assert mock text; a real model would also spend free quota for nothing."""
+    health = httpx.get(f"{BASE_URL}/health", timeout=5).json()
+    if (health["provider"], health["decider"]) != ("mock", "mock"):
+        pytest.fail(f"E2E needs a mock stack, got {health['provider']}/{health['decider']}")
 
 
 @pytest.fixture(scope="module")
@@ -140,7 +151,7 @@ def test_questions_defer_and_reopen(page: Page):
     choose(page, "어떤 경로로 LLM을 사용할까요?", "Ollama 로컬")
     expect(page.get_by_text("Ollama 컨테이너 · 자동 확정")).to_be_visible()
 
-    page.get_by_role("button", name="모델 다시 고르기").click()
+    page.get_by_role("button", name="모델 제공자 다시 고르기").click()
     expect(page.get_by_role("heading", name="어떤 경로로 LLM을")).to_be_visible()
     expect(page.get_by_text("자동 확정")).to_be_hidden()
 

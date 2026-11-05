@@ -1,4 +1,4 @@
-"""Decision Journey graph (Notion 02-1 §4). Flow is fixed here; no model picks the next node."""
+"""Decision Journey graph. Flow is fixed here; no model picks the next node."""
 
 from functools import wraps
 from time import perf_counter

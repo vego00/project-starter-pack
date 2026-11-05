@@ -76,8 +76,8 @@ def test_says_who_decided():
 
 
 def test_mock_notice_appears_only_for_mock_runs():
-    assert "모델 미연결" in compose(is_mock=True)
-    assert "모델 미연결" not in compose(is_mock=False)
+    assert "모델 없이 카드 기본값" in compose(is_mock=True)
+    assert "모델 없이 카드 기본값" not in compose(is_mock=False)
 
 
 def test_does_not_claim_evidence_or_verification_it_lacks():

@@ -1,6 +1,7 @@
 card_id: devops.orchestration
 version: 1
 layer: devops
+title: 오케스트레이션
 question: 컨테이너 오케스트레이션이 필요한가요?
 options:
   - id: none
@@ -41,14 +42,14 @@ signals:
   single_vm_k3s: [적은 비용으로 K8s 배포 경험 필요]
   managed_k8s: [다중 인스턴스·롤아웃 필요]
 requires:
-  # S2 제안: Notion 10 §3에 아직 없는 규칙
+  # S2 제안: Decision Registry에 아직 없는 규칙
   - id: managed-k8s-needs-cloud
     when:
       - {card: devops.orchestration, in: [managed_k8s]}
     require: {card: cloud.target, not_in: [local]}
     message: 관리형 Kubernetes는 클라우드에서만 사용할 수 있습니다.
 conflicts:
-  # Notion 10 §3의 "세션 메모리 저장"을 이번 카드 묶음의 data.checkpointer=memory로 표현
+  # Decision Registry의 "세션 메모리 저장"을 이번 카드 묶음의 data.checkpointer=memory로 표현
   - id: orchestration-with-memory-state
     when:
       - {card: devops.orchestration, not_in: [none]}

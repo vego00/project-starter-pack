@@ -605,9 +605,7 @@ export function ProgressRail({
             className={`step ${card.state}`}
             aria-current={card.state === "current" ? "step" : undefined}
           >
-            <span className="step-layer">
-              {LAYER_NAMES[card.layer] ?? card.layer}
-            </span>
+            <span className="step-layer">{card.title}</span>
             <span className="step-value">
               {card.option_name ??
                 STATE_LABEL[card.state as keyof typeof STATE_LABEL]}
@@ -617,7 +615,7 @@ export function ProgressRail({
               <button
                 className="link"
                 disabled={busy}
-                aria-label={`${LAYER_NAMES[card.layer] ?? card.layer} 다시 고르기`}
+                aria-label={`${card.title} 다시 고르기`}
                 onClick={() => act({ action: "reopen", card_id: card.card_id })}
               >
                 다시 고르기

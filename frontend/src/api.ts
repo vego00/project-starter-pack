@@ -96,6 +96,7 @@ const journeySchema = z.object({
     z.object({
       card_id: z.string(),
       layer: z.string(),
+      title: z.string(),
       question: z.string(),
       state: z.enum(["decided", "implied", "deferred", "current", "pending"]),
       option_name: z.string().nullable(),

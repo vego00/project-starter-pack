@@ -1,4 +1,4 @@
-"""Decision Card contract (Notion 10 · Decision Registry §1)."""
+"""Decision Card contract (see Decision Registry in Notion)."""
 
 from datetime import date
 from typing import Literal
@@ -89,6 +89,7 @@ class DecisionCard(_Frozen):
     version: int = Field(ge=1)
     layer: Layer
     order: int = 50  # Position within the layer; lower comes first.
+    title: str = Field(min_length=1)  # Short label; a layer can hold several cards.
     question: str
     options: tuple[CardOption, ...] = Field(min_length=2)
     signals: dict[str, tuple[str, ...]] = Field(default_factory=dict)

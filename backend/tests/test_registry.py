@@ -16,6 +16,7 @@ def card(card_id="agent.x", **overrides) -> dict:
         "card_id": card_id,
         "version": 1,
         "layer": card_id.split(".")[0],
+        "title": "제목",
         "question": "질문",
         "options": [{"id": "a", **option}, {"id": "b", **option}],
         "default_recommendation": {"option": "a", "reason": "이유"},
@@ -28,6 +29,12 @@ def test_shipped_cards_cover_every_layer_in_journey_order():
 
     assert list(dict.fromkeys(layers)) == list(LAYERS)
     assert layers == sorted(layers, key=LAYERS.index)
+
+
+def test_shipped_card_titles_tell_cards_apart():
+    titles = [c.title for c in load_registry().cards]
+
+    assert len(titles) == len(set(titles))
 
 
 def test_order_field_decides_position_within_a_layer():
@@ -110,7 +117,7 @@ def test_load_requires_every_layer(tmp_path):
 
 def test_new_card_needs_only_a_yaml_file(tmp_path):
     (tmp_path / "x.yaml").write_text(
-        "card_id: agent.topology\nversion: 1\nlayer: agent\nquestion: 질문\n"
+        "card_id: agent.topology\nversion: 1\nlayer: agent\ntitle: 제목\nquestion: 질문\n"
         "default_recommendation: {option: a, reason: 이유}\noptions:\n"
         + "".join(
             f"  - {{id: {i}, name: n, summary: s, learning_difficulty: low, "

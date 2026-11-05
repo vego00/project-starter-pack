@@ -71,6 +71,7 @@ function cards(first = "current", second = "pending") {
   const status = (card_id: string, layer: string, state: string) => ({
     card_id,
     layer,
+    title: `${card_id} 제목`,
     question: `${card_id} 질문`,
     state,
     option_id: state === "decided" ? "none" : null,
@@ -735,13 +736,27 @@ describe("issues and completion", () => {
     expect(window.location.search).toBe("");
   });
 
+  it("tells apart two cards of the same layer in the progress rail", async () => {
+    const twoInLayer = [
+      { ...cards()[0], card_id: "agent.a", title: "Agent 구조" },
+      { ...cards()[1], card_id: "agent.b", layer: "agent", title: "사람 확인" },
+    ];
+    await startWith(journey({ cards: twoInLayer }));
+
+    const rail = await screen.findByRole("complementary");
+    expect(rail).toHaveTextContent("Agent 구조");
+    expect(rail).toHaveTextContent("사람 확인");
+  });
+
   it("reopens a decided card from the progress rail", async () => {
     const { user, mock } = await startWith(
       journey({ cards: cards("decided", "current") }),
     );
 
     await user.click(
-      await screen.findByRole("button", { name: "Agent 설계 다시 고르기" }),
+      await screen.findByRole("button", {
+        name: "agent.hitl 제목 다시 고르기",
+      }),
     );
 
     expect(bodyOf(mock.mock.calls[1]).action).toEqual({
