@@ -31,7 +31,7 @@
 
 ## 문서 관리
 
-상세 기획·설계·로드맵은 [노션](https://app.notion.com/p/40e96199efb381fda58feba2bbb873f4)에서 관리하고, 작업 현황은 [Unified Backlog](https://app.notion.com/p/bd9c1a9f0cc64a32a8b470f480fa604f)에서 관리한다. 초기 docs는 [이전 커밋](https://github.com/vego00/project-starter-pack/tree/e7a14043bf6383df81d865314714bc9c76254576/docs)에 보존되어 있다.
+상세 기획·설계·로드맵은 [노션](https://app.notion.com/p/40f96199efb380ddb7ddeac8ca9d82dd)에서 관리하고, 작업 현황은 [Unified Backlog](https://app.notion.com/p/40f96199efb381e387c2e4ffbfbeedf9)에서 관리한다. 초기 docs는 [이전 커밋](https://github.com/vego00/project-starter-pack/tree/e7a14043bf6383df81d865314714bc9c76254576/docs)에 보존되어 있다.
 
 ## 저장소 구조와 브랜치
 
