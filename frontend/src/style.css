@@ -433,3 +433,7 @@ ul {
     order: 1; /* The card being decided comes first on a phone. */
   }
 }
+
+.row + h3 {
+  margin-top: 24px;
+}

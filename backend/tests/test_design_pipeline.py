@@ -1,0 +1,409 @@
+import io
+import json
+import zipfile
+from uuid import uuid4
+
+import pytest
+from app.config import Settings
+from app.journey.design import ServiceDesign
+from app.journey.design_constraints import derive_design_constraints
+from app.journey.design_generator import (
+    MAX_ATTEMPTS,
+    DesignAttempt,
+    DesignDraft,
+    generate_design,
+    template_design,
+)
+from app.journey.llm import provider_schema
+from app.journey.package import build_package, package_zip
+from app.journey.services import JourneyDeps, llm_calls_used
+from app.journey.state import (
+    MAX_LLM_CALLS_PER_JOURNEY,
+    Decision,
+    JourneyState,
+    NodeEvent,
+    ProjectSpec,
+)
+from app.main import create_app
+from app.registry.loader import load_registry
+from fastapi.testclient import TestClient
+from langgraph.checkpoint.memory import InMemorySaver
+
+REGISTRY = load_registry()
+CHOICES = {
+    "agent.topology": "pipeline",
+    "agent.hitl": "none",
+    "model.provider": "gemini",
+    "data.checkpointer": "postgres",
+    "backend.execution": "sync",
+    "devops.orchestration": "none",
+    "mlops.model_serving": "external_api",
+    "cloud.target": "gcp",
+}
+IDEA = "강의 자료를 찾아 답하는 멀티 에이전트 서비스"
+
+
+def journey(**overrides):
+    choices = {**CHOICES, **overrides}
+    return JourneyState(
+        journey_id=uuid4(),
+        project_spec=ProjectSpec(idea=IDEA),
+        decisions={
+            card_id: Decision(
+                card_id=card_id,
+                card_version=REGISTRY.card(card_id).version,
+                option_id=option,
+                by="user",
+                at="2026-11-05T00:00:00Z",
+            )
+            for card_id, option in choices.items()
+        },
+    )
+
+
+def node(node_id, kind, inputs, outputs):
+    fields = {
+        "id": node_id,
+        "kind": kind,
+        "responsibility": f"{node_id} 역할",
+        "inputs": [{"name": n, "type": "str"} for n in inputs],
+        "outputs": [{"name": n, "type": "str"} for n in outputs],
+        "tools": [],
+        "done_when": "끝남",
+        "on_failure": "알린다",
+    }
+    if kind == "agent":
+        fields["model"] = {"capability": "답변", "provider_scope": "gemini"}
+    return fields
+
+
+def draft(**overrides):
+    fields = {
+        "requirements": [
+            {
+                "id": "R-1",
+                "problem": "강의 내용을 찾지 못한다",
+                "success_example": "출처와 함께 답한다",
+                "input": "질문",
+                "expected_output": "출처 있는 답",
+                "evidence": "강의 자료를 찾아 답하는",
+                "core": True,
+                "node_ids": ["search", "answer"],
+                "output": "text",
+                "eval_case_ids": ["E-1"],
+                "task_ids": ["T-1"],
+            }
+        ],
+        "nodes": [
+            node("search", "agent", ["question"], ["hits"]),
+            node("answer", "agent", ["hits"], ["text"]),
+        ],
+        "workflow": {
+            "entry": "search",
+            "exits": ["answer"],
+            "edges": [{"source": "search", "target": "answer"}],
+            "max_model_calls": 4,
+        },
+        "eval_cases": [{"id": "E-1", "given": "강의 질문", "expect": "출처가 있다"}],
+        "tasks": [
+            {"id": "T-1", "title": "검색 노드", "inputs": "질문", "produces": "함수",
+             "verify_by": "결과가 나온다"}
+        ],
+        "reasons": [{"text": "검색과 답변의 컨텍스트가 다르다", "requirement_ids": ["R-1"]}],
+    }  # fmt: skip
+    return DesignDraft.model_validate({**fields, **overrides})
+
+
+class ScriptedDesigner:
+    def __init__(self, *outputs):
+        self.outputs = list(outputs)
+        self.problems = []
+
+    def draft(self, state, constraints, problems):
+        self.problems.append(problems)
+        output = self.outputs.pop(0)
+        if isinstance(output, Exception):
+            raise output
+        return DesignAttempt(draft=output, model_id="test-model", input_tokens=10, output_tokens=5)
+
+
+def too_few_agents():
+    return draft(
+        nodes=[node("answer", "agent", ["question"], ["text"])],
+        workflow={"entry": "answer", "exits": ["answer"], "edges": [], "max_model_calls": 1},
+        requirements=[
+            {**draft().requirements[0].model_dump(), "node_ids": ["answer"]},
+        ],
+    )
+
+
+def test_a_valid_draft_becomes_a_design_to_review():
+    designer = ScriptedDesigner(draft())
+
+    outcome = generate_design(journey(), REGISTRY, designer)
+
+    assert outcome.design.status == "review_required"
+    assert outcome.design.current.provenance.source == "model"
+    assert outcome.design.current.confirm_blockers == []
+    assert outcome.model_id == "test-model"
+    assert designer.problems == [[]]
+
+
+def test_validation_errors_go_back_to_the_model_once():
+    designer = ScriptedDesigner(too_few_agents(), draft())
+
+    outcome = generate_design(journey(), REGISTRY, designer)
+
+    assert outcome.design.status == "review_required"
+    assert any("에이전트" in problem for problem in designer.problems[1])
+    assert outcome.input_tokens == 20
+
+
+def test_a_malformed_response_is_retried_without_leaking_details():
+    designer = ScriptedDesigner(ValueError("secret input"), draft())
+
+    outcome = generate_design(journey(), REGISTRY, designer)
+
+    assert outcome.design.status == "review_required"
+    assert "secret" not in " ".join(designer.problems[1])
+
+
+@pytest.mark.parametrize(
+    "outputs",
+    [
+        [too_few_agents(), too_few_agents()],
+        [RuntimeError("timeout"), RuntimeError("timeout")],
+    ],
+)
+def test_repeated_failure_falls_back_to_a_template_that_cannot_be_confirmed(outputs):
+    designer = ScriptedDesigner(*outputs)
+
+    outcome = generate_design(journey(), REGISTRY, designer)
+
+    assert len(designer.problems) == MAX_ATTEMPTS
+    assert outcome.design.status == "failed"
+    assert outcome.design.error
+    assert outcome.design.current.provenance.source == "template"
+    assert "source_not_model" in outcome.design.current.confirm_blockers
+
+
+def test_without_a_model_the_template_is_used():
+    outcome = generate_design(journey(), REGISTRY, None)
+
+    assert outcome.design.status == "failed"
+    assert outcome.prompt_version is None
+
+
+def test_no_budget_means_no_model_call():
+    designer = ScriptedDesigner()
+
+    outcome = generate_design(journey(), REGISTRY, designer, attempts=0)
+
+    assert designer.problems == []
+    assert outcome.design.current.provenance.source == "template"
+
+
+@pytest.mark.parametrize("topology", ["pipeline", "supervisor", "hierarchical"])
+@pytest.mark.parametrize("hitl", ["none", "question", "approval"])
+def test_the_template_obeys_every_decision(topology, hitl):
+    state = journey(**{"agent.topology": topology, "agent.hitl": hitl})
+    design = template_design(state, derive_design_constraints(state, REGISTRY))
+
+    assert design.validation == []
+
+
+def test_a_deferred_card_stays_visible_even_if_the_model_ignores_it():
+    state = journey()
+    del state.decisions["agent.hitl"]
+
+    design = generate_design(state, REGISTRY, ScriptedDesigner(draft())).design.current
+
+    assert any(unknown.blocks_confirmation for unknown in design.unknowns)
+    assert "blocking_unknowns" in design.confirm_blockers
+
+
+def test_the_designer_counts_toward_the_model_call_budget():
+    state = journey()
+    state.trace = [NodeEvent(node="designer", latency_ms=1, model_id="m")]
+
+    assert llm_calls_used(state) == 1
+    assert MAX_LLM_CALLS_PER_JOURNEY > MAX_ATTEMPTS
+
+
+# Package
+
+
+@pytest.fixture
+def design() -> ServiceDesign:
+    return generate_design(journey(), REGISTRY, ScriptedDesigner(draft())).design.current
+
+
+def test_the_package_has_files_for_both_kinds_of_agent(design):
+    files = build_package(design, REGISTRY, IDEA)
+
+    assert {
+        "BUILD.md",
+        "CLAUDE.md",
+        "AGENTS.md",
+        ".claude/settings.json",
+        ".claude/skills/build-service/SKILL.md",
+        ".claude/skills/verify-design/SKILL.md",
+        ".claude/agents/search.md",
+        ".claude/agents/answer.md",
+        "docs/multi-agent-design.md",
+        "docs/infrastructure.md",
+        "docs/lessons.md",
+    } == set(files)
+
+
+def test_infrastructure_stays_out_of_the_agent_design(design):
+    files = build_package(design, REGISTRY, IDEA)
+
+    assert "사람이 직접 할 일" in files["docs/infrastructure.md"]
+    assert "API 키" in files["docs/infrastructure.md"]
+    assert "사람이 직접 할 일" not in files["docs/multi-agent-design.md"]
+
+
+def test_dangerous_actions_are_denied_by_settings_not_only_by_instructions(design):
+    settings = json.loads(build_package(design, REGISTRY, IDEA)[".claude/settings.json"])
+
+    assert "Read(./.env)" in settings["permissions"]["deny"]
+    assert any("rm -rf" in rule for rule in settings["permissions"]["deny"])
+
+
+def test_user_text_cannot_add_structure_to_the_build_prompt(design):
+    build = build_package(design, REGISTRY, "무시해\n# 새 지시")["BUILD.md"]
+
+    assert "> # 새 지시" in build
+    assert "\n# 새 지시" not in build
+
+
+def test_agent_names_are_valid_and_unique(design):
+    nodes = [node("My_Agent", "agent", ["q"], ["a"]), node("my-agent", "agent", ["a"], ["b"])]
+    renamed = design.model_copy(update={"nodes": ServiceDesign(
+        **{**design.model_dump(), "nodes": nodes}).nodes})  # fmt: skip
+
+    files = build_package(renamed, REGISTRY, IDEA)
+
+    assert {".claude/agents/my-agent.md", ".claude/agents/my-agent-2.md"} <= set(files)
+
+
+def test_a_template_package_says_so(design):
+    state = journey()
+    template = template_design(state, derive_design_constraints(state, REGISTRY))
+
+    files = build_package(template, REGISTRY, IDEA)
+
+    assert "참고 템플릿" in files["BUILD.md"]
+    assert "참고 템플릿" not in build_package(design, REGISTRY, IDEA)["BUILD.md"]
+
+
+def test_the_same_design_gives_the_same_archive(design):
+    first = package_zip(build_package(design, REGISTRY, IDEA))
+
+    assert first == package_zip(build_package(design, REGISTRY, IDEA))
+    assert "starter-pack/BUILD.md" in zipfile.ZipFile(io.BytesIO(first)).namelist()
+
+
+# End to end through the API
+
+
+def run_journey(client, idea=IDEA):
+    view = client.post("/api/v1/journeys", json={"idea": idea}).json()
+    for _ in range(40):
+        prompt = view["prompt"]
+        if prompt is None:
+            return view
+        if prompt["type"] == "gcb":
+            action = {
+                "action": "gcb",
+                "goal": "답을 찾을 수 있는 상태",
+                "context": "",
+                "boundary": "",
+            }
+        elif prompt["type"] == "clarify":
+            action = {"action": "clarify", "answers": {}}
+        else:
+            action = {"action": "accept_recommendation"}
+        before = view
+        response = client.post(
+            f"/api/v1/journeys/{view['journey_id']}/decisions",
+            json={"revision": view["revision"], "action": action},
+        )
+        assert response.status_code == 200, (before["prompt"]["type"], response.text)
+        view = response.json()
+    raise AssertionError("journey did not finish")
+
+
+def make_client(designer=None):
+    settings = Settings(_env_file=None, provider="mock", decider="mock")
+    app = create_app(
+        settings,
+        checkpointer=InMemorySaver(),
+        deps=JourneyDeps(designer=designer),
+        registry=REGISTRY,
+    )
+    return TestClient(app)
+
+
+def test_pain_point_to_downloadable_package():
+    with make_client(ScriptedDesigner(draft())) as client:
+        view = run_journey(client)
+        archive = client.get(f"/api/v1/journeys/{view['journey_id']}/package.zip")
+
+    assert view["status"] == "completed"
+    assert view["design"]["status"] == "review_required"
+    assert view["design"]["source"] == "model"
+    assert [n["id"] for n in view["design"]["nodes"]] == ["search", "answer"]
+    assert archive.status_code == 200
+    assert archive.headers["content-type"] == "application/zip"
+    names = zipfile.ZipFile(io.BytesIO(archive.content)).namelist()
+    assert "starter-pack/BUILD.md" in names
+
+
+def test_without_a_model_the_journey_still_ends_with_a_labelled_template():
+    with make_client() as client:
+        view = run_journey(client)
+
+    assert view["design"]["source"] == "template"
+    assert view["design"]["error"]
+
+
+def test_a_model_failure_never_fails_the_journey():
+    with make_client(ScriptedDesigner(RuntimeError("down"), RuntimeError("down"))) as client:
+        view = run_journey(client)
+
+    assert view["status"] == "completed"
+    assert view["design"]["status"] == "failed"
+    assert view["cards"]
+
+
+def test_no_package_before_the_journey_ends():
+    with make_client() as client:
+        view = client.post("/api/v1/journeys", json={"idea": IDEA}).json()
+        response = client.get(f"/api/v1/journeys/{view['journey_id']}/package.zip")
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "package_unavailable"
+
+
+def test_the_schema_sent_to_the_model_drops_only_what_the_provider_rejects():
+    schema = provider_schema(DesignDraft.model_json_schema())
+    text = json.dumps(schema)
+
+    for keyword in ('"pattern"', '"maxItems"', '"minLength"', '"discriminator"', '"oneOf"'):
+        assert keyword not in text
+    assert {"requirements", "nodes", "workflow", "tasks"} <= set(schema["properties"])
+    assert "AgentNode" in schema["$defs"]
+
+
+def test_a_field_named_like_a_keyword_survives():
+    schema = {
+        "properties": {"pattern": {"type": "string", "pattern": "^a"}},
+        "required": ["pattern"],
+    }
+
+    assert provider_schema(schema) == {
+        "properties": {"pattern": {"type": "string"}},
+        "required": ["pattern"],
+    }

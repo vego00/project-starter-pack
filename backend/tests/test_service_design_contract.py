@@ -383,7 +383,7 @@ def test_a_completed_old_journey_keeps_its_own_status_and_summary():
     assert "decision_summary" in state.artifacts
 
 
-def test_nothing_writes_the_design_yet_so_saved_journeys_keep_their_shape():
+def test_a_finished_journey_saves_its_design_in_a_shape_that_loads_again():
     """The graph must not add the channel: a checkpoint then looks just like an old one."""
     saver = InMemorySaver()
     graph = build_graph(load_registry(), checkpointer=saver)
@@ -410,5 +410,4 @@ def test_nothing_writes_the_design_yet_so_saved_journeys_keep_their_shape():
 
     saved = graph.get_state(config).values
     assert saved["status"] == "completed"
-    assert "design" not in saved
-    assert JourneyState.model_validate(saved).design.status == "not_started"
+    assert JourneyState.model_validate(saved).design.status == "failed"

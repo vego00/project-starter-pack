@@ -8,6 +8,7 @@ E2E_CHROMIUM_PATH uses an already installed Chromium instead of the version Play
 
 import os
 import subprocess
+import zipfile
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -123,7 +124,7 @@ def test_all_cards_to_completion_with_reload_and_restart(page: Page):
     shot(page, "4-blocked")
     choose(page, "어디에 배포할까요?", "로컬만")
 
-    expect(page.get_by_role("heading", name="모든 결정을 마쳤어요")).to_be_visible()
+    expect(page.get_by_role("heading", name="빌드 묶음을 만들었어요")).to_be_visible()
     expect(page.get_by_text("8 / 8")).to_be_visible()
     shot(page, "5-completed")
 
@@ -135,6 +136,16 @@ def test_all_cards_to_completion_with_reload_and_restart(page: Page):
     assert IDEA in document
     assert GOAL in document
     assert "승인 후 실행 (직접 선택)" in document
+
+    expect(page.get_by_text("참고용")).to_be_visible()
+    with page.expect_download() as download:
+        page.get_by_role("link", name="빌드 묶음 다운로드").click()
+    assert download.value.suggested_filename == "starter-pack.zip"
+    with zipfile.ZipFile(download.value.path()) as archive:
+        names = archive.namelist()
+        build = archive.read("starter-pack/BUILD.md").decode("utf-8")
+    assert "starter-pack/docs/infrastructure.md" in names
+    assert "참고 템플릿" in build
 
 
 def test_questions_defer_and_reopen(page: Page):
@@ -161,12 +172,12 @@ def test_stale_tab_cannot_answer_the_wrong_card(browser: Browser, page: Page):
     skip_clarify(page)
     other = page.context.new_page()
     other.goto(page.url)
-    expect(other.get_by_role("button", name="Single Agent 선택")).to_be_visible()
+    expect(other.get_by_role("button", name="Supervisor 라우팅 선택")).to_be_visible()
 
-    page.get_by_role("button", name="Single Agent 선택").click()
+    page.get_by_role("button", name="Supervisor 라우팅 선택").click()
     expect(page.get_by_role("heading", name="에이전트가 실행 중간에")).to_be_visible()
 
-    other.get_by_role("button", name="Single Agent 선택").click()
+    other.get_by_role("button", name="Supervisor 라우팅 선택").click()
     expect(other.get_by_role("alert").first).to_contain_text("최신 상태가 아니에요")
     expect(other.get_by_role("heading", name="에이전트가 실행 중간에")).to_be_visible()
     expect(other.get_by_text("1 / 8")).to_be_visible()

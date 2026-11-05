@@ -10,6 +10,7 @@ from app.config import Settings
 from app.journey.deciders.base import Decider
 from app.journey.deciders.jev import JevDecider
 from app.journey.deciders.mock import MockDecider
+from app.journey.design_generator import Designer, LLMDesigner
 from app.journey.llm import GeminiLLM, StructuredLLM
 from app.journey.prompts import (
     ADVISOR_SYSTEM,
@@ -38,6 +39,9 @@ logger = logging.getLogger(__name__)
 
 MAX_NOTE_CHARS = 400
 MAX_ANSWER_CHARS = 1500
+# Provisional: a whole design is far larger than a card explanation. Recalibrate from real calls.
+DESIGN_TIMEOUT_MS = 120_000
+DESIGN_MAX_OUTPUT_TOKENS = 16_000
 QA_UNAVAILABLE = (
     "지금은 답변을 만들지 못했어요. 선택지의 장단점을 참고하거나 잠시 후 다시 질문해 주세요."
 )
@@ -69,7 +73,7 @@ class Responder(Protocol):
 
 
 def llm_calls_used(state: JourneyState) -> int:
-    nodes = ("gcb_drafter", "advisor", "qa")
+    nodes = ("gcb_drafter", "advisor", "qa", "designer")
     return sum(event.node in nodes and bool(event.model_id) for event in state.trace)
 
 
@@ -261,6 +265,8 @@ class JourneyDeps:
     retriever: Retriever = field(default_factory=EmptyRetriever)
     responder: Responder = field(default_factory=MockResponder)
     drafter: GcbDrafter = field(default_factory=MockGcbDrafter)
+    # None means no model: the journey ends with a reference template.
+    designer: Designer | None = None
 
     @property
     def recommendations_are_mock(self) -> bool:
@@ -287,11 +293,19 @@ def build_deps(settings: Settings, registry: Registry) -> JourneyDeps:
         retriever = CuratedRetriever(load_catalog(registry))
     if settings.provider != "gemini":
         return JourneyDeps(decider=decider, retriever=retriever)
-    llm = GeminiLLM(settings.gemini_api_key.get_secret_value(), settings.gemini_model)
+    api_key = settings.gemini_api_key.get_secret_value()
+    llm = GeminiLLM(api_key, settings.gemini_model)
+    design_llm = GeminiLLM(
+        api_key,
+        settings.gemini_model,
+        timeout_ms=DESIGN_TIMEOUT_MS,
+        max_output_tokens=DESIGN_MAX_OUTPUT_TOKENS,
+    )
     return JourneyDeps(
         decider=decider,
         retriever=retriever,
         drafter=LLMGcbDrafter(llm),
         advisor=LLMAdvisor(llm, registry),
         responder=LLMResponder(llm, registry),
+        designer=LLMDesigner(design_llm, registry),
     )
