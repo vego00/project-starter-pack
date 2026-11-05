@@ -9,6 +9,7 @@ from app.journey.design import ServiceDesign
 from app.journey.design_constraints import derive_design_constraints
 from app.journey.design_generator import (
     MAX_ATTEMPTS,
+    MAX_OUTAGE_RETRIES,
     DesignAttempt,
     DesignDraft,
     generate_design,
@@ -28,6 +29,7 @@ from app.main import create_app
 from app.registry.loader import load_registry
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import InMemorySaver
+from pydantic import ValidationError
 
 REGISTRY = load_registry()
 CHOICES = {
@@ -159,28 +161,86 @@ def test_validation_errors_go_back_to_the_model_once():
     assert outcome.input_tokens == 20
 
 
-def test_a_malformed_response_is_retried_without_leaking_details():
-    designer = ScriptedDesigner(ValueError("secret input"), draft())
+def contract_error():
+    fields = draft().model_dump()
+    fields["state_fields"] = [
+        {"name": "secret-idea", "type": "str", "writers": [], "readers": [], "lifetime": "run"}
+    ]
+    try:
+        DesignDraft.model_validate(fields)
+    except ValidationError as exc:
+        return exc
+    raise AssertionError("the draft should break the contract")
+
+
+def test_a_broken_contract_tells_the_model_which_field_to_fix():
+    designer = ScriptedDesigner(contract_error(), draft())
 
     outcome = generate_design(journey(), REGISTRY, designer)
 
     assert outcome.design.status == "review_required"
-    assert "secret" not in " ".join(designer.problems[1])
+    assert "state_fields.0.writers" in designer.problems[1][0]
+    assert "secret-idea" not in " ".join(designer.problems[1])
+
+
+def test_a_broken_contract_is_logged_by_field_without_its_content(caplog):
+    generate_design(journey(), REGISTRY, ScriptedDesigner(contract_error(), draft()))
+
+    assert "state_fields.0.writers:too_short" in caplog.text
+    assert "secret-idea" not in caplog.text
+
+
+def test_a_provider_failure_is_logged_with_its_status_without_its_message(caplog):
+    outage = RuntimeError("secret input")
+    outage.code = 503
+
+    generate_design(journey(), REGISTRY, ScriptedDesigner(outage, draft()))
+
+    assert "status=503" in caplog.text
+    assert "secret" not in caplog.text
+
+
+def test_a_provider_failure_keeps_the_correction_for_a_broken_draft():
+    designer = ScriptedDesigner(RuntimeError("down"), contract_error(), draft())
+
+    outcome = generate_design(journey(), REGISTRY, designer)
+
+    assert outcome.design.status == "review_required"
+    assert designer.problems[1] == []
+    assert "state_fields.0.writers" in designer.problems[2][0]
+
+
+def test_a_provider_failure_keeps_the_problems_still_to_fix():
+    designer = ScriptedDesigner(too_few_agents(), RuntimeError("down"), draft())
+
+    outcome = generate_design(journey(), REGISTRY, designer)
+
+    assert outcome.design.status == "review_required"
+    assert designer.problems[2] == designer.problems[1] != []
+
+
+def test_without_spare_budget_a_provider_failure_uses_up_an_attempt():
+    designer = ScriptedDesigner(RuntimeError("down"), RuntimeError("down"))
+
+    outcome = generate_design(journey(), REGISTRY, designer, attempts=2, outage_retries=0)
+
+    assert len(designer.problems) == 2
+    assert outcome.design.status == "failed"
 
 
 @pytest.mark.parametrize(
-    "outputs",
+    ("outputs", "calls"),
     [
-        [too_few_agents(), too_few_agents()],
-        [RuntimeError("timeout"), RuntimeError("timeout")],
+        ([too_few_agents(), too_few_agents()], MAX_ATTEMPTS),
+        ([RuntimeError("timeout")] * (MAX_ATTEMPTS + MAX_OUTAGE_RETRIES), MAX_ATTEMPTS + 1),
     ],
 )
-def test_repeated_failure_falls_back_to_a_template_that_cannot_be_confirmed(outputs):
+def test_repeated_failure_falls_back_to_a_template_that_cannot_be_confirmed(outputs, calls):
     designer = ScriptedDesigner(*outputs)
 
     outcome = generate_design(journey(), REGISTRY, designer)
 
-    assert len(designer.problems) == MAX_ATTEMPTS
+    assert len(designer.problems) == calls
     assert outcome.design.status == "failed"
     assert outcome.design.error
     assert outcome.design.current.provenance.source == "template"
@@ -370,7 +430,8 @@ def test_without_a_model_the_journey_still_ends_with_a_labelled_template():
 
 
 def test_a_model_failure_never_fails_the_journey():
-    with make_client(ScriptedDesigner(RuntimeError("down"), RuntimeError("down"))) as client:
+    outages = [RuntimeError("down")] * (MAX_ATTEMPTS + MAX_OUTAGE_RETRIES)
+    with make_client(ScriptedDesigner(*outages)) as client:
         view = run_journey(client)
 
     assert view["status"] == "completed"

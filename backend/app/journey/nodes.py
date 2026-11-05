@@ -15,7 +15,7 @@ from app.journey.composers.summary import ARTIFACT_KEY, compose_summary
 from app.journey.constraints import evaluate, preview
 from app.journey.controller import next_card
 from app.journey.deciders.base import DeciderQuestion, judge
-from app.journey.design_generator import MAX_ATTEMPTS, generate_design
+from app.journey.design_generator import MAX_ATTEMPTS, MAX_OUTAGE_RETRIES, generate_design
 from app.journey.services import JourneyDeps, llm_calls_used
 from app.journey.state import (
     CLARIFY_QUESTIONS,
@@ -391,8 +391,13 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
 
     def designer(state: JourneyState) -> dict[str, Any]:
         remaining = MAX_LLM_CALLS_PER_JOURNEY - llm_calls_used(state)
+        attempts = min(MAX_ATTEMPTS, remaining)
         outcome = generate_design(
-            state, registry, deps.designer, attempts=min(MAX_ATTEMPTS, remaining)
+            state,
+            registry,
+            deps.designer,
+            attempts=attempts,
+            outage_retries=min(MAX_OUTAGE_RETRIES, remaining - attempts),
         )
         return {
             "design": outcome.design,

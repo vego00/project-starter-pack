@@ -10,7 +10,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Protocol
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.journey.design import (
     MAX_ITEMS,
@@ -38,6 +38,10 @@ from app.registry.loader import Registry
 logger = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 2  # One draft and one automatic correction, from the approved plan's starting value.
+MAX_OUTAGE_RETRIES = (
+    1  # A provider failure says nothing about the draft, so it spares a correction.
+)
+MAX_REPORTED_PROBLEMS = 10
 FAILED_MESSAGE = "맞춤 설계를 만들지 못해 참고 템플릿을 보여드려요. 확정할 수 없는 예시예요."
 
 
@@ -233,6 +237,14 @@ def _errors(design: ServiceDesign) -> list[str]:
     return [issue.message for issue in design.validation or [] if issue.severity == "error"]
 
 
+def _contract_problems(exc: ValidationError) -> list[str]:
+    """Names what broke the contract so a correction has a target. Excludes the input values."""
+    return [
+        f"{'.'.join(map(str, error['loc'])) or '전체'}: {error['msg']}"
+        for error in exc.errors(include_input=False, include_url=False)[:MAX_REPORTED_PROBLEMS]
+    ]
+
+
 def _failed(state: JourneyState, constraints: DesignConstraints, **usage) -> DesignOutcome:
     return DesignOutcome(
         design=DesignState(
@@ -248,6 +260,7 @@ def generate_design(
     designer: Designer | None,
     *,
     attempts: int = MAX_ATTEMPTS,
+    outage_retries: int = MAX_OUTAGE_RETRIES,
 ) -> DesignOutcome:
     constraints = derive_design_constraints(state, registry)
     if designer is None or attempts < 1:
@@ -255,7 +268,7 @@ def generate_design(
 
     problems: list[str] = []
     usage: dict = {}
-    for _ in range(attempts):
+    while attempts > 0:
         try:
             attempt = designer.draft(state, constraints, problems)
             usage = {
@@ -276,12 +289,29 @@ def generate_design(
                     prompt_version=DESIGN_VERSION,
                 ),
             )
-        except Exception as exc:  # noqa: BLE001 - model boundary; the prompt holds user text
-            logger.error("Design draft failed type=%s", type(exc).__name__)
-            problems = [
-                "이전 출력이 계약 형식에 맞지 않았어요. 형식과 필수 항목을 지켜 다시 쓰세요."
-            ]
+        except ValidationError as exc:
+            attempts -= 1
+            problems = _contract_problems(exc)
+            logger.warning(
+                "Design draft broke the contract fields=%s",
+                [
+                    ".".join(map(str, error["loc"])) + ":" + error["type"]
+                    for error in exc.errors(include_input=False, include_url=False)
+                ],
+            )
             continue
+        except Exception as exc:  # noqa: BLE001 - model boundary; the prompt holds user text
+            if outage_retries > 0:
+                outage_retries -= 1
+            else:
+                attempts -= 1
+            logger.error(
+                "Design call failed type=%s status=%s",
+                type(exc).__name__,
+                getattr(exc, "code", None),
+            )
+            continue
+        attempts -= 1
         problems = _errors(design)
         if not problems:
             return DesignOutcome(
