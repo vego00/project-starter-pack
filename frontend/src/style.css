@@ -13,10 +13,13 @@
   font-size: 14px;
   line-height: 1.6;
   --line: #e0e3ec;
-  --muted: #667089;
+  --control-line: #868da3;
+  --muted: #616b84;
   --primary: #6257ce;
   --primary-dark: #5146bc;
+  --primary-pressed: #453ba6;
   --tint: #f2f1ff;
+  --tint-pressed: #e3e1ff;
   --warn-bg: #fff6e6;
   --warn-text: #7a4f00;
   --danger-bg: #fdecec;
@@ -37,7 +40,9 @@ select {
 }
 button {
   cursor: pointer;
-  border: 1px solid var(--line);
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid var(--control-line);
   border-radius: 8px;
   background: white;
   padding: 9px 13px;
@@ -45,6 +50,10 @@ button {
 }
 button:hover:not(:disabled) {
   background: var(--tint);
+}
+button:active:not(:disabled) {
+  background: var(--tint-pressed);
+  transform: translateY(1px);
 }
 button:disabled {
   opacity: 0.5;
@@ -54,32 +63,39 @@ button:focus-visible,
 textarea:focus-visible,
 input:focus-visible,
 select:focus-visible {
-  outline: 3px solid #9690e9;
+  outline: 3px solid var(--primary);
   outline-offset: 2px;
 }
 a.button {
-  display: inline-block;
-  border: 1px solid var(--line);
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  border: 1px solid var(--control-line);
   border-radius: 8px;
   padding: 9px 13px;
   text-decoration: none;
 }
+a.button:active {
+  transform: translateY(1px);
+}
 a.button:focus-visible {
-  outline: 3px solid #9690e9;
+  outline: 3px solid var(--primary);
   outline-offset: 2px;
 }
 a.primary,
-button.primary,
-button.choose {
+button.primary {
   background: var(--primary);
   border-color: var(--primary);
   color: white;
   font-weight: 600;
 }
 a.primary:hover,
-button.primary:hover:not(:disabled),
-button.choose:hover:not(:disabled) {
+button.primary:hover:not(:disabled) {
   background: var(--primary-dark);
+}
+a.primary:active,
+button.primary:active:not(:disabled) {
+  background: var(--primary-pressed);
 }
 button.link {
   border: 0;
@@ -91,10 +107,23 @@ textarea,
 input,
 select {
   width: 100%;
-  border: 1px solid var(--line);
+  border: 1px solid var(--control-line);
   border-radius: 8px;
   background: white;
   padding: 9px 11px;
+}
+input,
+select {
+  min-height: 44px;
+}
+@media (prefers-reduced-motion: reduce) {
+  button {
+    transition: none;
+  }
+  button:active:not(:disabled),
+  a.button:active {
+    transform: none;
+  }
 }
 label {
   display: block;
@@ -230,6 +259,9 @@ ul {
 .recommendation p {
   margin: 4px 0 0;
 }
+.recommendation .accept {
+  margin-top: 10px;
+}
 .options {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
@@ -250,6 +282,9 @@ ul {
 }
 .option > p:not(.note) {
   margin: 6px 0 0;
+}
+.option.recommended {
+  border-color: var(--primary);
 }
 .option.blocked {
   background: #fafbfc;

@@ -50,14 +50,14 @@ def test_lists_every_decision_in_journey_order():
 
     positions = [document.index(card.question) for card in REGISTRY.cards]
     assert positions == sorted(positions)
-    assert "승인 interrupt (직접 선택)" in document
+    assert "승인 후 실행 (직접 선택)" in document
 
 
 def test_records_tradeoffs_and_rejected_options():
     document = compose()
 
     assert "**감수할 점:** 승인 대기와 거절 후 흐름까지 설계해야 합니다" in document
-    assert "**고르지 않은 선택지:** 없음, 질문 interrupt" in document
+    assert "**고르지 않은 선택지:** 없음, 실행 중 질문" in document
 
 
 def test_says_who_decided():

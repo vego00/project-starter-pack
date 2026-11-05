@@ -100,7 +100,7 @@ def test_all_cards_to_completion_with_reload_and_restart(page: Page):
     expect(page.get_by_text("내 프로젝트를 분석한 결과는 아니에요")).to_be_visible()
     shot(page, "3-card")
     choose(page, "에이전트를 어떤 구조로 구성할까요?", "고정 파이프라인")
-    choose(page, "에이전트가 실행 중간에 사람의 확인을 받아야 하나요?", "승인 interrupt")
+    choose(page, "에이전트가 실행 중간에 사람의 확인을 받아야 하나요?", "승인 후 실행")
     choose(page, "어떤 경로로 LLM을 사용할까요?", "Gemini")
 
     page.reload()
@@ -134,7 +134,7 @@ def test_all_cards_to_completion_with_reload_and_restart(page: Page):
     assert document.startswith("# 프로젝트 결정 요약")
     assert IDEA in document
     assert GOAL in document
-    assert "승인 interrupt (직접 선택)" in document
+    assert "승인 후 실행 (직접 선택)" in document
 
 
 def test_questions_defer_and_reopen(page: Page):

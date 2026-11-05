@@ -765,3 +765,53 @@ describe("issues and completion", () => {
     });
   });
 });
+
+describe("screen changes and the main action", () => {
+  it("moves focus to the heading of a new screen", async () => {
+    await startWith(
+      journey({
+        prompt: {
+          type: "gcb",
+          draft: { goal: "", context: "", boundary: "" },
+          source: "none",
+          error: null,
+        },
+      }),
+    );
+    const heading = await screen.findByRole("heading", {
+      name: "프로젝트의 목표와 기준을 정리해요",
+    });
+    expect(heading).toHaveFocus();
+  });
+
+  it("moves focus when the journey completes", async () => {
+    await startWith(
+      journey({
+        status: "completed",
+        prompt: null,
+        cards: cards("decided", "decided"),
+      }),
+    );
+    const heading = await screen.findByRole("heading", {
+      name: "모든 결정을 마쳤어요",
+    });
+    expect(heading).toHaveFocus();
+  });
+
+  it("makes accepting the recommendation the one primary action", async () => {
+    await startWith(journey());
+    const accept = await screen.findByRole("button", { name: "추천대로 진행" });
+
+    expect(accept).toHaveClass("primary");
+    expect(screen.getByRole("button", { name: "없음 선택" })).not.toHaveClass(
+      "primary",
+    );
+  });
+
+  it("does not show the internal problem codes", async () => {
+    await startWith(journey());
+
+    await screen.findByRole("button", { name: "추천대로 진행" });
+    expect(screen.queryByText(/DiV/)).not.toBeInTheDocument();
+  });
+});

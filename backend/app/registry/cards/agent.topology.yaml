@@ -44,6 +44,6 @@ signals:
   hierarchical: [에이전트가 많고 담당 팀이 나뉘어 있음]
 default_recommendation:
   option: pipeline
-  reason: 동적 분기가 필요하다는 신호가 없으면 재현하기 쉬운 고정 흐름에서 시작합니다. (DiV P1)
+  reason: 동적 분기가 필요하다는 신호가 없으면 재현하기 쉬운 고정 흐름에서 시작합니다.
 learning_refs: [multi-agent-architecture, langgraph]
 div_refs: [P1]
