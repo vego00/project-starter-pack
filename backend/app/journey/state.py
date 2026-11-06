@@ -83,6 +83,13 @@ class Decision(BaseModel):
     at: datetime
 
 
+class SkippedCard(BaseModel):
+    """A card the decider judged not needed for this project, so it is not asked (ADR-018)."""
+
+    confidence: float
+    decider: str
+
+
 class Recommendation(BaseModel):
     """`option_id=None` means "비교 필요": no recommendation is forced below the threshold."""
 
@@ -171,6 +178,8 @@ class JourneyState(BaseModel):
     implied: dict[CardId, Decision] = {}
     pending_cards: list[CardId] = []
     deferred_cards: list[CardId] = []
+    # Set once after clarify. A rule on a decided card can still bring one back (`pending_cards`).
+    skipped_cards: dict[CardId, SkippedCard] = {}
     blocked_options: dict[CardId, dict[str, str]] = {}
     conflicts: list[Conflict] = []
     current_card_id: CardId | None = None
@@ -191,6 +200,11 @@ class JourneyState(BaseModel):
     @property
     def all_decisions(self) -> dict[CardId, Decision]:
         return {**self.decisions, **self.implied}
+
+    @property
+    def skipped(self) -> set[CardId]:
+        """Skipped cards that stay out: not brought back by a rule and not decided."""
+        return set(self.skipped_cards) - set(self.pending_cards) - set(self.all_decisions)
 
 
 class _Action(BaseModel):

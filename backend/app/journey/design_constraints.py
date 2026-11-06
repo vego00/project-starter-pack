@@ -27,6 +27,8 @@ CONSTRAINING_CARDS = {
     "agent.topology",
     "agent.hitl",
     "model.provider",
+    "data.primary_db",
+    "data.vector_store",
     "data.checkpointer",
     "backend.execution",
 }
@@ -53,6 +55,9 @@ class TargetServiceConstraints(_Record):
     allowed_providers: list[str] | None = None
     resumable: bool | None = None
     execution: str | None = None
+    # "none" means the design must not add that store or the tools that read and write it.
+    primary_db: str | None = None
+    vector_store: str | None = None
 
 
 class StarterGuarantees(_Record):
@@ -76,9 +81,10 @@ class DesignConstraints(_Record):
     out_of_scope: list[OutOfScopeCard]
 
 
-def _snapshot(card: DecisionCard, decision: Decision | None) -> DecisionRef:
+def _snapshot(card: DecisionCard, decision: Decision | None, skipped: bool) -> DecisionRef:
     if decision is None:
-        return DecisionRef(card_id=card.card_id, card_version=card.version, by="deferred")
+        by = "skipped" if skipped else "deferred"
+        return DecisionRef(card_id=card.card_id, card_version=card.version, by=by)
     return DecisionRef(
         card_id=decision.card_id,
         card_version=decision.card_version,
@@ -126,13 +132,15 @@ def derive_design_constraints(state: JourneyState, registry: Registry) -> Design
     unknowns: list[Unknown] = []
     warnings = [issue.message for issue in state.review_issues if issue.severity == "warning"]
 
+    skipped = state.skipped
     for card in registry.cards:
         decision = decisions.get(card.card_id)
-        refs.append(_snapshot(card, decision))
+        refs.append(_snapshot(card, decision, card.card_id in skipped))
         blocks = card.card_id in BLOCKING_CARDS
         constrains = card.card_id in CONSTRAINING_CARDS
         if decision is None:
-            if constrains:
+            # A skipped card was judged not needed: it is recorded, not left as an open question.
+            if constrains and card.card_id not in skipped:
                 text = f"아직 정하지 않은 결정: {card.title}"
                 unknowns.append(Unknown(text=text, blocks_confirmation=blocks))
             continue
@@ -159,6 +167,8 @@ def derive_design_constraints(state: JourneyState, registry: Registry) -> Design
         allowed_providers=None if provider is None else [provider],
         resumable=RESUMABLE.get(usable.get("data.checkpointer", "")),
         execution=usable.get("backend.execution"),
+        primary_db=usable.get("data.primary_db"),
+        vector_store=usable.get("data.vector_store"),
     )
     if usable.get("data.checkpointer") == "other":
         warnings.append("직접 지정한 저장소가 중단 후 재개를 지원하는지 확인하세요.")

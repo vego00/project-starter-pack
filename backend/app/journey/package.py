@@ -21,6 +21,8 @@ ZIP_TIME = (2026, 1, 1, 0, 0, 0)
 
 INFRA_CARDS = (
     "model.provider",
+    "data.primary_db",
+    "data.vector_store",
     "data.checkpointer",
     "backend.execution",
     "devops.orchestration",
@@ -162,8 +164,13 @@ def _chosen(design: ServiceDesign, registry: Registry) -> dict[str, str | None]:
     return {ref.card_id: ref.option_id for ref in design.provenance.decisions}
 
 
+def _skipped(design: ServiceDesign) -> set[str]:
+    return {ref.card_id for ref in design.provenance.decisions if ref.by == "skipped"}
+
+
 def _infrastructure_doc(design: ServiceDesign, registry: Registry) -> str:
     chosen = _chosen(design, registry)
+    skipped = _skipped(design)
     lines = [
         "# 인프라 설계",
         "",
@@ -178,6 +185,9 @@ def _infrastructure_doc(design: ServiceDesign, registry: Registry) -> str:
         card = registry.card(card_id)
         option_id = chosen.get(card_id)
         option = card.option(option_id) if option_id else None
+        if option is None and card_id in skipped:
+            lines += [f"### {card.title}: 해당 없음", "", "- 필요 없다고 판단해 묻지 않았어요.", ""]
+            continue
         if option is None:
             lines += [f"### {card.title}", "", "- 아직 정하지 않았어요. 먼저 정하세요.", ""]
             continue

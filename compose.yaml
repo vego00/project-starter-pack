@@ -31,6 +31,7 @@ services:
       APP_OPENCODE_API_KEY: ${APP_OPENCODE_API_KEY:-}
       APP_TYPESAFE_API_KEY: ${APP_TYPESAFE_API_KEY:-}
       APP_EVIDENCE_SCOPE: ${APP_EVIDENCE_SCOPE:-none}
+      APP_CARD_SELECTION: ${APP_CARD_SELECTION:-true}
       APP_DATABASE_URL: postgresql://starter:${POSTGRES_PASSWORD:-starter-local-only}@postgres:5432/starter
     depends_on:
       postgres:

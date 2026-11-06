@@ -746,7 +746,9 @@ describe("issues and completion", () => {
           status: "failed",
           source: "template",
           error: "맞춤 설계를 만들지 못했어요.",
-          nodes: [{ id: "worker", kind: "agent", responsibility: "초안을 쓴다" }],
+          nodes: [
+            { id: "worker", kind: "agent", responsibility: "초안을 쓴다" },
+          ],
           first_task: "뼈대 연결하기",
           first_task_check: "결과가 돌아온다",
           unknowns: ["아직 정하지 않은 결정: Agent 구조"],
@@ -829,6 +831,48 @@ describe("issues and completion", () => {
 
     await screen.findByRole("heading", { name: "모든 결정을 마쳤어요" });
     expect(screen.queryByRole("button", { name: /다시 고르기/ })).toBeNull();
+  });
+
+  it("shows a skipped card as not applying and puts it back", async () => {
+    const [current, skipped] = cards("current", "skipped");
+    const { user, mock } = await startWith(
+      journey({ cards: [current, { ...skipped, skip_confidence: 0.92 }] }),
+    );
+
+    const rail = await screen.findByRole("complementary", {
+      name: "결정 진행 상황",
+    });
+    expect(rail).toHaveTextContent("해당 없음 · 확신도 92%");
+    expect(rail).toHaveTextContent("0 / 1");
+    await user.click(
+      screen.getByRole("button", { name: "cloud.target 제목 다시 넣기" }),
+    );
+
+    expect(bodyOf(mock.mock.calls[1]).action).toEqual({
+      action: "reopen",
+      card_id: "cloud.target",
+    });
+  });
+
+  it("puts a skipped card back after the journey finished", async () => {
+    const { user, mock } = await startWith(
+      journey({
+        status: "completed",
+        prompt: null,
+        cards: cards("decided", "skipped"),
+        can_reopen: true,
+      }),
+    );
+
+    await screen.findByRole("heading", { name: "모든 결정을 마쳤어요" });
+    await user.click(
+      screen.getByRole("button", { name: "cloud.target 제목 다시 넣기" }),
+    );
+
+    expect(bodyOf(mock.mock.calls[1]).action).toEqual({
+      action: "reopen",
+      card_id: "cloud.target",
+    });
   });
 });
 

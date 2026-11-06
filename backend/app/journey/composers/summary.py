@@ -103,6 +103,16 @@ def compose_summary(
         lines += [""]
         components += card.artifacts.get(decision.option_id, ())
 
+    skipped = [card for card in registry.cards if card.card_id in state.skipped]
+    if skipped:
+        lines += ["## 해당 없음", ""]
+        lines += [
+            "이 프로젝트에는 필요 없다고 판단해 묻지 않은 결정이에요. 필요하면 다시 넣으세요.",
+            "",
+        ]
+        lines += [f"- {card.title}: {card.question}" for card in skipped]
+        lines += [""]
+
     lines += ["## 확인할 점", ""]
     warnings = [issue.message for issue in state.review_issues if issue.severity == "warning"]
     lines += [f"- {_inline(message)}" for message in warnings] or [

@@ -44,11 +44,13 @@ class CardStatus(BaseModel):
     layer: str
     title: str
     question: str
-    state: Literal["decided", "implied", "deferred", "current", "pending"]
+    state: Literal["decided", "implied", "deferred", "current", "pending", "skipped"]
     option_id: str | None = None
     option_name: str | None = None
     by: Literal["user", "recommended", "implied"] | None = None
     rationale: str = ""
+    # How sure the decider was that a skipped card is not needed.
+    skip_confidence: float | None = None
 
 
 class DesignNodeView(BaseModel):
@@ -197,6 +199,8 @@ class JourneyService:
 
     def _check_reopen(self, state: JourneyState, action: ReopenAction) -> None:
         """Rejects before the graph runs, so a finished journey never shows a refusal as a step."""
+        if action.card_id in state.skipped:
+            return
         if action.card_id in state.implied:
             raise JourneyError(
                 409,
@@ -227,6 +231,7 @@ class JourneyService:
 
     def _card_statuses(self, state: JourneyState) -> list[CardStatus]:
         decided: dict[str, Decision] = state.all_decisions
+        skipped = state.skipped
         statuses = []
         for card in self._registry.cards:
             decision = decided.get(card.card_id)
@@ -237,6 +242,8 @@ class JourneyService:
                 kind = "current"
             elif card.card_id in state.deferred_cards:
                 kind = "deferred"
+            elif card.card_id in skipped:
+                kind = "skipped"
             else:
                 kind = "pending"
             statuses.append(
@@ -250,6 +257,9 @@ class JourneyService:
                     option_name=option.name if option else None,
                     by=decision.by if decision else None,
                     rationale=decision.rationale if decision else "",
+                    skip_confidence=(
+                        state.skipped_cards[card.card_id].confidence if kind == "skipped" else None
+                    ),
                 )
             )
         return statuses
