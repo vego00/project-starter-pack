@@ -468,7 +468,10 @@ def test_warning_is_kept_without_stopping_the_journey():
     state = journey.state
     assert journey.prompt is None
     assert state.status == "completed"
-    assert [issue.rule_id for issue in state.review_issues] == ["self-serving-on-cloud"]
+    assert {issue.rule_id for issue in state.review_issues} == {
+        "self-serving-on-cloud",
+        "api-provider-with-self-serving",
+    }
 
 
 # Persistence and design guarantees

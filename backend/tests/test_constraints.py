@@ -86,6 +86,18 @@ def test_warning_conflict_reports_without_blocking(registry):
     assert [c.severity for c in result.conflicts] == ["warning"]
 
 
+def test_api_provider_with_self_serving_is_a_warning(registry):
+    result = evaluate(registry, {"model.provider": "gemini", "mlops.model_serving": "ollama"})
+    assert rule_ids(result.conflicts) == {"api-provider-with-self-serving"}
+    assert [c.severity for c in result.conflicts] == ["warning"]
+    assert "mlops.model_serving" not in result.blocked
+
+
+def test_api_provider_with_external_serving_is_fine(registry):
+    result = evaluate(registry, {"model.provider": "gemini", "mlops.model_serving": "external_api"})
+    assert result.conflicts == []
+
+
 # implies
 def test_implies_decides_the_card_and_removes_it_from_pending(registry):
     result = evaluate(registry, {"model.provider": "ollama"})
