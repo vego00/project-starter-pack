@@ -129,9 +129,7 @@ def evaluate(registry: Registry, chosen: Mapping[str, str]) -> ConstraintResult:
 def revived(registry: Registry, effective: Mapping[str, str], skipped: Collection[str]) -> set[str]:
     """Skipped cards that a rule on decided cards still points at, so they must be asked (ADR-018).
 
-    A requires rule whose conditions all hold points at the card it requires. An error conflict
-    whose decided conditions all hold points at its undecided cards. Warnings do not bring a card
-    back, and neither does a rule that only depends on the skipped card's own choice.
+    Only requires rules and error conflicts whose decided conditions all hold count; warnings do not.
     """
     skipped = set(skipped) - set(effective)
     back: set[str] = set()
