@@ -1,0 +1,2 @@
+# Raw results stay local; only summary.md files are kept.
+*.json

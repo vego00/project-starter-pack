@@ -1,0 +1,28 @@
+# Copy of a fixed evaluation case. The source is the Notion page in `notion`; change it there
+# first. `spec` holds the confirmed GCB text from `spec_from_journey`, so a run skips drafting.
+# Cards missing from `selection` take the recommendation, else the card's default.
+id: C1
+title: DiV 처음 문제 · 아이디어 메모에서 기획서까지
+status: 확정
+notion: https://app.notion.com/p/41096199efb381f8ae0ad455df777fa4
+copied_on: '2026-11-06'
+spec_from_journey: 46efedfc-972d-4808-a995-3e27d0eaa24f
+spec:
+  idea: 프로젝트 아이디어가 떠오를 때마다 자연어로 남기고 싶습니다. 지금은 생각을 짧게 적어 둬도, 나중에 어떤 아이디어였는지 찾아서 기획서 작성을 이어가기 어렵습니다. 적어
+    둔 아이디어의 핵심을 알아보고 다시 꺼내 쓸 수 있게 정리하고, 그중 하나를 골라 다른 사람이 읽고 이해할 수 있는 기획서 초안으로 발전시키고 싶습니다.
+  goal: 아이디어를 기록하고 핵심을 파악해 나중에 다시 꺼내 쓸 수 있으며, 그중 하나를 골라 다른 사람이 읽고 이해할 수 있는 기획서 초안으로 발전시킬 수 있는 상태
+  context: 프로젝트 아이디어가 떠오를 때마다 자연어로 남기고 싶으나, 짧게 적어 둔 생각을 나중에 다시 찾아 기획서 작성을 이어가기 어려운 배경이 있습니다.
+  boundary: 적어 둔 아이디어의 핵심을 알아보고 정리할 수 있어야 하며, 선택한 아이디어를 다른 사람이 읽고 이해할 수 있는 기획서 초안으로 발전시킬 수 있어야 합니다.
+selection:
+  agent.topology: supervisor
+  agent.hitl: none
+  model.provider: upstage
+  data.checkpointer: memory
+  backend.execution: sync
+  devops.orchestration: none
+  mlops.model_serving: ollama
+  cloud.target: local
+must_ask:
+- data.primary_db
+- data.vector_store
+may_skip: []

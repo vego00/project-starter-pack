@@ -1,0 +1,25 @@
+# Copy of a fixed evaluation case. The source is the Notion page in `notion`; change it there
+# first. `spec` holds the confirmed GCB text from `spec_from_journey`, so a run skips drafting.
+# Cards missing from `selection` take the recommendation, else the card's default.
+id: C3
+title: 강의 자료 질의응답 · 근거와 출처
+status: 초안
+notion: https://app.notion.com/p/41096199efb381b7820bef6abf49a27b
+copied_on: '2026-11-06'
+spec_from_journey: 7c0790ee-418f-4877-9a95-45df4b9443ab
+spec:
+  idea: 부트캠프 강의 자료를 찾아 질문에 답하고 출처를 알려주는 멀티 에이전트 서비스를 만들고 싶어요.
+  goal: 부트캠프 강의 자료를 바탕으로 질문에 답하고 출처를 확인할 수 있는 상태
+  context: 부트캠프 강의 자료에서 필요한 정보를 찾아 질문에 답하고 출처를 안내하는 서비스가 필요합니다.
+selection:
+  agent.topology: pipeline
+  agent.hitl: none
+  model.provider: gemini
+  data.checkpointer: memory
+  backend.execution: sync
+  devops.orchestration: none
+  mlops.model_serving: external_api
+  cloud.target: local
+must_ask:
+- data.vector_store
+may_skip: []
