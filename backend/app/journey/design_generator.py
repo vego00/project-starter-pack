@@ -337,5 +337,6 @@ def _generate(
             return DesignOutcome(
                 design=DesignState(status="review_required", current=design), **usage
             )
-        logger.warning("Design failed validation errors=%d", len(problems))
+        rules = sorted({i.rule_id for i in design.validation or [] if i.severity == "error"})
+        logger.warning("Design failed validation errors=%d rules=%s", len(problems), rules)
     return _failed(state, constraints, **usage)
