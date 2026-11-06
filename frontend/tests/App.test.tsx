@@ -799,6 +799,20 @@ describe("issues and completion", () => {
     });
   });
 
+  it("reopens a decided card by clicking anywhere on its row", async () => {
+    const { user, mock } = await startWith(
+      journey({ cards: cards("decided", "pending") }),
+    );
+
+    await user.click(await screen.findByText("agent.hitl 제목"));
+
+    expect(bodyOf(mock.mock.calls[1]).action).toEqual({
+      action: "reopen",
+      card_id: "agent.hitl",
+    });
+    expect(screen.queryByRole("button", { name: /cloud.target/ })).toBeNull();
+  });
+
   it("reopens a decision after the journey finished", async () => {
     const { user, mock } = await startWith(
       journey({

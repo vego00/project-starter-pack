@@ -26,6 +26,11 @@ const BY_LABEL = {
   recommended: "추천대로",
   implied: "자동 확정",
 };
+// Rows a person can go back to; the whole row reopens the card.
+const REOPEN_LABEL: Partial<Record<string, string>> = {
+  decided: "다시 고르기",
+  skipped: "다시 넣기",
+};
 const STATE_LABEL = {
   deferred: "나중에",
   current: "지금 결정",
@@ -650,7 +655,7 @@ export function CompletedView({
       </ol>
       {journey.can_reopen && (
         <p className="muted">
-          바꾸고 싶은 결정이 있으면 왼쪽 목록에서 다시 고르기를 누르세요. 바꾼
+          바꾸고 싶은 결정이 있으면 진행 목록에서 그 카드를 누르세요. 바꾼
           결정에 맞춰 설계와 빌드 묶음을 다시 만들어요.
         </p>
       )}
@@ -697,13 +702,9 @@ export function ProgressRail({
       </p>
       <progress value={done} max={total} aria-hidden />
       <ol>
-        {journey.cards.map((card) => (
-          <li
-            key={card.card_id}
-            className={`step ${card.state}`}
-            aria-current={card.state === "current" ? "step" : undefined}
-          >
-            <span className="step-layer">{card.title}</span>
+        {journey.cards.map((card) => {
+          const action = canReopen ? REOPEN_LABEL[card.state] : undefined;
+          const value = (
             <span className="step-value">
               {card.option_name ??
                 STATE_LABEL[card.state as keyof typeof STATE_LABEL]}
@@ -712,28 +713,39 @@ export function ProgressRail({
                 card.skip_confidence != null &&
                 ` · 확신도 ${Math.round(card.skip_confidence * 100)}%`}
             </span>
-            {canReopen && card.state === "skipped" && (
-              <button
-                className="link"
-                disabled={busy}
-                aria-label={`${card.title} 다시 넣기`}
-                onClick={() => act({ action: "reopen", card_id: card.card_id })}
-              >
-                다시 넣기
-              </button>
-            )}
-            {canReopen && card.state === "decided" && (
-              <button
-                className="link"
-                disabled={busy}
-                aria-label={`${card.title} 다시 고르기`}
-                onClick={() => act({ action: "reopen", card_id: card.card_id })}
-              >
-                다시 고르기
-              </button>
-            )}
-          </li>
-        ))}
+          );
+          return (
+            <li
+              key={card.card_id}
+              className={`step ${card.state}${action ? " clickable" : ""}`}
+              aria-current={card.state === "current" ? "step" : undefined}
+            >
+              {action ? (
+                <button
+                  className="step-button"
+                  disabled={busy}
+                  aria-label={`${card.title} ${action}`}
+                  onClick={() =>
+                    act({ action: "reopen", card_id: card.card_id })
+                  }
+                >
+                  <span className="step-head">
+                    <span className="step-layer">{card.title}</span>
+                    <span className="step-action" aria-hidden>
+                      {action}
+                    </span>
+                  </span>
+                  {value}
+                </button>
+              ) : (
+                <>
+                  <span className="step-layer">{card.title}</span>
+                  {value}
+                </>
+              )}
+            </li>
+          );
+        })}
       </ol>
     </aside>
   );

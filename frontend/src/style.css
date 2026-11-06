@@ -409,6 +409,30 @@ ul {
   background: var(--tint);
   border-radius: 0 6px 6px 0;
 }
+.step.clickable {
+  padding: 0;
+}
+.step-button {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  border: 0;
+  border-radius: 0 6px 6px 0;
+  background: none;
+  padding: 4px 8px 8px 10px;
+  text-align: left;
+}
+.step-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.step-action {
+  flex: none;
+  color: var(--primary);
+  font-size: 0.85rem;
+}
 .step-layer {
   display: block;
   font-weight: 600;
