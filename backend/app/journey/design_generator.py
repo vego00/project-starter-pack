@@ -250,16 +250,42 @@ def template_design(state: JourneyState, constraints: DesignConstraints) -> Serv
     )
 
 
+# How to fix the rules drafts broke most in fixed-case runs. Sent with the problem on a retry.
+FIX_HINTS = {
+    "loop.no_limit": "순환하는 노드를 모두 loop_limits의 node_ids에 넣고 max_iterations를 적으세요",
+    "loop.no_way_out": "on_exceeded를 그 순환에 들어 있지 않은 노드로 바꾸세요",
+    "permission.write_without_approval": (
+        "쓰기 도구를 entry에서 오는 모든 길이 사람 확인 노드를 지난 뒤의 노드로 옮기세요"
+    ),
+    "decision.too_few_agents": "권한, 컨텍스트, 모델 능력이 다른 일을 찾아 agent 노드를 나누세요",
+    "owner.writer_has_no_output": "writers에는 그 이름을 outputs로 내보내는 노드만 넣으세요",
+    "owner.reader_has_no_input": "readers에는 그 이름을 inputs로 받는 노드만 넣으세요",
+    "owner.unlisted_writer": "그 이름을 내보내는 노드를 모두 state_fields의 writers에 넣으세요",
+    "io.unconnected": "앞선 노드의 outputs에 그 이름을 넣거나 그 입력을 빼세요",
+}
+
+
 def _errors(design: ServiceDesign) -> list[str]:
-    return [issue.message for issue in design.validation or [] if issue.severity == "error"]
+    return [
+        f"{issue.message} (고치는 법: {FIX_HINTS[issue.rule_id]})"
+        if issue.rule_id in FIX_HINTS
+        else issue.message
+        for issue in design.validation or []
+        if issue.severity == "error"
+    ]
 
 
 def _contract_problems(exc: ValidationError) -> list[str]:
     """Names what broke the contract so a correction has a target. Excludes the input values."""
-    return [
-        f"{'.'.join(map(str, error['loc'])) or '전체'}: {error['msg']}"
-        for error in exc.errors(include_input=False, include_url=False)[:MAX_REPORTED_PROBLEMS]
-    ]
+    problems = []
+    for error in exc.errors(include_input=False, include_url=False)[:MAX_REPORTED_PROBLEMS]:
+        problem = f"{'.'.join(map(str, error['loc'])) or '전체'}: {error['msg']}"
+        if error["loc"][-1:] == ("writers",) and error["type"] == "too_short":
+            problem += (
+                " (고치는 법: 그 이름을 내보내는 노드를 writers에 넣거나 그 상태 필드를 빼세요)"
+            )
+        problems.append(problem)
+    return problems
 
 
 def _failed(state: JourneyState, constraints: DesignConstraints, **usage) -> DesignOutcome:

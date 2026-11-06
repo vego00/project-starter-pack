@@ -158,6 +158,7 @@ def test_validation_errors_go_back_to_the_model_once():
 
     assert outcome.design.status == "review_required"
     assert any("에이전트" in problem for problem in designer.problems[1])
+    assert any("고치는 법: 권한" in problem for problem in designer.problems[1])
     assert outcome.input_tokens == 20
 
 
@@ -187,6 +188,7 @@ def test_a_broken_contract_tells_the_model_which_field_to_fix():
 
     assert outcome.design.status == "review_required"
     assert "state_fields.0.writers" in designer.problems[1][0]
+    assert "고치는 법" in designer.problems[1][0]
     assert "secret-idea" not in " ".join(designer.problems[1])
 
 
