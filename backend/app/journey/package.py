@@ -1,8 +1,9 @@
 """Builds the downloadable starter package. Deterministic: the same design gives the same files.
 
-Coding-agent files tell Claude Code or Codex how to build the service. `.claude/agents/` defines
-the agents that run inside it. Infrastructure stays in its own document because people do most of
-that work by hand.
+Coding-agent files tell Claude Code or Codex how to build the service; `.claude/` holds only those.
+`agents/` holds the instructions each agent node of the service reads at run time. It stays out of
+`.claude/agents/`, where Claude Code would load it as its own subagent (ADR-017 change 2).
+Infrastructure stays in its own document because people do most of that work by hand.
 """
 
 import io
@@ -250,6 +251,8 @@ def _build_doc(design: ServiceDesign, idea: str) -> str:
             f"- {DATA_RULE}",
             "- 설계에 없는 기능, 서비스, 의존성을 임의로 추가하지 않는다. 필요하면 먼저 묻는다.",
             "- 실행해 확인하지 않은 기능을 완료로 보고하지 않는다.",
+            "- `agents/`의 파일은 서비스의 에이전트 노드가 실행 중 읽는 지시문이다. "
+            "코딩 도구의 하위 에이전트로 등록하거나 부르지 않는다.",
             "",
         ]
     )
@@ -339,7 +342,7 @@ def build_package(design: ServiceDesign, registry: Registry, idea: str) -> dict[
     for node in design.nodes:
         if node.kind == "agent":
             name = _agent_name(node.id, used)
-            files[f".claude/agents/{name}.md"] = _agent_file(node, name)
+            files[f"agents/{name}.md"] = _agent_file(node, name)
     return files
 
 
