@@ -31,17 +31,20 @@ class _Record(BaseModel):
 
 
 class DecisionRef(_Record):
-    """A decision as it stood when the design was generated. `deferred` has no option yet."""
+    """A decision as it stood when the design was generated.
+
+    `deferred` has no option yet. `skipped` has none because the card was judged not needed.
+    """
 
     card_id: Short
     card_version: int = Field(ge=1)
     option_id: Short | None = None
-    by: Literal["user", "recommended", "implied", "deferred"]
+    by: Literal["user", "recommended", "implied", "deferred", "skipped"]
 
     @model_validator(mode="after")
     def _deferred_has_no_option(self):
-        if (self.by == "deferred") != (self.option_id is None):
-            raise ValueError("only a deferred decision has no option")
+        if (self.by in ("deferred", "skipped")) != (self.option_id is None):
+            raise ValueError("only a deferred or skipped decision has no option")
         return self
 
 

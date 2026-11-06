@@ -267,6 +267,7 @@ class JourneyDeps:
     drafter: GcbDrafter = field(default_factory=MockGcbDrafter)
     # None means no model: the journey ends with a reference template.
     designer: Designer | None = None
+    card_selection: bool = True
 
     @property
     def recommendations_are_mock(self) -> bool:
@@ -293,7 +294,9 @@ def build_deps(settings: Settings, registry: Registry) -> JourneyDeps:
     if settings.evidence_scope == "owner":
         retriever = CuratedRetriever(load_catalog(registry))
     if settings.provider != "gemini":
-        return JourneyDeps(decider=decider, retriever=retriever)
+        return JourneyDeps(
+            decider=decider, retriever=retriever, card_selection=settings.card_selection
+        )
     api_key = settings.gemini_api_key.get_secret_value()
     llm = GeminiLLM(api_key, settings.gemini_model)
     design_llm = GeminiLLM(
@@ -309,4 +312,5 @@ def build_deps(settings: Settings, registry: Registry) -> JourneyDeps:
         advisor=LLMAdvisor(llm, registry),
         responder=LLMResponder(llm, registry),
         designer=LLMDesigner(design_llm, registry),
+        card_selection=settings.card_selection,
     )

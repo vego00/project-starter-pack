@@ -16,13 +16,15 @@ from app.registry.loader import Registry
 
 RECURSION_LIMIT = 50  # Per run between two interrupts; a normal run takes far fewer steps.
 
-GATE_WRITES = {"decisions", "gate_outcome", "gate_error"}
+# Reopening a skipped card puts it back, so every gate may also write `skipped_cards`.
+GATE_WRITES = {"decisions", "skipped_cards", "gate_outcome", "gate_error"}
 NODE_WRITES: dict[str, set[str]] = {
     "gcb_drafter": {"gcb_draft"},
     "gcb_gate": {"gcb_answer", "gate_outcome", "gate_error"},
     "intake": {"project_spec"},
     "clarify_gate": {"clarify_passed"},
     "clarify_question": {"clarifications", "clarify_rounds"},
+    "card_selector": {"skipped_cards"},
     "constraint_engine": {"implied", "pending_cards", "conflicts", "blocked_options"},
     "controller": {"current_card_id"},
     "advisor": {"advice"},
@@ -82,7 +84,7 @@ def _after_gcb(state: JourneyState) -> str:
 
 
 def _after_clarify(state: JourneyState) -> str:
-    return "constraint_engine" if state.clarify_passed else "clarify_question"
+    return "card_selector" if state.clarify_passed else "clarify_question"
 
 
 def _after_engine(state: JourneyState) -> str:
@@ -116,9 +118,10 @@ def build_graph(registry: Registry, *, checkpointer: Checkpointer, deps: Journey
     graph.add_conditional_edges("gcb_gate", _after_gcb, ["gcb_gate", "intake"])
     graph.add_edge("intake", "clarify_gate")
     graph.add_conditional_edges(
-        "clarify_gate", _after_clarify, ["clarify_question", "constraint_engine"]
+        "clarify_gate", _after_clarify, ["clarify_question", "card_selector"]
     )
     graph.add_edge("clarify_question", "intake")
+    graph.add_edge("card_selector", "constraint_engine")
     graph.add_conditional_edges("constraint_engine", _after_engine, ["controller", "reviewer"])
     for preparer in ("advisor", "recommender", "retriever"):
         graph.add_edge("controller", preparer)

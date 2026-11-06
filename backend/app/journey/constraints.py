@@ -1,6 +1,6 @@
 """Constraint Engine: requires / implies / conflicts as pure, deterministic rules (no LLM)."""
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Collection, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Literal
 
@@ -124,6 +124,33 @@ def evaluate(registry: Registry, chosen: Mapping[str, str]) -> ConstraintResult:
 
     pending = [card_id for card_id in registry.card_ids if card_id not in effective]
     return ConstraintResult(implied, conflicts, blocked, pending)
+
+
+def revived(registry: Registry, effective: Mapping[str, str], skipped: Collection[str]) -> set[str]:
+    """Skipped cards that a rule on decided cards still points at, so they must be asked (ADR-018).
+
+    A requires rule whose conditions all hold points at the card it requires. An error conflict
+    whose decided conditions all hold points at its undecided cards. Warnings do not bring a card
+    back, and neither does a rule that only depends on the skipped card's own choice.
+    """
+    skipped = set(skipped) - set(effective)
+    back: set[str] = set()
+    for card in registry.cards:
+        for rule in card.requires:
+            target = rule.require.card
+            if target in skipped and all(c.matches(effective.get(c.card)) for c in rule.when):
+                back.add(target)
+        for rule in card.conflicts:
+            undecided = {c.card for c in rule.when if c.card not in effective}
+            decided = [c for c in rule.when if c.card in effective]
+            if (
+                rule.severity == "error"
+                and decided
+                and undecided <= skipped
+                and all(c.matches(effective[c.card]) for c in decided)
+            ):
+                back |= undecided
+    return back
 
 
 def preview(registry: Registry, chosen: Mapping[str, str], card_id: str, option_id: str) -> Impact:

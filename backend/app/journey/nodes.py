@@ -12,9 +12,10 @@ from langgraph.types import Command, interrupt
 from pydantic import ValidationError
 
 from app.journey.composers.summary import ARTIFACT_KEY, compose_summary
-from app.journey.constraints import evaluate, preview
+from app.journey.constraints import evaluate, preview, revived
 from app.journey.controller import next_card
-from app.journey.deciders.base import DeciderQuestion, judge
+from app.journey.deciders.base import DeciderQuestion, judge, judge_many
+from app.journey.design_constraints import BLOCKING_CARDS
 from app.journey.design_generator import MAX_ATTEMPTS, MAX_OUTAGE_RETRIES, generate_design
 from app.journey.services import JourneyDeps, llm_calls_used
 from app.journey.state import (
@@ -39,6 +40,7 @@ from app.journey.state import (
     Recommendation,
     ReopenAction,
     SelectAction,
+    SkippedCard,
 )
 from app.registry.loader import Registry
 from app.registry.schema import DecisionCard
@@ -46,6 +48,8 @@ from app.registry.schema import DecisionCard
 Node = Callable[[JourneyState], dict[str, Any]]
 
 RESUME_KEY = "value"
+# ADR-018 starting value, above the 0.7 recommendation gate. Not measured: tune on fixed cases.
+SKIP_CONFIDENCE = 0.85
 
 
 def resume_command(payload: Any) -> Command:
@@ -66,6 +70,10 @@ def _reject(message: str) -> dict[str, Any]:
 
 
 def _reopen(state: JourneyState, card_id: str) -> dict[str, Any]:
+    if card_id in state.skipped:
+        # Putting a skipped card back: it becomes pending and is asked like any other.
+        remaining = {k: v for k, v in state.skipped_cards.items() if k != card_id}
+        return {"skipped_cards": remaining, "gate_outcome": "advance", "gate_error": None}
     if card_id in state.implied:
         return _reject("자동으로 정해진 결정입니다. 이 결정을 만든 앞선 선택을 바꿔 주세요.")
     if card_id not in state.decisions:
@@ -81,6 +89,25 @@ def _progress(state: JourneyState, registry: Registry) -> dict[str, int]:
         "implied": len(state.implied),
         "deferred": sum(card_id in state.pending_cards for card_id in state.deferred_cards),
     }
+
+
+def _selection_question(card: DecisionCard) -> DeciderQuestion:
+    options = ", ".join(option.name for option in card.options)
+    return DeciderQuestion(
+        id=f"select.{card.card_id}",
+        text=(
+            f"이 프로젝트를 설계할 때 '{card.title}' 결정이 필요한가요? "
+            f"카드 질문: {card.question} 선택지: {options}"
+        ),
+        choices=("needed", "unneeded", "unknown"),
+        criteria={
+            "needed": "프로젝트에 이 결정이 다루는 기능이나 구성이 있거나 생길 수 있음",
+            "unneeded": "프로젝트 정보로 보아 이 결정이 다루는 기능이나 구성이 분명히 필요 없음",
+            "unknown": "주어진 정보로는 필요한지 판단할 수 없음",
+        },
+        # Asking is the safe side: a card is left out only on a confident "unneeded".
+        default="needed",
+    )
 
 
 def _recommendation_reason(card: DecisionCard, option_id: str, decider: str) -> str:
@@ -150,6 +177,23 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
         )
         return {"clarify_passed": verdict.answer == "yes", "_trace": verdict.trace()}
 
+    def card_selector(state: JourneyState) -> dict[str, Any]:
+        """Leaves out cards this project does not need (ADR-018). Any doubt asks the card."""
+        if not deps.card_selection:
+            return {"skipped_cards": {}}
+        # Cards that block confirming a design are always asked.
+        cards = [card for card in registry.cards if card.card_id not in BLOCKING_CARDS]
+        questions = {card.card_id: _selection_question(card) for card in cards}
+        verdicts, meta = judge_many(deps.decider, state, list(questions.values()))
+        skipped = {}
+        for card_id, question in questions.items():
+            verdict = verdicts[question.id]
+            if verdict.answer == "unneeded" and verdict.confidence >= SKIP_CONFIDENCE:
+                skipped[card_id] = SkippedCard(
+                    confidence=verdict.confidence, decider=verdict.decider
+                )
+        return {"skipped_cards": skipped, "_trace": meta}
+
     def clarify_question(state: JourneyState) -> dict[str, Any]:
         spec = state.project_spec
         fields = spec.missing_signals()[:MAX_QUESTIONS_PER_ROUND]
@@ -189,9 +233,12 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
                 rationale=choice.message,
                 at=datetime.now(UTC),
             )
+        effective = {**chosen, **{card_id: d.option_id for card_id, d in implied.items()}}
+        # Recomputed on every change, so a card comes back once a decision points at it.
+        out = set(state.skipped_cards) - revived(registry, effective, state.skipped_cards)
         return {
             "implied": implied,
-            "pending_cards": result.pending,
+            "pending_cards": [card_id for card_id in result.pending if card_id not in out],
             "conflicts": result.conflicts,
             "blocked_options": result.blocked,
         }
@@ -434,6 +481,7 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
         "intake": intake,
         "clarify_gate": clarify_gate,
         "clarify_question": clarify_question,
+        "card_selector": card_selector,
         "constraint_engine": constraint_engine,
         "controller": controller,
         "advisor": advisor,

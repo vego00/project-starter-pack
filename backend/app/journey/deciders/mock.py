@@ -1,7 +1,7 @@
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
-from app.journey.deciders.base import DeciderQuestion, DeciderResult
+from app.journey.deciders.base import DeciderBatch, DeciderQuestion, DeciderResult
 
 if TYPE_CHECKING:
     from app.journey.state import JourneyState
@@ -24,3 +24,11 @@ class MockDecider:
         if question.default is None:
             return DeciderResult(answer=question.choices[0], confidence=0.0)
         return DeciderResult(answer=question.default, confidence=0.9)
+
+    def decide_many(
+        self, state: "JourneyState", questions: Sequence[DeciderQuestion]
+    ) -> DeciderBatch:
+        """Same answers as `decide`. An override keyed by "batch" fails the whole request."""
+        if isinstance(failure := self._overrides.get("batch"), Exception):
+            raise failure
+        return DeciderBatch(results={q.id: self.decide(state, q) for q in questions})

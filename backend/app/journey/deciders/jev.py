@@ -1,13 +1,13 @@
 """Jev (TypeSafe AI) over either supported route. Both answer the same typed question."""
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 import httpx
 
-from app.journey.deciders.base import DeciderQuestion, DeciderResult
+from app.journey.deciders.base import DeciderBatch, DeciderQuestion, DeciderResult
 from app.journey.prompts import project_context
 from app.registry.loader import Registry
 
@@ -23,8 +23,8 @@ NONE_FITS_MEANING = "주어진 정보로는 어느 선택지도 분명히 맞다
 JevRouteName = Literal["opencode", "vercel", "typesafe"]
 
 
-def _parse_native(body: dict[str, Any]) -> DeciderResult:
-    answer = body["answers"][QUESTION_KEY]
+def _parse_native(body: dict[str, Any], key: str) -> DeciderResult:
+    answer = body["answers"][key]
     usage = body.get("usage", {})
     return DeciderResult(
         answer=answer["choice"],
@@ -35,8 +35,8 @@ def _parse_native(body: dict[str, Any]) -> DeciderResult:
     )
 
 
-def _parse_gateway(body: dict[str, Any]) -> DeciderResult:
-    answer = body["answers"][QUESTION_KEY]
+def _parse_gateway(body: dict[str, Any], key: str) -> DeciderResult:
+    answer = body["answers"][key]
     choice = answer["choice"]
     usage = body.get("usage", {})
     return DeciderResult(
@@ -54,7 +54,7 @@ class JevRoute:
     base_url: str
     path: str
     default_model: str
-    parse: Callable[[dict[str, Any]], DeciderResult]
+    parse: Callable[[dict[str, Any], str], DeciderResult]
     extra_body: dict[str, Any] = field(default_factory=dict)
 
 
@@ -103,7 +103,26 @@ class JevDecider:
         self._client = client or httpx.Client(base_url=self._route.base_url, timeout=TIMEOUT_S)
 
     def decide(self, state: "JourneyState", question: DeciderQuestion) -> DeciderResult:
-        criteria = {choice: question.criteria.get(choice) for choice in question.choices}
+        body = self._ask(state, {QUESTION_KEY: question})
+        return self._route.parse(body, QUESTION_KEY)
+
+    def decide_many(
+        self, state: "JourneyState", questions: Sequence[DeciderQuestion]
+    ) -> DeciderBatch:
+        """One request; the API judges each key separately. Keys are positions, not ids."""
+        keyed = {f"q{index}": question for index, question in enumerate(questions)}
+        body = self._ask(state, keyed)
+        results = {q.id: self._route.parse(body, key) for key, q in keyed.items()}
+        # Model and usage belong to the request, so every result carries the same values.
+        usage = next(iter(results.values()), DeciderResult(answer="", confidence=0))
+        return DeciderBatch(
+            results=results,
+            model_id=usage.model_id,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+        )
+
+    def _ask(self, state: "JourneyState", questions: dict[str, DeciderQuestion]) -> dict[str, Any]:
         headers = {"Content-Type": "application/json"}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
@@ -115,11 +134,15 @@ class JevDecider:
                     "model": self._model,
                     "state": project_context(state, self._registry),
                     "questions": {
-                        QUESTION_KEY: {
+                        key: {
                             "type": "choice",
                             "instructions": question.text,
-                            "criteria": {**criteria, NONE_FITS: NONE_FITS_MEANING},
+                            "criteria": {
+                                **{c: question.criteria.get(c) for c in question.choices},
+                                NONE_FITS: NONE_FITS_MEANING,
+                            },
                         }
+                        for key, question in questions.items()
                     },
                     **self._route.extra_body,
                 },
@@ -127,4 +150,4 @@ class JevDecider:
             ).encode(),
         )
         response.raise_for_status()
-        return self._route.parse(response.json())
+        return response.json()

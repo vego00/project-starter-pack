@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     database_url: SecretStr | None = None
     # Notes are private until sharing is permitted: "owner" is for the note owner's own instance.
     evidence_scope: Literal["none", "owner"] = "none"
+    # ADR-018: the decider leaves out cards this project does not need. False asks every card.
+    card_selection: bool = True
 
     @field_validator(
         "gemini_api_key",

@@ -30,6 +30,7 @@ const STATE_LABEL = {
   deferred: "나중에",
   current: "지금 결정",
   pending: "대기",
+  skipped: "해당 없음",
 };
 
 const EXAMPLES = [
@@ -579,7 +580,9 @@ export function CompletedView({
           <ol className="summary">
             {design.nodes.map((node) => (
               <li key={node.id}>
-                <span className="eyebrow">{NODE_KIND[node.kind] ?? node.kind}</span>
+                <span className="eyebrow">
+                  {NODE_KIND[node.kind] ?? node.kind}
+                </span>
                 <strong>{node.id}</strong>
                 <span>{node.responsibility}</span>
               </li>
@@ -604,9 +607,8 @@ export function CompletedView({
             </p>
           ))}
           <p className="muted">
-            압축을 풀고 Claude Code나 Codex에 <code>BUILD.md</code>대로
-            만들어 달라고 요청하세요. 파일 {design.files.length}개가 들어
-            있어요.
+            압축을 풀고 Claude Code나 Codex에 <code>BUILD.md</code>대로 만들어
+            달라고 요청하세요. 파일 {design.files.length}개가 들어 있어요.
           </p>
           <div className="row">
             <a
@@ -635,7 +637,10 @@ export function CompletedView({
               {LAYER_NAMES[card.layer] ?? card.layer}
             </span>
             <span>{card.question}</span>
-            <strong>{card.option_name}</strong>
+            <strong>
+              {card.option_name ??
+                (card.state === "skipped" ? STATE_LABEL.skipped : null)}
+            </strong>
             {card.by && <span className="badge">{BY_LABEL[card.by]}</span>}
             {card.by === "implied" && (
               <span className="muted">{card.rationale}</span>
@@ -679,16 +684,18 @@ export function ProgressRail({
   const done = journey.cards.filter(
     (card) => card.state === "decided" || card.state === "implied",
   ).length;
+  // Skipped cards are not asked, so they are not part of what is left to decide.
+  const total = journey.cards.filter((card) => card.state !== "skipped").length;
   const canReopen = journey.prompt?.type === "decision" || journey.can_reopen;
   return (
     <aside className="rail" aria-label="결정 진행 상황">
       <p className="rail-title">
         <strong>
-          {done} / {journey.cards.length}
+          {done} / {total}
         </strong>{" "}
         결정 완료
       </p>
-      <progress value={done} max={journey.cards.length} aria-hidden />
+      <progress value={done} max={total} aria-hidden />
       <ol>
         {journey.cards.map((card) => (
           <li
@@ -701,7 +708,20 @@ export function ProgressRail({
               {card.option_name ??
                 STATE_LABEL[card.state as keyof typeof STATE_LABEL]}
               {card.state === "implied" && " · 자동 확정"}
+              {card.state === "skipped" &&
+                card.skip_confidence != null &&
+                ` · 확신도 ${Math.round(card.skip_confidence * 100)}%`}
             </span>
+            {canReopen && card.state === "skipped" && (
+              <button
+                className="link"
+                disabled={busy}
+                aria-label={`${card.title} 다시 넣기`}
+                onClick={() => act({ action: "reopen", card_id: card.card_id })}
+              >
+                다시 넣기
+              </button>
+            )}
             {canReopen && card.state === "decided" && (
               <button
                 className="link"
