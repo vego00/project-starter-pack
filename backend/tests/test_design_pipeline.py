@@ -450,6 +450,71 @@ def test_the_full_design_is_readable_after_the_journey():
     assert design.workflow.edges
 
 
+def reopen(client, view, card_id):
+    return client.post(
+        f"/api/v1/journeys/{view['journey_id']}/decisions",
+        json={"revision": view["revision"], "action": {"action": "reopen", "card_id": card_id}},
+    )
+
+
+def test_a_finished_journey_can_change_one_decision_and_redesign():
+    with make_client() as client:
+        finished = run_journey(client)
+        assert finished["can_reopen"] is True
+        first = client.get(f"/api/v1/journeys/{finished['journey_id']}/design").json()
+
+        reopened = reopen(client, finished, "model.provider").json()
+        assert reopened["status"] == "in_progress"
+        assert reopened["can_reopen"] is False
+        assert reopened["prompt"]["card"]["card_id"] == "model.provider"
+
+        view = client.post(
+            f"/api/v1/journeys/{finished['journey_id']}/decisions",
+            json={
+                "revision": reopened["revision"],
+                "action": {"action": "select", "option_id": "openai"},
+            },
+        ).json()
+        while view["prompt"]:  # Only cards the change affected are asked again.
+            assert view["prompt"]["type"] == "decision"
+            view = client.post(
+                f"/api/v1/journeys/{view['journey_id']}/decisions",
+                json={"revision": view["revision"], "action": {"action": "accept_recommendation"}},
+            ).json()
+        second = client.get(f"/api/v1/journeys/{finished['journey_id']}/design").json()
+
+    assert view["status"] == "completed" and view["can_reopen"] is True
+    providers = {d["card_id"]: d["option_id"] for d in second["provenance"]["decisions"]}
+    assert providers["model.provider"] == "openai"
+    assert (first["design_revision"], second["design_revision"]) == (1, 2)
+    others = {c["card_id"]: c["option_name"] for c in finished["cards"]}
+    assert {
+        c["card_id"]: c["option_name"] for c in view["cards"] if c["card_id"] != "model.provider"
+    } == {k: v for k, v in others.items() if k != "model.provider"}
+
+
+def test_reopen_after_finishing_rejects_a_card_that_was_never_decided():
+    with make_client() as client:
+        finished = run_journey(client)
+        response = reopen(client, finished, "no.such.card")
+        after = client.get(f"/api/v1/journeys/{finished['journey_id']}").json()
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "reopen_rejected"
+    assert after["revision"] == finished["revision"]
+
+
+def test_a_finished_journey_still_rejects_other_actions():
+    with make_client() as client:
+        finished = run_journey(client)
+        response = client.post(
+            f"/api/v1/journeys/{finished['journey_id']}/decisions",
+            json={"revision": finished["revision"], "action": {"action": "defer"}},
+        )
+
+    assert response.json()["error"]["code"] == "journey_finished"
+
+
 def test_no_design_before_the_journey_ends():
     with make_client() as client:
         view = client.post("/api/v1/journeys", json={"idea": IDEA}).json()

@@ -42,9 +42,15 @@ class Journey:
         self.result = self.graph.invoke(journey_input(self.id, project), self.config)
 
     @property
-    def prompt(self):
+    def waiting(self):
         interrupts = self.result.get("__interrupt__")
         return interrupts[0].value if interrupts else None
+
+    @property
+    def prompt(self):
+        """What a user must answer. A finished journey only waits for an optional reopen."""
+        waiting = self.waiting
+        return None if waiting is None or waiting["type"] == "done" else waiting
 
     @property
     def card_id(self):
@@ -545,7 +551,7 @@ def test_shipped_registry_starts_with_topology_and_completes():
     result = graph.invoke(journey_input(journey_id, ProjectSpec(**COMPLETE_SPEC)), config)
     assert result["__interrupt__"][0].value["card"]["card_id"] == "agent.topology"
 
-    while result.get("__interrupt__"):
+    while result["__interrupt__"][0].value["type"] != "done":
         result = graph.invoke(resume_command({"action": "accept_recommendation"}), config)
 
     state = JourneyState.model_validate(graph.get_state(config).values)

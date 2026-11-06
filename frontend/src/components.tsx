@@ -643,6 +643,12 @@ export function CompletedView({
           </li>
         ))}
       </ol>
+      {journey.can_reopen && (
+        <p className="muted">
+          바꾸고 싶은 결정이 있으면 왼쪽 목록에서 다시 고르기를 누르세요. 바꾼
+          결정에 맞춰 설계와 빌드 묶음을 다시 만들어요.
+        </p>
+      )}
       <p className="muted">
         요약 문서에는 결정 이유와 감수할 점, 먼저 확인할 일이 들어 있어요.
         팀원과 함께 읽어 보세요.
@@ -673,7 +679,7 @@ export function ProgressRail({
   const done = journey.cards.filter(
     (card) => card.state === "decided" || card.state === "implied",
   ).length;
-  const canReopen = journey.prompt?.type === "decision";
+  const canReopen = journey.prompt?.type === "decision" || journey.can_reopen;
   return (
     <aside className="rail" aria-label="결정 진행 상황">
       <p className="rail-title">

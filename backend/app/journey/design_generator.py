@@ -262,6 +262,26 @@ def generate_design(
     attempts: int = MAX_ATTEMPTS,
     outage_retries: int = MAX_OUTAGE_RETRIES,
 ) -> DesignOutcome:
+    """Each run after a changed decision is a new revision, so an old design never passes as new."""
+    outcome = _generate(state, registry, designer, attempts, outage_retries)
+    previous = state.design.current
+    if previous is None:
+        return outcome
+    current = outcome.design.current.model_copy(
+        update={"design_revision": previous.design_revision + 1}
+    )
+    return outcome.model_copy(
+        update={"design": outcome.design.model_copy(update={"current": current})}
+    )
+
+
+def _generate(
+    state: JourneyState,
+    registry: Registry,
+    designer: Designer | None,
+    attempts: int,
+    outage_retries: int,
+) -> DesignOutcome:
     constraints = derive_design_constraints(state, registry)
     if designer is None or attempts < 1:
         return _failed(state, constraints)

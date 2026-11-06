@@ -32,7 +32,7 @@ def main(database_url: str, journey_id: str, command: str, payload: str) -> None
     print(
         json.dumps(
             {
-                "card_id": prompt["card"]["card_id"] if prompt else None,
+                "card_id": prompt["card"]["card_id"] if prompt and "card" in prompt else None,
                 "decisions": sorted(values.get("decisions", {})),
                 "status": values.get("status"),
             }
