@@ -12,6 +12,7 @@ from langgraph.types import Checkpointer
 from pydantic import BaseModel
 
 from app.config import Settings
+from app.journey.design import ServiceDesign
 from app.journey.persistence import open_checkpointer
 from app.journey.service import JourneyError, JourneyService, JourneyView
 from app.journey.services import JourneyDeps, build_deps
@@ -148,6 +149,14 @@ def create_app(
                 "X-Content-Type-Options": "nosniff",
             },
         )
+
+    @app.get(
+        "/api/v1/journeys/{journey_id}/design",
+        response_model=ServiceDesign,
+        responses=ERROR_RESPONSES,
+    )
+    def get_design(journey_id: UUID, journeys: Journeys):
+        return _guarded(journey_id, lambda: journeys.design(journey_id))
 
     @app.get("/api/v1/journeys/{journey_id}/package.zip", responses=ERROR_RESPONSES)
     def get_package(journey_id: UUID, journeys: Journeys):

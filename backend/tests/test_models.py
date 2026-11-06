@@ -379,6 +379,18 @@ def test_vercel_route_requires_zero_retention():
     assert (outcome.confidence, outcome.input_tokens, outcome.output_tokens) == (0.8, 12, 1)
 
 
+def test_typesafe_route_sends_the_key_to_the_direct_api():
+    seen, handler = capture(native_answer())
+
+    outcome = decide("typesafe", handler, api_key="k")
+
+    assert seen["url"] == "https://api.typesafe.ai/v1/systemone"
+    assert seen["auth"] == "Bearer k"
+    assert seen["body"]["model"] == "jev-latest"
+    assert "providerOptions" not in seen["body"]
+    assert (outcome.answer, outcome.confidence) == ("question", 0.8)
+
+
 def test_both_routes_ask_the_same_question():
     seen, handler = capture(native_answer())
 
@@ -472,6 +484,7 @@ def test_mock_is_the_default_and_needs_no_keys():
         {"provider": "gemini", "gemini_model": "m"},
         {"decider": "jev", "jev_route": "vercel"},
         {"decider": "jev", "jev_route": "vercel", "ai_gateway_api_key": ""},
+        {"decider": "jev", "jev_route": "typesafe"},
         {"jev_route": "direct"},
         {"provider": "openai"},
         {"decider": "llm"},

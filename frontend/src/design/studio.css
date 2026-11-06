@@ -1,0 +1,256 @@
+.app.studio {
+  max-width: none;
+}
+.case-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.case-picker span {
+  white-space: nowrap;
+}
+.case-picker select {
+  min-height: 44px;
+  padding: 8px;
+  border: 1px solid var(--control-line);
+  border-radius: 8px;
+  background: white;
+}
+.studio-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  gap: 16px;
+  align-items: start;
+  margin-top: 12px;
+}
+.studio-main {
+  min-width: 0;
+}
+.studio-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.tool-gap {
+  flex: 1;
+}
+.studio-canvas {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  overflow: hidden;
+}
+.studio-outline {
+  margin-top: 8px;
+}
+.studio-outline summary {
+  padding: 10px 0;
+  cursor: pointer;
+}
+.studio-panel {
+  position: sticky;
+  top: 12px;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+}
+.studio-panel h2 {
+  margin: 0 0 4px;
+  font-size: 18px;
+  overflow-wrap: anywhere;
+}
+.studio-panel h3 {
+  margin: 20px 0 6px;
+  font-size: 14px;
+}
+.panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.studio .field {
+  display: block;
+  margin-top: 12px;
+}
+.studio .field > span {
+  display: block;
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+.studio .field input,
+.studio .field textarea,
+.studio .field select {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid var(--control-line);
+  border-radius: 8px;
+  background: white;
+}
+.studio .field.grow {
+  flex: 1;
+  margin-top: 0;
+}
+.studio .row {
+  align-items: flex-end;
+  margin-top: 8px;
+}
+.field-error {
+  color: var(--danger-text);
+}
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  margin: 8px 0;
+}
+.check input {
+  width: 20px;
+  height: 20px;
+}
+.studio button.danger {
+  margin-top: 12px;
+  border-color: var(--danger-text);
+  color: var(--danger-text);
+}
+.studio button.danger:hover:not(:disabled) {
+  background: var(--danger-bg);
+}
+.plain-list,
+.requirements {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.plain-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+.plain-list.issues li.error,
+.plain-list.issues li.error button {
+  color: var(--danger-text);
+}
+.plain-list.issues button.link,
+.plain-list button.link {
+  text-align: left;
+}
+.requirements li + li {
+  margin-top: 8px;
+}
+.requirement {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  border-color: var(--line);
+}
+.requirement.active {
+  border-color: var(--primary-dark);
+  background: var(--tint);
+  outline: 1px solid var(--primary-dark);
+}
+
+.flow-node {
+  padding: 8px 12px;
+  border: 1px solid var(--control-line);
+  background: white;
+  color: #293248;
+  font-size: 13px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.flow-node strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.flow-node p {
+  margin: 2px 0 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.flow-node.code {
+  border-radius: 2px;
+}
+.flow-node.agent {
+  border: 2px solid var(--primary);
+  border-radius: 14px;
+  background: var(--tint);
+}
+.flow-node.human {
+  border: 2px dashed var(--warn-text);
+  border-radius: 28px;
+  background: var(--warn-bg);
+  padding-inline: 20px;
+}
+.flow-node.selected {
+  outline: 3px solid #293248;
+  outline-offset: 2px;
+}
+.flow-node.highlighted {
+  box-shadow: 0 0 0 4px var(--primary);
+}
+.flow-node-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.flow-node-tags .tag {
+  padding: 0 6px;
+  border-radius: 4px;
+  background: #293248;
+  color: white;
+}
+.flow-node-issue {
+  display: block;
+  margin-top: 4px;
+  color: var(--danger-text);
+  font-weight: 600;
+  font-size: 12px;
+}
+.flow-node .react-flow__handle {
+  width: 12px;
+  height: 12px;
+  background: white;
+  border: 2px solid #293248;
+}
+.flow-node .react-flow__handle.side {
+  opacity: 0;
+  pointer-events: none;
+}
+.flow-edge .react-flow__edge-path {
+  stroke: var(--muted);
+  stroke-width: 1.5;
+}
+.flow-edge.failure .react-flow__edge-path {
+  stroke: var(--danger-text);
+  stroke-dasharray: 6 4;
+}
+.flow-edge .react-flow__edge-text {
+  font-size: 12px;
+}
+.flow-edge.failure .react-flow__edge-text {
+  fill: var(--danger-text);
+}
+
+@media (max-width: 900px) {
+  .studio-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .studio-panel {
+    position: static;
+    max-height: none;
+  }
+  .tool-gap {
+    display: none;
+  }
+}

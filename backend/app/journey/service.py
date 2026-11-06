@@ -152,6 +152,13 @@ class JourneyService:
             raise JourneyError(409, "summary_unavailable", "결정을 모두 마치면 받을 수 있어요.")
         return document
 
+    def design(self, journey_id: UUID) -> ServiceDesign:
+        with self._lock(journey_id):
+            state = JourneyState.model_validate(self._snapshot(journey_id).values)
+        if state.design.current is None:
+            raise JourneyError(409, "design_unavailable", "결정을 모두 마치면 볼 수 있어요.")
+        return state.design.current
+
     def package(self, journey_id: UUID) -> bytes:
         with self._lock(journey_id):
             state = JourneyState.model_validate(self._snapshot(journey_id).values)

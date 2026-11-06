@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { packageUrl, summaryUrl } from "./api";
+import { designViewUrl, packageUrl, summaryUrl } from "./api";
 import type {
   Action,
   CardStatus,
@@ -615,6 +615,9 @@ export function CompletedView({
               download="starter-pack.zip"
             >
               빌드 묶음 다운로드
+            </a>
+            <a className="button" href={designViewUrl(journey.journey_id)}>
+              설계 그래프로 보기
             </a>
           </div>
           <h3>내가 고른 기술</h3>

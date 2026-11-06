@@ -29,6 +29,7 @@ services:
       APP_JEV_MODEL: ${APP_JEV_MODEL:-}
       APP_AI_GATEWAY_API_KEY: ${APP_AI_GATEWAY_API_KEY:-}
       APP_OPENCODE_API_KEY: ${APP_OPENCODE_API_KEY:-}
+      APP_TYPESAFE_API_KEY: ${APP_TYPESAFE_API_KEY:-}
       APP_EVIDENCE_SCOPE: ${APP_EVIDENCE_SCOPE:-none}
       APP_DATABASE_URL: postgresql://starter:${POSTGRES_PASSWORD:-starter-local-only}@postgres:5432/starter
     depends_on:

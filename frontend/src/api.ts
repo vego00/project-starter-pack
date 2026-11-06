@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { designSchema } from "./design/types";
+import type { Design } from "./design/types";
 
 const optionViewSchema = z.object({
   option: z.object({
@@ -159,7 +161,11 @@ const REQUEST_TIMEOUT_MS = 300000;
 const OFFLINE =
   "서버에 연결할 수 없어요. 백엔드 실행 상태를 확인하고 다시 시도해 주세요.";
 
-async function request(path: string, init?: RequestInit): Promise<Journey> {
+async function request<T>(
+  path: string,
+  schema: z.ZodType<T>,
+  init?: RequestInit,
+): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
@@ -177,7 +183,7 @@ async function request(path: string, init?: RequestInit): Promise<Journey> {
         throw new ApiError(detail.data.error.message, detail.data.error.code);
       throw new ApiError(OFFLINE, "unavailable");
     }
-    const parsed = journeySchema.safeParse(body);
+    const parsed = schema.safeParse(body);
     if (!parsed.success)
       throw new ApiError(
         "결과 형식을 확인하지 못했어요. 다시 시도해 주세요.",
@@ -198,14 +204,22 @@ async function request(path: string, init?: RequestInit): Promise<Journey> {
 }
 
 export function startJourney(idea: string): Promise<Journey> {
-  return request("/api/v1/journeys", {
+  return request("/api/v1/journeys", journeySchema, {
     method: "POST",
     body: JSON.stringify({ idea: idea.trim() }),
   });
 }
 
 export function getJourney(id: string): Promise<Journey> {
-  return request(`/api/v1/journeys/${id}`);
+  return request(`/api/v1/journeys/${id}`, journeySchema);
+}
+
+export function getDesign(id: string): Promise<Design> {
+  return request(`/api/v1/journeys/${id}/design`, designSchema);
+}
+
+export function designViewUrl(id: string): string {
+  return `/?design=${id}`;
 }
 
 export function packageUrl(id: string): string {
@@ -217,8 +231,12 @@ export function summaryUrl(id: string): string {
 }
 
 export function sendAction(journey: Journey, action: Action): Promise<Journey> {
-  return request(`/api/v1/journeys/${journey.journey_id}/decisions`, {
-    method: "POST",
-    body: JSON.stringify({ revision: journey.revision, action }),
-  });
+  return request(
+    `/api/v1/journeys/${journey.journey_id}/decisions`,
+    journeySchema,
+    {
+      method: "POST",
+      body: JSON.stringify({ revision: journey.revision, action }),
+    },
+  );
 }

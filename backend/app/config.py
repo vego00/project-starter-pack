@@ -15,10 +15,11 @@ class Settings(BaseSettings):
     decider: Literal["mock", "jev"] = "mock"
     gemini_api_key: SecretStr | None = None
     gemini_model: str | None = None
-    jev_route: Literal["opencode", "vercel"] = "opencode"
+    jev_route: Literal["opencode", "vercel", "typesafe"] = "opencode"
     jev_model: str | None = None  # Empty uses the route's default model.
     ai_gateway_api_key: SecretStr | None = None
     opencode_api_key: SecretStr | None = None
+    typesafe_api_key: SecretStr | None = None
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
     database_url: SecretStr | None = None
     # Notes are private until sharing is permitted: "owner" is for the note owner's own instance.
@@ -30,6 +31,7 @@ class Settings(BaseSettings):
         "jev_model",
         "ai_gateway_api_key",
         "opencode_api_key",
+        "typesafe_api_key",
         mode="before",
     )
     @classmethod
@@ -43,4 +45,6 @@ class Settings(BaseSettings):
             raise ValueError("provider=gemini needs APP_GEMINI_API_KEY and APP_GEMINI_MODEL")
         if self.decider == "jev" and self.jev_route == "vercel" and not self.ai_gateway_api_key:
             raise ValueError("jev_route=vercel needs APP_AI_GATEWAY_API_KEY")
+        if self.decider == "jev" and self.jev_route == "typesafe" and not self.typesafe_api_key:
+            raise ValueError("jev_route=typesafe needs APP_TYPESAFE_API_KEY")
         return self

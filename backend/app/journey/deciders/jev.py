@@ -20,7 +20,7 @@ QUESTION_KEY = "decision"
 NONE_FITS = "none_of_the_above"
 NONE_FITS_MEANING = "주어진 정보로는 어느 선택지도 분명히 맞다고 판단할 수 없음"
 
-JevRouteName = Literal["opencode", "vercel"]
+JevRouteName = Literal["opencode", "vercel", "typesafe"]
 
 
 def _parse_native(body: dict[str, Any]) -> DeciderResult:
@@ -73,6 +73,13 @@ ROUTES: dict[JevRouteName, JevRoute] = {
         default_model="typesafe-ai/jev-1.14.0",
         parse=_parse_gateway,
         extra_body={"providerOptions": {"gateway": {"zeroDataRetention": True}}},
+    ),
+    # Paid direct API; same request and response shape as the OpenCode route.
+    "typesafe": JevRoute(
+        base_url="https://api.typesafe.ai",
+        path="/v1/systemone",
+        default_model="jev-latest",
+        parse=_parse_native,
     ),
 }
 
