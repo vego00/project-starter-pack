@@ -535,3 +535,19 @@ def test_real_settings_build_real_adapters():
     assert isinstance(deps.responder, LLMResponder)
     assert isinstance(deps.drafter, LLMGcbDrafter)
     assert not deps.recommendations_are_mock
+
+
+@pytest.mark.parametrize(("design_model", "used"), [("big", "big"), ("", "m")])
+def test_only_the_design_draft_uses_the_design_model(design_model, used):
+    settings = Settings(
+        _env_file=None,
+        provider="gemini",
+        gemini_api_key="k",
+        gemini_model="m",
+        gemini_design_model=design_model,
+    )
+
+    deps = build_deps(settings, REGISTRY)
+
+    assert deps.designer._llm._model == used
+    assert deps.advisor._llm._model == "m"

@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     decider: Literal["mock", "jev"] = "mock"
     gemini_api_key: SecretStr | None = None
     gemini_model: str | None = None
+    # Empty uses gemini_model. The design draft is the hardest call, so it can use another model.
+    gemini_design_model: str | None = None
     jev_route: Literal["opencode", "vercel", "typesafe"] = "opencode"
     jev_model: str | None = None  # Empty uses the route's default model.
     ai_gateway_api_key: SecretStr | None = None
@@ -30,6 +32,7 @@ class Settings(BaseSettings):
     @field_validator(
         "gemini_api_key",
         "gemini_model",
+        "gemini_design_model",
         "jev_model",
         "ai_gateway_api_key",
         "opencode_api_key",

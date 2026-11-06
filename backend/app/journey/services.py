@@ -301,7 +301,7 @@ def build_deps(settings: Settings, registry: Registry) -> JourneyDeps:
     llm = GeminiLLM(api_key, settings.gemini_model)
     design_llm = GeminiLLM(
         api_key,
-        settings.gemini_model,
+        settings.gemini_design_model or settings.gemini_model,
         timeout_ms=DESIGN_TIMEOUT_MS,
         max_output_tokens=DESIGN_MAX_OUTPUT_TOKENS,
     )
