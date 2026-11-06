@@ -59,7 +59,12 @@ def main() -> int:
         results.append(check("gemini", gemini))
     else:
         print("gemini: SKIPPED (APP_GEMINI_API_KEY or APP_GEMINI_MODEL is empty)")
-    if settings.decider == "jev" or settings.jev_route == "opencode" or settings.ai_gateway_api_key:
+    if (
+        settings.decider == "jev"
+        or settings.jev_route == "opencode"
+        or settings.ai_gateway_api_key
+        or settings.typesafe_api_key
+    ):
         state = JourneyState(journey_id=uuid4(), project_spec=ProjectSpec(idea=IDEA))
         decider = build_deps(
             settings.model_copy(update={"decider": "jev"}), load_registry()

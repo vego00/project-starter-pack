@@ -282,6 +282,7 @@ def build_deps(settings: Settings, registry: Registry) -> JourneyDeps:
     if settings.decider == "jev":
         key = settings.ai_gateway_api_key if settings.jev_route == "vercel" else None
         key = key or (settings.opencode_api_key if settings.jev_route == "opencode" else None)
+        key = key or (settings.typesafe_api_key if settings.jev_route == "typesafe" else None)
         decider = JevDecider(
             settings.jev_route,
             registry,
