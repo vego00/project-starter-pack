@@ -128,6 +128,7 @@ const journeySchema = z.object({
     })
     .nullable()
     .optional(),
+  can_reopen: z.boolean().optional().default(false),
 });
 
 export type Journey = z.infer<typeof journeySchema>;

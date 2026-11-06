@@ -796,6 +796,40 @@ describe("issues and completion", () => {
       card_id: "agent.hitl",
     });
   });
+
+  it("reopens a decision after the journey finished", async () => {
+    const { user, mock } = await startWith(
+      journey({
+        status: "completed",
+        prompt: null,
+        cards: cards("decided", "decided"),
+        can_reopen: true,
+      }),
+    );
+
+    expect(await screen.findByText(/다시 만들어요/)).toBeVisible();
+    await user.click(
+      screen.getByRole("button", { name: "agent.hitl 제목 다시 고르기" }),
+    );
+
+    expect(bodyOf(mock.mock.calls[1]).action).toEqual({
+      action: "reopen",
+      card_id: "agent.hitl",
+    });
+  });
+
+  it("does not offer a reopen on a journey that cannot change", async () => {
+    await startWith(
+      journey({
+        status: "completed",
+        prompt: null,
+        cards: cards("decided", "decided"),
+      }),
+    );
+
+    await screen.findByRole("heading", { name: "모든 결정을 마쳤어요" });
+    expect(screen.queryByRole("button", { name: /다시 고르기/ })).toBeNull();
+  });
 });
 
 describe("screen changes and the main action", () => {
