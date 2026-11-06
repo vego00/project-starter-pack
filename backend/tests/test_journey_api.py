@@ -261,7 +261,8 @@ def test_warnings_are_listed_on_the_finished_journey(client):
         view = select(client, view, option_id)
 
     assert view["status"] == "completed"
-    assert len(view["warnings"]) == 1
+    # Gemini with Ollama serving on GCP: self-serving on cloud, and an API provider that self-serves.
+    assert len(view["warnings"]) == 2
 
 
 # Summary document
