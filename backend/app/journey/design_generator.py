@@ -159,8 +159,11 @@ def _template_node(
     }
 
 
+TEMPLATE_ROUNDS = 3  # An example bound for the template's review loop, not a measured value.
+
+
 def template_design(state: JourneyState, constraints: DesignConstraints) -> ServiceDesign:
-    """A generic two-agent shape that respects the decisions. It never replaces a real design."""
+    """A generic shape that respects the decisions. It never replaces a real design."""
     allowed = constraints.target.allowed_providers
     model = {
         "capability": "한국어 입력을 이해하고 구조화된 결과를 쓴다",
@@ -168,21 +171,35 @@ def template_design(state: JourneyState, constraints: DesignConstraints) -> Serv
     }
     wants_human = bool(constraints.target.human_checks)
     finish_input = "approved" if wants_human else "checked"
+    # A single-agent choice keeps the review step but runs it as code.
+    review_kind = "code" if constraints.target.max_agent_nodes == 1 else "agent"
+    review_extra = {"model": model} if review_kind == "agent" else {}
     nodes = [
         _template_node("intake", "code", "입력을 검사해 작업 요청으로 정리한다", ["request"], ["task"]),
         _template_node("worker", "agent", "요청을 처리해 초안을 만든다", ["task"], ["draft"], model=model),
-        _template_node("reviewer", "agent", "초안을 기준에 맞춰 점검한다", ["draft"], ["checked"], model=model),
+        _template_node("reviewer", review_kind, "초안을 기준에 맞춰 점검한다", ["draft"], ["checked"], **review_extra),
     ]  # fmt: skip
-    path = ["intake", "worker", "reviewer"]
+    after_review = "approval" if wants_human else "finish"
+    edges = [
+        {"source": "intake", "target": "worker"},
+        {"source": "worker", "target": "reviewer"},
+        {"source": "reviewer", "target": "worker", "condition": "보완 필요"},
+        {"source": "reviewer", "target": after_review, "condition": "통과"},
+    ]
+    loop = ["worker", "reviewer"]
     if wants_human:
         nodes.append(
             _template_node("approval", "human", "사람이 결과를 확인한다", ["checked"], ["approved"])
         )
-        path.append("approval")
+        edges += [
+            {"source": "approval", "target": "finish", "condition": "승인"},
+            {"source": "approval", "target": "worker", "condition": "거절"},
+        ]
+        loop.append("approval")
     nodes.append(
         _template_node("finish", "code", "결과를 사용자에게 돌려준다", [finish_input], ["result"])
     )
-    path.append("finish")
+    agent_count = sum(node["kind"] == "agent" for node in nodes)
     return _with_decisions(
         {
             "requirements": [
@@ -193,7 +210,7 @@ def template_design(state: JourneyState, constraints: DesignConstraints) -> Serv
                     input="사용자 요청",
                     expected_output="점검을 거친 결과",
                     core=True,
-                    node_ids=["worker", "reviewer"],
+                    node_ids=["worker", "reviewer"] if review_kind == "agent" else ["worker"],
                     output="draft",
                     eval_case_ids=["E-1"],
                     task_ids=["T-1"],
@@ -203,11 +220,11 @@ def template_design(state: JourneyState, constraints: DesignConstraints) -> Serv
             "workflow": {
                 "entry": "intake",
                 "exits": ["finish"],
-                "edges": [
-                    {"source": source, "target": target}
-                    for source, target in zip(path, path[1:], strict=False)
+                "edges": edges,
+                "loop_limits": [
+                    {"node_ids": loop, "max_iterations": TEMPLATE_ROUNDS, "on_exceeded": "finish"}
                 ],
-                "max_model_calls": 2,
+                "max_model_calls": agent_count * TEMPLATE_ROUNDS,
             },
             "eval_cases": [
                 {"id": "E-1", "given": "대표 입력 한 건", "expect": "기대 결과를 직접 정해야 해요"}

@@ -103,7 +103,7 @@ def _node_section(node) -> list[str]:
 
 
 def _design_doc(design: ServiceDesign) -> str:
-    lines = ["# 멀티 에이전트 설계", "", *_notice(design), "## 요구사항", ""]
+    lines = ["# 에이전트 설계", "", *_notice(design), "## 요구사항", ""]
     for req in design.requirements:
         tag = "핵심" if req.core else "선택"
         source = "가정, 확인 필요" if req.is_assumption else "사용자 글에 근거"
@@ -174,7 +174,7 @@ def _infrastructure_doc(design: ServiceDesign, registry: Registry) -> str:
     lines = [
         "# 인프라 설계",
         "",
-        "멀티 에이전트 설계와 분리한 문서예요. 코딩 에이전트가 혼자 끝낼 수 없는 일이 많아요.",
+        "에이전트 설계와 분리한 문서예요. 코딩 에이전트가 혼자 끝낼 수 없는 일이 많아요.",
         "",
         "## 고른 항목",
         "",

@@ -14,6 +14,7 @@ from app.registry.schema import DecisionCard
 # option_id -> (fewest agent nodes, most agent nodes or None, routing)
 # Code and human nodes are not counted. Past the minimum, each added role needs a reason.
 TOPOLOGY = {
+    "single": (1, 1, "fixed"),
     "pipeline": (2, None, "fixed"),
     "supervisor": (2, None, "model"),
     "hierarchical": (2, None, "model_with_subgraphs"),

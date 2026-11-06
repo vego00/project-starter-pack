@@ -270,7 +270,7 @@ def test_no_budget_means_no_model_call():
     assert outcome.design.current.provenance.source == "template"
 
 
-@pytest.mark.parametrize("topology", ["pipeline", "supervisor", "hierarchical"])
+@pytest.mark.parametrize("topology", ["single", "pipeline", "supervisor", "hierarchical"])
 @pytest.mark.parametrize("hitl", ["none", "question", "approval"])
 def test_the_template_obeys_every_decision(topology, hitl):
     state = journey(**{"agent.topology": topology, "agent.hitl": hitl})

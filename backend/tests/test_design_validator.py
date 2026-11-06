@@ -392,8 +392,9 @@ def add_human(d):
     d["workflow"]["edges"] = [
         edge for edge in d["workflow"]["edges"] if edge["target"] != "publish"
     ] + [
-        {"source": "grade", "target": "approve"},
-        {"source": "approve", "target": "publish"},
+        {"source": "grade", "target": "approve", "condition": "출처 있음"},
+        {"source": "approve", "target": "publish", "condition": "승인"},
+        {"source": "approve", "target": "answer", "condition": "거절"},
     ]
 
 
@@ -444,6 +445,43 @@ def test_writing_after_approval_passes():
         give_write_tool(d)
 
     assert issues(changed(write_after_approving), constraints(human_checks=["approval"])) == []
+
+
+def test_a_branch_without_a_condition_is_a_warning():
+    def unlabel(d):
+        d["workflow"]["edges"][2].pop("condition")
+
+    found = issues(changed(unlabel))
+
+    assert [(i.rule_id, i.severity) for i in found] == [("branch.unlabelled", "warning")]
+
+
+def test_a_supervisor_without_a_branch_is_a_warning():
+    def straight_line(d):
+        d["workflow"]["edges"] = [
+            {"source": "intake", "target": "answer"},
+            {"source": "answer", "target": "grade"},
+            {"source": "grade", "target": "publish"},
+            {"source": "publish", "target": "give_up"},
+        ]
+        d["workflow"]["loop_limits"] = []
+        d["workflow"]["exits"] = ["give_up"]
+        by_id(d, "answer")["inputs"] = [{"name": "clean", "type": "str"}]
+
+    routed = constraints(min_agent_nodes=1, routing="model")
+
+    assert rules(changed(straight_line), routed) == {"branch.no_routing"}
+    assert "branch.no_routing" not in rules(valid_design(), routed)
+
+
+def test_an_approval_without_a_rejection_path_is_a_warning():
+    def no_rejection(d):
+        add_human(d)
+        d["workflow"]["edges"] = [e for e in d["workflow"]["edges"] if e.get("condition") != "거절"]
+
+    found = issues(changed(no_rejection), constraints(human_checks=["approval"]))
+
+    assert [(i.rule_id, i.severity) for i in found] == [("branch.no_rejection", "warning")]
 
 
 def test_writing_without_any_human_check_chosen_is_a_warning():
