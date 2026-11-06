@@ -23,10 +23,8 @@ describe("mock designs", () => {
     expect(checkDesign(byId("straight"))).toEqual([]);
   });
 
-  it("shows only the write warning in the branching design", () => {
-    expect(messages(byId("branching"))).toEqual([
-      "save-idea: 사람 확인 없이 외부에 써요.",
-    ]);
+  it("does not warn about saving inside the service", () => {
+    expect(messages(byId("branching"))).toEqual([]);
   });
 
   it("finds each planted problem in the broken design", () => {
@@ -82,7 +80,9 @@ describe("checkDesign", () => {
         node.id === "node-writer"
           ? {
               ...node,
-              tools: [{ name: "t", access: "write" as const, reason: "r" }],
+              tools: [
+                { name: "t", access: "external_write" as const, reason: "r" },
+              ],
             }
           : node,
       ),
@@ -196,6 +196,22 @@ describe("graph", () => {
     const design = byId("branching");
     const nodes = toFlowNodes(design, new Map(), checkDesign(design), null, []);
     expect(nodes.find((n) => n.id === "writer")!.data.loopLimit).toBe(3);
-    expect(nodes.find((n) => n.id === "save-idea")!.data.issues).toBe(1);
+    expect(nodes.find((n) => n.id === "save-idea")!.data.issues).toBe(0);
+
+    const broken = byId("broken");
+    const planted = checkDesign(broken).filter((issue) =>
+      issue.nodeIds.includes("archive"),
+    ).length;
+    const brokenNodes = toFlowNodes(
+      broken,
+      new Map(),
+      checkDesign(broken),
+      null,
+      [],
+    );
+    expect(planted).toBeGreaterThan(0);
+    expect(brokenNodes.find((n) => n.id === "archive")!.data.issues).toBe(
+      planted,
+    );
   });
 });

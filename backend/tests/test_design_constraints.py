@@ -161,9 +161,12 @@ def test_no_human_check_in_the_target_is_not_a_warning_about_the_review():
 # The first version designs multi-agent services only
 
 
-def test_the_topology_card_offers_only_multi_agent_structures():
+def test_only_the_single_agent_structure_allows_one_agent():
+    # ADR-017 changed on 2026-11-06: a single agent is allowed, multi-agent stays the default.
     assert {o.id for o in REGISTRY.card("agent.topology").options} == set(TOPOLOGY)
-    assert all(minimum >= 2 for minimum, _, _ in TOPOLOGY.values())
+    assert TOPOLOGY["single"][:2] == (1, 1)
+    assert all(minimum >= 2 for key, (minimum, _, _) in TOPOLOGY.items() if key != "single")
+    assert REGISTRY.card("agent.topology").default_recommendation.option == "pipeline"
 
 
 # Deferred decisions and card versions

@@ -44,6 +44,12 @@ import { KIND_LABEL } from "./types";
 import type { Design, DesignEdge, DesignNode, NodeKind } from "./types";
 import "./studio.css";
 
+const ACCESS_LABEL = {
+  read: "읽기",
+  write: "서비스 안에 저장",
+  external_write: "외부에 쓰기",
+};
+
 type Selection =
   | { type: "node"; id: string }
   | { type: "edge"; source: string; target: string }
@@ -280,8 +286,7 @@ function NodePanel({
           {node.tools.map((tool) => (
             <li key={tool.name}>
               <span>
-                <strong>{tool.name}</strong> (
-                {tool.access === "write" ? "쓰기" : "읽기"})
+                <strong>{tool.name}</strong> ({ACCESS_LABEL[tool.access]})
                 <br />
                 <span className="muted">{tool.reason}</span>
               </span>

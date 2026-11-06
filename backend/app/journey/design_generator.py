@@ -159,8 +159,11 @@ def _template_node(
     }
 
 
+TEMPLATE_ROUNDS = 3  # An example bound for the template's review loop, not a measured value.
+
+
 def template_design(state: JourneyState, constraints: DesignConstraints) -> ServiceDesign:
-    """A generic two-agent shape that respects the decisions. It never replaces a real design."""
+    """A generic shape that respects the decisions. It never replaces a real design."""
     allowed = constraints.target.allowed_providers
     model = {
         "capability": "한국어 입력을 이해하고 구조화된 결과를 쓴다",
@@ -168,21 +171,35 @@ def template_design(state: JourneyState, constraints: DesignConstraints) -> Serv
     }
     wants_human = bool(constraints.target.human_checks)
     finish_input = "approved" if wants_human else "checked"
+    # A single-agent choice keeps the review step but runs it as code.
+    review_kind = "code" if constraints.target.max_agent_nodes == 1 else "agent"
+    review_extra = {"model": model} if review_kind == "agent" else {}
     nodes = [
         _template_node("intake", "code", "입력을 검사해 작업 요청으로 정리한다", ["request"], ["task"]),
         _template_node("worker", "agent", "요청을 처리해 초안을 만든다", ["task"], ["draft"], model=model),
-        _template_node("reviewer", "agent", "초안을 기준에 맞춰 점검한다", ["draft"], ["checked"], model=model),
+        _template_node("reviewer", review_kind, "초안을 기준에 맞춰 점검한다", ["draft"], ["checked"], **review_extra),
     ]  # fmt: skip
-    path = ["intake", "worker", "reviewer"]
+    after_review = "approval" if wants_human else "finish"
+    edges = [
+        {"source": "intake", "target": "worker"},
+        {"source": "worker", "target": "reviewer"},
+        {"source": "reviewer", "target": "worker", "condition": "보완 필요"},
+        {"source": "reviewer", "target": after_review, "condition": "통과"},
+    ]
+    loop = ["worker", "reviewer"]
     if wants_human:
         nodes.append(
             _template_node("approval", "human", "사람이 결과를 확인한다", ["checked"], ["approved"])
         )
-        path.append("approval")
+        edges += [
+            {"source": "approval", "target": "finish", "condition": "승인"},
+            {"source": "approval", "target": "worker", "condition": "거절"},
+        ]
+        loop.append("approval")
     nodes.append(
         _template_node("finish", "code", "결과를 사용자에게 돌려준다", [finish_input], ["result"])
     )
-    path.append("finish")
+    agent_count = sum(node["kind"] == "agent" for node in nodes)
     return _with_decisions(
         {
             "requirements": [
@@ -193,7 +210,7 @@ def template_design(state: JourneyState, constraints: DesignConstraints) -> Serv
                     input="사용자 요청",
                     expected_output="점검을 거친 결과",
                     core=True,
-                    node_ids=["worker", "reviewer"],
+                    node_ids=["worker", "reviewer"] if review_kind == "agent" else ["worker"],
                     output="draft",
                     eval_case_ids=["E-1"],
                     task_ids=["T-1"],
@@ -203,11 +220,11 @@ def template_design(state: JourneyState, constraints: DesignConstraints) -> Serv
             "workflow": {
                 "entry": "intake",
                 "exits": ["finish"],
-                "edges": [
-                    {"source": source, "target": target}
-                    for source, target in zip(path, path[1:], strict=False)
+                "edges": edges,
+                "loop_limits": [
+                    {"node_ids": loop, "max_iterations": TEMPLATE_ROUNDS, "on_exceeded": "finish"}
                 ],
-                "max_model_calls": 2,
+                "max_model_calls": agent_count * TEMPLATE_ROUNDS,
             },
             "eval_cases": [
                 {"id": "E-1", "given": "대표 입력 한 건", "expect": "기대 결과를 직접 정해야 해요"}
@@ -233,16 +250,42 @@ def template_design(state: JourneyState, constraints: DesignConstraints) -> Serv
     )
 
 
+# How to fix the rules drafts broke most in fixed-case runs. Sent with the problem on a retry.
+FIX_HINTS = {
+    "loop.no_limit": "순환하는 노드를 모두 loop_limits의 node_ids에 넣고 max_iterations를 적으세요",
+    "loop.no_way_out": "on_exceeded를 그 순환에 들어 있지 않은 노드로 바꾸세요",
+    "permission.write_without_approval": (
+        "쓰기 도구를 entry에서 오는 모든 길이 사람 확인 노드를 지난 뒤의 노드로 옮기세요"
+    ),
+    "decision.too_few_agents": "권한, 컨텍스트, 모델 능력이 다른 일을 찾아 agent 노드를 나누세요",
+    "owner.writer_has_no_output": "writers에는 그 이름을 outputs로 내보내는 노드만 넣으세요",
+    "owner.reader_has_no_input": "readers에는 그 이름을 inputs로 받는 노드만 넣으세요",
+    "owner.unlisted_writer": "그 이름을 내보내는 노드를 모두 state_fields의 writers에 넣으세요",
+    "io.unconnected": "앞선 노드의 outputs에 그 이름을 넣거나 그 입력을 빼세요",
+}
+
+
 def _errors(design: ServiceDesign) -> list[str]:
-    return [issue.message for issue in design.validation or [] if issue.severity == "error"]
+    return [
+        f"{issue.message} (고치는 법: {FIX_HINTS[issue.rule_id]})"
+        if issue.rule_id in FIX_HINTS
+        else issue.message
+        for issue in design.validation or []
+        if issue.severity == "error"
+    ]
 
 
 def _contract_problems(exc: ValidationError) -> list[str]:
     """Names what broke the contract so a correction has a target. Excludes the input values."""
-    return [
-        f"{'.'.join(map(str, error['loc'])) or '전체'}: {error['msg']}"
-        for error in exc.errors(include_input=False, include_url=False)[:MAX_REPORTED_PROBLEMS]
-    ]
+    problems = []
+    for error in exc.errors(include_input=False, include_url=False)[:MAX_REPORTED_PROBLEMS]:
+        problem = f"{'.'.join(map(str, error['loc'])) or '전체'}: {error['msg']}"
+        if error["loc"][-1:] == ("writers",) and error["type"] == "too_short":
+            problem += (
+                " (고치는 법: 그 이름을 내보내는 노드를 writers에 넣거나 그 상태 필드를 빼세요)"
+            )
+        problems.append(problem)
+    return problems
 
 
 def _failed(state: JourneyState, constraints: DesignConstraints, **usage) -> DesignOutcome:

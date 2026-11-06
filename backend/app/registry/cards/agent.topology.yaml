@@ -1,10 +1,19 @@
 card_id: agent.topology
-version: 2
+version: 3
 layer: agent
 order: 10
 title: Agent 구조
 question: 에이전트를 어떤 구조로 구성할까요?
 options:
+  # ADR-017 변경(2026-11-06): 단일 에이전트 허용. 2026-11-05에 뺀 선택지를 같은 id와 문구로 되살림
+  - id: single
+    name: Single Agent
+    summary: 에이전트 하나가 도구를 사용해 작업 전체를 처리합니다.
+    pros: [구현과 디버깅이 가장 쉽습니다]
+    cons: [역할이 많아지면 프롬프트와 도구 관리가 어려워집니다]
+    learning_difficulty: low
+    ops_burden: low
+    cost_nature: 호출량 기반
   - id: pipeline
     name: 고정 파이프라인
     summary: 정해진 순서대로 여러 단계를 코드로 연결합니다.
@@ -30,6 +39,7 @@ options:
     ops_burden: high
     cost_nature: 호출량 기반 (라우팅 호출 추가)
 signals:
+  single: [작업 단계가 적음, 짧은 기간, 소규모 팀]
   pipeline: [작업 단계가 고정적임, 재현 가능한 평가 필요]
   supervisor: [요청 종류에 따라 처리 경로가 크게 달라짐]
   hierarchical: [에이전트가 많고 담당 팀이 나뉘어 있음]

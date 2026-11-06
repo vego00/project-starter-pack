@@ -30,6 +30,20 @@ def _reach(start: str, graph: dict[str, set[str]]) -> set[str]:
     return seen
 
 
+def _reach_without(start: str, graph: dict[str, set[str]], blocked: set[str]) -> set[str]:
+    """Nodes reachable from `start`, itself included, without passing through `blocked`."""
+    if start in blocked or start not in graph:
+        return set()
+    seen = {start}
+    stack = [start]
+    while stack:
+        for node in graph.get(stack.pop(), ()):
+            if node not in blocked and node not in seen:
+                seen.add(node)
+                stack.append(node)
+    return seen
+
+
 def _flow_graph(design: ServiceDesign, known: set[str]) -> dict[str, set[str]]:
     """Over-limit exits count as edges: a loop may leave only through its limit."""
     graph: dict[str, set[str]] = {node_id: set() for node_id in known}
@@ -225,10 +239,13 @@ def _check_decisions(
 
     needs_approval = "approval" in (target.human_checks or [])
     human_ids = {node.id for node in humans}
+    # An external write is after approval only if every path from the entry passes a human node.
+    # Reaching it from a human is not enough: a rejection edge loops back to earlier nodes.
+    before_human = _reach_without(design.workflow.entry, graph, human_ids)
     for node in design.nodes:
-        if not any(tool.access == "write" for tool in node.tools):
+        if not any(tool.access == "external_write" for tool in node.tools):
             continue
-        if any(node.id in _reach(human, graph) for human in human_ids & set(graph)):
+        if node.id not in before_human:
             continue
         message = f"노드 {node.id}가 사람 확인 없이 외부에 쓰기를 해요"
         if needs_approval:
@@ -250,6 +267,30 @@ def _check_decisions(
         kept = carried.get(unknown.text)
         if kept is None or (unknown.blocks_confirmation and not kept.blocks_confirmation):
             issues.error("unknown.dropped", f"미확인 사항이 설계에서 빠졌어요: {unknown.text}")
+
+
+def _check_branches(design: ServiceDesign, constraints: DesignConstraints, issues: _Issues) -> None:
+    """Warnings for now: designs came out as one straight line with no failure or rejection path."""
+    outgoing: dict[str, list] = {}
+    for edge in design.workflow.edges:
+        outgoing.setdefault(edge.source, []).append(edge)
+    for source, edges in outgoing.items():
+        if len(edges) > 1 and any(edge.condition is None for edge in edges):
+            issues.warning(
+                "branch.unlabelled", f"노드 {source}에서 나가는 길 중 조건이 없는 길이 있어요"
+            )
+    routed = constraints.target.routing in ("model", "model_with_subgraphs")
+    if routed and not any(len(edges) > 1 for edges in outgoing.values()):
+        issues.warning(
+            "branch.no_routing", "Supervisor 구조를 골랐는데 다음 노드를 고르는 분기가 없어요"
+        )
+    if "approval" in (constraints.target.human_checks or []):
+        for node in design.nodes:
+            if node.kind == "human" and len(outgoing.get(node.id, [])) < 2:
+                issues.warning(
+                    "branch.no_rejection",
+                    f"사람 승인 노드 {node.id}에 거절했을 때 가는 길이 없어요",
+                )
 
 
 def _check_tracing(design: ServiceDesign, issues: _Issues) -> None:
@@ -290,5 +331,6 @@ def validate_design(design: ServiceDesign, constraints: DesignConstraints) -> li
     _check_data_flow(design, graph, issues)
     _check_owners(design, issues)
     _check_decisions(design, constraints, graph, issues)
+    _check_branches(design, constraints, issues)
     _check_tracing(design, issues)
     return list(issues)
