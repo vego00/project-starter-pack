@@ -420,6 +420,14 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
             return _reject("다시 고를 카드를 지정해 주세요.")
         return _reopen(state, action.card_id)
 
+    def done_gate(state: JourneyState) -> dict[str, Any]:
+        raw = _wait_for_user({"type": "done", "error": state.gate_error})
+        try:
+            action = ISSUE_ACTION.validate_python(raw)
+        except ValidationError:
+            return _reject("다시 고를 카드를 지정해 주세요.")
+        return _reopen(state, action.card_id)
+
     return {
         "gcb_drafter": gcb_drafter,
         "gcb_gate": gcb_gate,
@@ -438,4 +446,5 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
         "composer": composer,
         "designer": designer,
         "issue_gate": issue_gate,
+        "done_gate": done_gate,
     }

@@ -403,7 +403,7 @@ def test_a_finished_journey_saves_its_design_in_a_shape_that_loads_again():
     )
 
     result = graph.invoke(journey_input(journey_id, spec), config)
-    while interrupts := result.get("__interrupt__"):
+    while (interrupts := result["__interrupt__"])[0].value["type"] != "done":
         card = interrupts[0].value["card"]
         action = {"action": "select", "option_id": card["recommendation"]["option_id"]}
         result = graph.invoke(resume_command(action), config)

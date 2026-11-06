@@ -5,7 +5,7 @@ from time import perf_counter
 from typing import Any
 from uuid import UUID
 
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import START, StateGraph
 from langgraph.types import Checkpointer
 from pydantic import BaseModel
 
@@ -35,6 +35,7 @@ NODE_WRITES: dict[str, set[str]] = {
     "composer": {"artifacts"},
     "designer": {"design"},
     "issue_gate": GATE_WRITES,
+    "done_gate": GATE_WRITES,
 }
 
 
@@ -100,6 +101,10 @@ def _after_issue(state: JourneyState) -> str:
     return "issue_gate" if state.gate_outcome == "invalid" else "constraint_engine"
 
 
+def _after_done(state: JourneyState) -> str:
+    return "done_gate" if state.gate_outcome == "invalid" else "constraint_engine"
+
+
 def build_graph(registry: Registry, *, checkpointer: Checkpointer, deps: JourneyDeps | None = None):
     nodes = build_nodes(registry, deps or JourneyDeps())
     graph = StateGraph(JourneyState)
@@ -125,7 +130,9 @@ def build_graph(registry: Registry, *, checkpointer: Checkpointer, deps: Journey
     graph.add_edge("qa", "decision_gate")
     graph.add_conditional_edges("reviewer", _after_review, ["issue_gate", "composer"])
     graph.add_edge("composer", "designer")
-    graph.add_edge("designer", END)
+    # A finished journey waits here, so a decision can still change and the design follow it.
+    graph.add_edge("designer", "done_gate")
+    graph.add_conditional_edges("done_gate", _after_done, ["done_gate", "constraint_engine"])
     graph.add_conditional_edges("issue_gate", _after_issue, ["issue_gate", "constraint_engine"])
     return graph.compile(checkpointer=checkpointer)
 

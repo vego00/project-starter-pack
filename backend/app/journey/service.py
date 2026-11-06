@@ -80,6 +80,8 @@ class JourneyView(BaseModel):
     warnings: list[str]
     notice: str | None
     design: DesignView | None = None
+    # Finished journeys made before the end wait existed cannot change a decision.
+    can_reopen: bool = False
 
 
 def _pending_prompt(snapshot: StateSnapshot) -> dict[str, Any] | None:
@@ -96,6 +98,8 @@ def _resume_payload(action: JourneyAction) -> Any:
 
 
 def _allowed(prompt_type: str, action: JourneyAction) -> bool:
+    if prompt_type == "done":
+        return isinstance(action, ReopenAction)
     if prompt_type == "clarify":
         return isinstance(action, ClarifyAction)
     if prompt_type == "gcb":
@@ -134,12 +138,15 @@ class JourneyService:
                     409, "stale_revision", "화면이 최신 상태가 아니에요. 최신 내용을 불러왔어요."
                 )
             prompt = _pending_prompt(snapshot)
-            if prompt is None:
+            finished = prompt is None or prompt["type"] == "done"
+            if finished and not (prompt is not None and isinstance(action, ReopenAction)):
                 raise JourneyError(409, "journey_finished", "이미 끝난 여정이에요.")
             if not _allowed(prompt["type"], action):
                 raise JourneyError(
                     409, "action_not_allowed", "지금 단계에서 할 수 없는 동작이에요."
                 )
+            if prompt["type"] == "done":
+                self._check_reopen(JourneyState.model_validate(snapshot.values), action)
             config = journey_config(journey_id)
             self._graph.invoke(resume_command(_resume_payload(action)), config)
             return self._view(journey_id, self._snapshot(journey_id))
@@ -187,6 +194,17 @@ class JourneyService:
             warnings=[*design.warnings, *issues],
             files=sorted(files),
         )
+
+    def _check_reopen(self, state: JourneyState, action: ReopenAction) -> None:
+        """Rejects before the graph runs, so a finished journey never shows a refusal as a step."""
+        if action.card_id in state.implied:
+            raise JourneyError(
+                409,
+                "reopen_rejected",
+                "자동으로 정해진 결정이에요. 이 결정을 만든 앞선 선택을 바꿔 주세요.",
+            )
+        if action.card_id not in state.decisions:
+            raise JourneyError(409, "reopen_rejected", "정하지 않은 카드는 다시 고를 수 없어요.")
 
     def _lock(self, journey_id: UUID) -> Any:
         with self._locks_guard:
@@ -243,14 +261,21 @@ class JourneyService:
 
     def _view(self, journey_id: UUID, snapshot: StateSnapshot) -> JourneyView:
         state = JourneyState.model_validate(snapshot.values)
+        prompt = _pending_prompt(snapshot)
+        waiting_at_end = prompt is not None and prompt["type"] == "done"
+        status = state.status
+        if prompt is not None and prompt["type"] in ("gcb", "clarify", "decision"):
+            # A reopened card is asked again after the reviewer last said "completed".
+            status = "in_progress"
         return JourneyView(
             journey_id=journey_id,
             revision=len(state.trace),
-            status=state.status,
+            status=status,
             idea=state.project_spec.idea,
-            prompt=_pending_prompt(snapshot),
+            prompt=None if waiting_at_end else prompt,
             cards=self._card_statuses(state),
             warnings=[c.message for c in state.conflicts if c.severity == "warning"],
             notice=self._notice(),
             design=self._design_view(state),
+            can_reopen=waiting_at_end,
         )
