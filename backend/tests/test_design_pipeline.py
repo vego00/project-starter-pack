@@ -439,6 +439,26 @@ def test_a_model_failure_never_fails_the_journey():
     assert view["cards"]
 
 
+def test_the_full_design_is_readable_after_the_journey():
+    with make_client(ScriptedDesigner(draft())) as client:
+        view = run_journey(client)
+        response = client.get(f"/api/v1/journeys/{view['journey_id']}/design")
+
+    assert response.status_code == 200
+    design = ServiceDesign.model_validate(response.json())
+    assert [n.id for n in design.nodes] == ["search", "answer"]
+    assert design.workflow.edges
+
+
+def test_no_design_before_the_journey_ends():
+    with make_client() as client:
+        view = client.post("/api/v1/journeys", json={"idea": IDEA}).json()
+        response = client.get(f"/api/v1/journeys/{view['journey_id']}/design")
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "design_unavailable"
+
+
 def test_no_package_before_the_journey_ends():
     with make_client() as client:
         view = client.post("/api/v1/journeys", json={"idea": IDEA}).json()

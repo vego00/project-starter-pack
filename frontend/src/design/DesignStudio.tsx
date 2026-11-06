@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { getDesign, getJourney } from "../api";
 import {
   applyNodeChanges,
   Background,
@@ -807,7 +808,65 @@ function Studio({ item }: { item: DesignCase }) {
   );
 }
 
-export default function DesignStudio() {
+/** The design a finished journey produced. Edits stay in this tab until saving exists. */
+function JourneyDesign({ journeyId }: { journeyId: string }) {
+  const [item, setItem] = useState<DesignCase | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
+  useEffect(() => {
+    Promise.all([getDesign(journeyId), getJourney(journeyId)])
+      .then(([design, journey]) =>
+        setItem({
+          id: journeyId,
+          title: journey.idea,
+          idea: journey.idea,
+          design,
+        }),
+      )
+      .catch((error: unknown) =>
+        setFailure(
+          error instanceof Error ? error.message : "설계를 불러오지 못했어요.",
+        ),
+      );
+  }, [journeyId]);
+  return (
+    <div className="app studio">
+      <header className="topbar">
+        <h1>설계 구조 보기</h1>
+        <a className="button" href={`/?journey=${journeyId}`}>
+          결과로 돌아가기
+        </a>
+      </header>
+      {failure && (
+        <p className="note warn" role="alert">
+          {failure}
+        </p>
+      )}
+      {!item && !failure && (
+        <p className="panel muted">설계를 불러오는 중이에요…</p>
+      )}
+      {item && (
+        <>
+          <p className="note">
+            {item.idea} 고친 내용은 아직 저장되지 않아요. 빌드 묶음은 처음 만든
+            설계 그대로예요.
+          </p>
+          <Studio key={item.id} item={item} />
+        </>
+      )}
+    </div>
+  );
+}
+
+export default function DesignStudio({
+  journeyId = null,
+}: {
+  journeyId?: string | null;
+}) {
+  if (journeyId) return <JourneyDesign journeyId={journeyId} />;
+  return <MockDesigns />;
+}
+
+function MockDesigns() {
   const cases = useMemo(loadDesignCases, []);
   const [caseId, setCaseId] = useState(cases[0].id);
   const item = cases.find((one) => one.id === caseId)!;

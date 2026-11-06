@@ -4,6 +4,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import DesignStudio from "../src/design/DesignStudio";
+import { DESIGN_CASES } from "../src/design/mock";
 
 beforeAll(() => {
   vi.stubGlobal(
@@ -148,5 +149,66 @@ describe("DesignStudio", () => {
     expect(requirement).toHaveAttribute("aria-pressed", "true");
     await user.selectOptions(screen.getByLabelText("예시"), "straight");
     expect(within(panel()).getByText("처음 설계 그대로예요.")).toBeVisible();
+  });
+});
+
+describe("DesignStudio for a journey", () => {
+  const ID = "e29a4ac6-f90c-4f97-91d6-d99acf27351f";
+  afterEach(() => vi.unstubAllGlobals());
+
+  function serve(design: { status: number; body: unknown }) {
+    const fetchMock = vi.fn(async (path: string) => {
+      if (path.endsWith("/design"))
+        return new Response(JSON.stringify(design.body), {
+          status: design.status,
+        });
+      return new Response(
+        JSON.stringify({
+          journey_id: ID,
+          revision: 1,
+          status: "completed",
+          idea: "실제 여정의 아이디어",
+          prompt: null,
+          cards: [],
+          warnings: [],
+          notice: null,
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("shows the journey's own design, not the examples", async () => {
+    const fetchMock = serve({ status: 200, body: DESIGN_CASES[1].design });
+    render(<DesignStudio journeyId={ID} />);
+
+    expect(await screen.findByText(/실제 여정의 아이디어/)).toBeVisible();
+    expect(screen.queryByText("예시 데이터")).toBeNull();
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/v1/journeys/${ID}/design`,
+      expect.anything(),
+    );
+    await userEvent.setup().click(screen.getByText(/글로 보기/));
+    const outline = screen.getByText(/글로 보기/).closest("details")!;
+    const first = DESIGN_CASES[1].design.nodes[0].id;
+    expect(within(outline).getByRole("button", { name: first })).toBeVisible();
+  });
+
+  it("explains when the design is not ready", async () => {
+    serve({
+      status: 409,
+      body: {
+        error: {
+          code: "design_unavailable",
+          message: "결정을 모두 마치면 볼 수 있어요.",
+        },
+      },
+    });
+    render(<DesignStudio journeyId={ID} />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "결정을 모두 마치면 볼 수 있어요.",
+    );
   });
 });
