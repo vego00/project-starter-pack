@@ -424,19 +424,31 @@ def test_an_undecided_card_adds_no_limit():
 
 
 def give_write_tool(d):
-    by_id(d, "publish")["tools"].append({"name": "send", "access": "write", "reason": "전송"})
+    by_id(d, "publish")["tools"].append(
+        {"name": "send", "access": "external_write", "reason": "전송"}
+    )
 
 
 def test_writing_before_a_chosen_approval_is_an_error():
     def write_before_approving(d):
         add_human(d)
-        by_id(d, "grade")["tools"].append({"name": "send", "access": "write", "reason": "전송"})
+        by_id(d, "grade")["tools"].append(
+            {"name": "send", "access": "external_write", "reason": "전송"}
+        )
 
     found = issues(changed(write_before_approving), constraints(human_checks=["approval"]))
 
     assert [(i.rule_id, i.severity) for i in found] == [
         ("permission.write_without_approval", "error")
     ]
+
+
+def test_saving_inside_the_service_before_approval_passes():
+    def save_before_approving(d):
+        add_human(d)
+        by_id(d, "grade")["tools"].append({"name": "save", "access": "write", "reason": "기록"})
+
+    assert issues(changed(save_before_approving), constraints(human_checks=["approval"])) == []
 
 
 def test_writing_after_approval_passes():

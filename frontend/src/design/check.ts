@@ -114,7 +114,7 @@ export function checkDesign(design: Design): Issue[] {
 
   const humans = design.nodes.filter((node) => node.kind === "human");
   for (const node of design.nodes) {
-    if (!node.tools.some((tool) => tool.access === "write")) continue;
+    if (!node.tools.some((tool) => tool.access === "external_write")) continue;
     if (!humans.some((human) => allReach.get(human.id)!.has(node.id))) {
       add("warning", `${node.id}: 사람 확인 없이 외부에 써요.`, [node.id]);
     }

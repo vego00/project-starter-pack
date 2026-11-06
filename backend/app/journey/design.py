@@ -113,8 +113,11 @@ class Port(_Record):
 
 
 class ToolPermission(_Record):
+    """`write` stays inside the service (its own store). `external_write` leaves a mark outside it,
+    such as sending a message or a payment, and is the kind an approval must come before."""
+
     name: Id
-    access: Literal["read", "write"]
+    access: Literal["read", "write", "external_write"]
     reason: Text
 
 

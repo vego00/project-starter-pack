@@ -11,7 +11,7 @@ const node = z.object({
   tools: z.array(
     z.object({
       name: z.string(),
-      access: z.enum(["read", "write"]),
+      access: z.enum(["read", "write", "external_write"]),
       reason: z.string(),
     }),
   ),

@@ -239,11 +239,11 @@ def _check_decisions(
 
     needs_approval = "approval" in (target.human_checks or [])
     human_ids = {node.id for node in humans}
-    # A write is after approval only if every path from the entry passes a human node. Reaching
-    # it from a human is not enough: a rejection edge loops back to nodes before the approval.
+    # An external write is after approval only if every path from the entry passes a human node.
+    # Reaching it from a human is not enough: a rejection edge loops back to earlier nodes.
     before_human = _reach_without(design.workflow.entry, graph, human_ids)
     for node in design.nodes:
-        if not any(tool.access == "write" for tool in node.tools):
+        if not any(tool.access == "external_write" for tool in node.tools):
             continue
         if node.id not in before_human:
             continue
