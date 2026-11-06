@@ -265,6 +265,16 @@ FIX_HINTS = {
 }
 
 
+def score_design(design: ServiceDesign) -> tuple[int, int]:
+    """Lower is better: broken rules first, then warnings. The validator decides, not a model,
+    so the same design always gets the same score."""
+    issues = design.validation or []
+    return (
+        sum(issue.severity == "error" for issue in issues),
+        sum(issue.severity == "warning" for issue in issues),
+    )
+
+
 def _errors(design: ServiceDesign) -> list[str]:
     return [
         f"{issue.message} (고치는 법: {FIX_HINTS[issue.rule_id]})"

@@ -5,7 +5,7 @@ from uuid import uuid4
 
 import pytest
 from app.config import Settings
-from app.journey.design import ServiceDesign
+from app.journey.design import ServiceDesign, ValidationIssue
 from app.journey.design_constraints import derive_design_constraints
 from app.journey.design_generator import (
     MAX_ATTEMPTS,
@@ -13,6 +13,7 @@ from app.journey.design_generator import (
     DesignAttempt,
     DesignDraft,
     generate_design,
+    score_design,
     template_design,
 )
 from app.journey.llm import provider_schema
@@ -305,6 +306,23 @@ def test_the_designer_counts_toward_the_model_call_budget():
 @pytest.fixture
 def design() -> ServiceDesign:
     return generate_design(journey(), REGISTRY, ScriptedDesigner(draft())).design.current
+
+
+def with_issues(design: ServiceDesign, *severities: str) -> ServiceDesign:
+    issues = [ValidationIssue(rule_id="r", severity=s, message="m") for s in severities]
+    return design.model_copy(update={"validation": issues})
+
+
+def test_a_broken_rule_outweighs_any_number_of_warnings(design):
+    one_error = with_issues(design, "error")
+    many_warnings = with_issues(design, *["warning"] * 5)
+
+    assert score_design(many_warnings) < score_design(one_error)
+    assert score_design(with_issues(design)) == (0, 0)
+
+
+def test_the_same_design_always_gets_the_same_score(design):
+    assert score_design(design) == score_design(design.model_copy())
 
 
 def test_the_package_has_files_for_both_kinds_of_agent(design):
