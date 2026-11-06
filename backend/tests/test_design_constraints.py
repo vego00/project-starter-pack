@@ -24,6 +24,8 @@ AGENT_PATH = {
     "agent.topology": "pipeline",
     "agent.hitl": "none",
     "model.provider": "gemini",
+    "data.primary_db": "postgres",
+    "data.vector_store": "pgvector",
     "data.checkpointer": "postgres",
     "backend.execution": "sync",
     "devops.orchestration": "none",
@@ -128,6 +130,13 @@ def test_execution_is_passed_through():
     assert derive(with_choice(backend__execution="queue")).target.execution == "queue"
 
 
+def test_storage_choices_are_passed_through():
+    target = derive(with_choice(data__primary_db="none", data__vector_store="none")).target
+
+    assert (target.primary_db, target.vector_store) == ("none", "none")
+    assert derive().target.vector_store == "pgvector"
+
+
 # Target service and starter stay apart
 
 
@@ -229,7 +238,11 @@ def test_a_completed_journey_saved_on_old_cards_still_derives():
 
     assert result.target.routing == "fixed"
     assert result.target.allowed_providers == ["gemini"]
-    assert result.unknowns == []
+    # Cards added after the journey finished were never asked: open, but not blocking.
+    assert [(u.text, u.blocks_confirmation) for u in result.unknowns] == [
+        ("아직 정하지 않은 결정: 데이터 저장소", False),
+        ("아직 정하지 않은 결정: 검색 저장소", False),
+    ]
     changed = {"Agent 구조"}
     assert {w.split(" 카드가")[0] for w in result.warnings if "바뀌었어요" in w} == changed
 

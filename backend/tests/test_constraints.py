@@ -52,6 +52,19 @@ def test_requires_violation_is_a_conflict_once_all_are_decided(registry):
     assert result.conflicts[0].severity == "error"
 
 
+def test_pgvector_needs_postgres_as_the_primary_db(registry):
+    assert set(
+        evaluate(registry, {"data.vector_store": "pgvector"}).blocked["data.primary_db"]
+    ) == {
+        "sqlite",
+        "none",
+    }
+    both = evaluate(registry, {"data.vector_store": "pgvector", "data.primary_db": "sqlite"})
+    assert rule_ids(both.conflicts) == {"pgvector-needs-postgres"}
+    other = evaluate(registry, {"data.vector_store": "qdrant", "data.primary_db": "none"})
+    assert other.conflicts == []
+
+
 def test_requires_is_satisfied_by_an_allowed_option(registry):
     result = evaluate(
         registry,

@@ -27,6 +27,8 @@ CONSTRAINING_CARDS = {
     "agent.topology",
     "agent.hitl",
     "model.provider",
+    "data.primary_db",
+    "data.vector_store",
     "data.checkpointer",
     "backend.execution",
 }
@@ -53,6 +55,9 @@ class TargetServiceConstraints(_Record):
     allowed_providers: list[str] | None = None
     resumable: bool | None = None
     execution: str | None = None
+    # "none" means the design must not add that store or the tools that read and write it.
+    primary_db: str | None = None
+    vector_store: str | None = None
 
 
 class StarterGuarantees(_Record):
@@ -159,6 +164,8 @@ def derive_design_constraints(state: JourneyState, registry: Registry) -> Design
         allowed_providers=None if provider is None else [provider],
         resumable=RESUMABLE.get(usable.get("data.checkpointer", "")),
         execution=usable.get("backend.execution"),
+        primary_db=usable.get("data.primary_db"),
+        vector_store=usable.get("data.vector_store"),
     )
     if usable.get("data.checkpointer") == "other":
         warnings.append("직접 지정한 저장소가 중단 후 재개를 지원하는지 확인하세요.")

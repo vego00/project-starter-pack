@@ -21,6 +21,8 @@ ZIP_TIME = (2026, 1, 1, 0, 0, 0)
 
 INFRA_CARDS = (
     "model.provider",
+    "data.primary_db",
+    "data.vector_store",
     "data.checkpointer",
     "backend.execution",
     "devops.orchestration",

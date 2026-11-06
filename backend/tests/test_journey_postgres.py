@@ -65,15 +65,16 @@ def test_journey_continues_across_processes_until_completed():
     assert step(journey_id, "resume", select("pipeline"))["card_id"] == "agent.hitl"
     assert step(journey_id, "resume", select("question"))["card_id"] == "model.provider"
 
-    for option_id in ("gemini", "postgres", "sync", "none", "external_api"):
+    walk = ("gemini", "postgres", "pgvector", "postgres", "sync", "none", "external_api")
+    for option_id in walk:
         result = step(journey_id, "resume", select(option_id))
     assert result["card_id"] == "cloud.target"
-    assert len(result["decisions"]) == 7
+    assert len(result["decisions"]) == 9
 
     final = step(journey_id, "resume", select("local"))
     assert final["card_id"] is None
     assert final["status"] == "completed"
-    assert len(final["decisions"]) == 8
+    assert len(final["decisions"]) == len(load_registry().cards)
 
 
 @needs_postgres

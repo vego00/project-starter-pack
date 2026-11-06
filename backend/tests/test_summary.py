@@ -12,6 +12,8 @@ IDEA = "강의 자료를 찾아 답하는 멀티 에이전트 서비스"
 CHOICES = {
     "agent.hitl": "approval",
     "model.provider": "gemini",
+    "data.primary_db": "postgres",
+    "data.vector_store": "pgvector",
     "data.checkpointer": "postgres",
     "backend.execution": "queue",
     "devops.orchestration": "none",
@@ -164,7 +166,13 @@ def test_components_come_from_chosen_options_only():
     assert "`compose:worker`" in document and "`compose:redis`" in document
     assert "`compose:ollama`" not in document
 
-    simple = compose(make_state(choices={**CHOICES, "backend.execution": "sync"}))
+    simple_choices = {
+        **CHOICES,
+        "backend.execution": "sync",
+        "data.primary_db": "none",
+        "data.vector_store": "none",
+    }
+    simple = compose(make_state(choices=simple_choices))
     assert "추가될 구성 요소" not in simple
 
 
