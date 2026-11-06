@@ -315,12 +315,21 @@ def test_the_package_has_files_for_both_kinds_of_agent(design):
         ".claude/settings.json",
         ".claude/skills/build-service/SKILL.md",
         ".claude/skills/verify-design/SKILL.md",
-        ".claude/agents/search.md",
-        ".claude/agents/answer.md",
+        "agents/search.md",
+        "agents/answer.md",
         "docs/multi-agent-design.md",
         "docs/infrastructure.md",
         "docs/lessons.md",
     } == set(files)
+
+
+def test_service_agents_stay_out_of_the_coding_tool_folder(design):
+    files = build_package(design, REGISTRY, IDEA)
+
+    # Claude Code loads .claude/agents/ as its own subagents; a service node is not one.
+    assert not [path for path in files if path.startswith(".claude/agents/")]
+    assert "에이전트 노드가 실행 중 읽는 지시문" in files["BUILD.md"]
+    assert files["agents/search.md"].startswith("---\nname: search\n")
 
 
 def test_infrastructure_stays_out_of_the_agent_design(design):
@@ -352,7 +361,7 @@ def test_agent_names_are_valid_and_unique(design):
 
     files = build_package(renamed, REGISTRY, IDEA)
 
-    assert {".claude/agents/my-agent.md", ".claude/agents/my-agent-2.md"} <= set(files)
+    assert {"agents/my-agent.md", "agents/my-agent-2.md"} <= set(files)
 
 
 def test_a_template_package_says_so(design):
