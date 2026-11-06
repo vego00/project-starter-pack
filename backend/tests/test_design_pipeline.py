@@ -170,6 +170,53 @@ def test_a_failed_validation_is_logged_by_rule_without_its_message(caplog):
     assert "에이전트가" not in caplog.text
 
 
+# Several candidates (Graph of Thoughts: Generate k, Score, KeepBest)
+
+
+def no_call_limit():
+    """Valid but with one warning: no model call limit."""
+    workflow = {**draft().workflow.model_dump(), "max_model_calls": None}
+    return draft(workflow=workflow)
+
+
+def test_candidates_are_drafted_from_scratch_and_the_best_is_kept():
+    designer = ScriptedDesigner(too_few_agents(), no_call_limit(), draft())
+
+    outcome = generate_design(journey(), REGISTRY, designer, attempts=3, candidates=3)
+
+    assert designer.problems == [[], [], []]
+    assert outcome.design.status == "review_required"
+    assert outcome.design.current.workflow.max_model_calls == 4  # fewer warnings won
+
+
+def test_a_draft_that_broke_the_contract_is_not_a_candidate():
+    designer = ScriptedDesigner(contract_error(), too_few_agents(), no_call_limit())
+
+    outcome = generate_design(journey(), REGISTRY, designer, attempts=3, candidates=3)
+
+    assert outcome.design.status == "review_required"
+    assert outcome.design.current.workflow.max_model_calls is None
+
+
+def test_when_every_candidate_is_broken_the_best_one_is_corrected():
+    designer = ScriptedDesigner(too_few_agents(), contract_error(), draft())
+
+    outcome = generate_design(journey(), REGISTRY, designer, attempts=3, candidates=2)
+
+    assert designer.problems[:2] == [[], []]
+    assert any("에이전트" in problem for problem in designer.problems[2])
+    assert outcome.design.status == "review_required"
+
+
+def test_candidates_never_exceed_the_attempts():
+    designer = ScriptedDesigner(too_few_agents(), too_few_agents())
+
+    outcome = generate_design(journey(), REGISTRY, designer, attempts=2, candidates=5)
+
+    assert len(designer.problems) == 2
+    assert outcome.design.current.provenance.source == "template"
+
+
 def contract_error():
     fields = draft().model_dump()
     fields["state_fields"] = [
