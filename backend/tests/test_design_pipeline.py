@@ -161,6 +161,13 @@ def test_validation_errors_go_back_to_the_model_once():
     assert outcome.input_tokens == 20
 
 
+def test_a_failed_validation_is_logged_by_rule_without_its_message(caplog):
+    generate_design(journey(), REGISTRY, ScriptedDesigner(too_few_agents(), draft()))
+
+    assert "rules=['decision.too_few_agents']" in caplog.text
+    assert "에이전트가" not in caplog.text
+
+
 def contract_error():
     fields = draft().model_dump()
     fields["state_fields"] = [
