@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import App from "../src/App";
 
@@ -25,6 +31,7 @@ function optionView(id: string, name: string, extra = {}) {
     implies: {},
     implied_messages: [],
     warnings: [],
+    must_change: [],
     artifacts: [],
     ...extra,
   };
@@ -55,6 +62,7 @@ function decisionPrompt(overrides = {}, cardOverrides = {}) {
       recommendation,
       evidence: [],
       advice_source: "mock",
+      to_review: [],
       learning_refs: [],
       div_refs: ["P1"],
       ...cardOverrides,
@@ -147,6 +155,13 @@ async function startWith(view: unknown) {
   );
   await user.click(screen.getByRole("button", { name: "결정 시작하기" }));
   return { user, mock };
+}
+
+async function openStage(
+  user: ReturnType<typeof userEvent.setup>,
+  name: RegExp,
+) {
+  await user.click(await screen.findByRole("button", { name }));
 }
 
 beforeEach(() => {
@@ -258,6 +273,21 @@ describe("restoring", () => {
     expect(window.location.search).toContain(ID);
   });
 
+  it("reopens a journey saved before the change preview existed", async () => {
+    stubStorage({ [LAST_KEY]: ID });
+    const saved: unknown = JSON.parse(
+      JSON.stringify(journey()),
+      (key: string, value: unknown) =>
+        key === "must_change" || key === "to_review" ? undefined : value,
+    );
+    stubFetch(() => Response.json(saved));
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "사람 확인이 필요한가요?" }),
+    ).toBeVisible();
+  });
+
   it("falls back to a new project when the journey no longer exists", async () => {
     const items = stubStorage({ [LAST_KEY]: ID });
     stubFetch(() =>
@@ -304,39 +334,66 @@ describe("restoring", () => {
 describe("workspace tabs", () => {
   const press = (name: string) => screen.findByRole("button", { name });
 
-  it("closes and reopens each side", async () => {
+  it("closes the card tab to give the graph the page", async () => {
     const { user } = await startWith(journey());
 
-    await user.click(await press("단계 탭 닫기"));
-    expect(screen.getByRole("main")).toHaveClass("no-rail");
-    expect(await press("단계 탭 열기")).toHaveAttribute(
-      "aria-expanded",
-      "false",
-    );
-    expect(screen.getByRole("main")).not.toHaveClass("no-card");
+    await user.click(await press("카드 닫기"));
+    expect(screen.getByRole("main")).toHaveClass("no-card");
+    expect(await press("카드 열기")).toHaveAttribute("aria-expanded", "false");
 
-    await user.click(await press("단계 탭 열기"));
-    expect(screen.getByRole("main")).not.toHaveClass("no-rail");
+    await user.click(await press("카드 열기"));
+    expect(screen.getByRole("main")).not.toHaveClass("no-card");
   });
 
-  it("gives the graph the page and can bring both sides back", async () => {
+  it("asks before leaving a journey in progress", async () => {
     const { user } = await startWith(journey());
 
-    await user.click(await press("그래프 넓게 보기"));
-    expect(screen.getByRole("main")).toHaveClass("no-rail", "no-card");
+    await user.click(await press("새 프로젝트"));
+    expect(screen.queryByLabelText("프로젝트 아이디어")).toBeNull();
+    await user.click(await press("계속하기"));
+    expect(screen.queryByLabelText("프로젝트 아이디어")).toBeNull();
 
-    await user.click(await press("탭 모두 열기"));
-    expect(screen.getByRole("main")).not.toHaveClass("no-rail");
-    expect(screen.getByRole("main")).not.toHaveClass("no-card");
+    await user.click(await press("새 프로젝트"));
+    await user.click(await press("나가기"));
+    expect(screen.getByLabelText("프로젝트 아이디어")).toBeVisible();
   });
 
   it("shows the card tab when moving to another card", async () => {
     const { user } = await startWith(journey());
 
-    await user.click(await press("카드 탭 닫기"));
+    await user.click(await press("카드 닫기"));
+    await openStage(user, /^시스템 구성 \d/);
     await user.click(await press("cloud.target 제목 먼저 정하기"));
 
     expect(screen.getByRole("main")).not.toHaveClass("no-card");
+  });
+
+  it("opens one stage at a time from the strip", async () => {
+    const { user } = await startWith(journey());
+    const tab = await screen.findByRole("button", {
+      name: /^에이전트 설계 \d/,
+    });
+    expect(tab).toHaveAttribute("aria-expanded", "false");
+
+    await user.click(tab);
+    expect(tab).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("agent.hitl 제목")).toBeVisible();
+
+    await openStage(user, /^시스템 구성 \d/);
+    expect(tab).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("agent.hitl 제목")).toBeNull();
+  });
+});
+
+describe("theme", () => {
+  it("switches between light and dark from the header", async () => {
+    const { user } = await startWith(journey());
+    const before = document.documentElement.dataset.theme;
+    const name = before === "dark" ? "라이트 모드" : "다크 모드";
+
+    await user.click(await screen.findByRole("button", { name }));
+
+    expect(document.documentElement.dataset.theme).not.toBe(before);
   });
 });
 
@@ -344,24 +401,20 @@ describe("decision card", () => {
   it("is honest that the recommendation is a mock default", async () => {
     await startWith(journey());
 
-    expect(await screen.findByText("추천: 없음")).toBeVisible();
-    expect(
-      screen.getByText(/내 프로젝트를 분석한 결과는 아니에요/),
-    ).toBeVisible();
+    expect(await screen.findByText("추천")).toBeVisible();
     expect(screen.queryByText(/확신도/)).not.toBeInTheDocument();
     expect(screen.queryByText(/AI가 내 프로젝트/)).not.toBeInTheDocument();
-    expect(screen.getByText(/연결된 강의 자료 없음/)).toBeVisible();
     expect(screen.getByText("모델 미연결 상태입니다.")).toBeVisible();
   });
 
-  it("sends the current revision with a selection", async () => {
+  it("sends the current revision when the recommended option is taken", async () => {
     const { user, mock } = await startWith(journey());
 
     await user.click(await screen.findByRole("button", { name: "없음 선택" }));
 
     expect(bodyOf(mock.mock.calls[1])).toEqual({
       revision: 7,
-      action: { action: "select", option_id: "none" },
+      action: { action: "accept_recommendation" },
     });
   });
 
@@ -526,7 +579,7 @@ describe("decision card", () => {
     await waitFor(() => expect(mock).toHaveBeenCalledTimes(2));
     expect(bodyOf(mock.mock.calls[1]).action).toEqual({ action: "defer" });
 
-    await user.click(screen.getByRole("button", { name: "추천대로 진행" }));
+    await user.click(screen.getByRole("button", { name: "없음 선택" }));
     await waitFor(() => expect(mock).toHaveBeenCalledTimes(3));
     expect(bodyOf(mock.mock.calls[2]).action).toEqual({
       action: "accept_recommendation",
@@ -582,9 +635,14 @@ describe("gcb", () => {
   it("sends what the user wrote, trimmed", async () => {
     const { user, mock } = await startWith(journey({ prompt, revision: 2 }));
 
-    await user.type(await screen.findByLabelText(/^Goal:/), "  달성된 상태  ");
-    await user.type(screen.getByLabelText(/^Boundary:/), "출처 표시");
-    await user.click(screen.getByRole("button", { name: "다음" }));
+    await user.type(
+      await screen.findByLabelText(/끝났을 때/),
+      "  달성된 상태  ",
+    );
+    await user.type(screen.getByLabelText(/꼭 지켜야/), "출처 표시");
+    await user.click(
+      screen.getByRole("button", { name: "이 내용으로 결정 시작" }),
+    );
 
     expect(bodyOf(mock.mock.calls[1])).toEqual({
       revision: 2,
@@ -609,14 +667,16 @@ describe("gcb", () => {
     );
 
     expect(
-      await screen.findByText(/AI가 아이디어를 읽고 쓴 초안/),
+      await screen.findByText(/AI가 아이디어를 읽고 채운 초안/),
     ).toBeVisible();
-    const goal = screen.getByLabelText(/^Goal:/);
+    const goal = screen.getByLabelText(/끝났을 때/);
     expect(goal).toHaveValue("초안 목표");
 
     await user.clear(goal);
     await user.type(goal, "고친 목표");
-    await user.click(screen.getByRole("button", { name: "다음" }));
+    await user.click(
+      screen.getByRole("button", { name: "이 내용으로 결정 시작" }),
+    );
 
     expect(bodyOf(mock.mock.calls[1]).action.goal).toBe("고친 목표");
     expect(bodyOf(mock.mock.calls[1]).action.context).toBe("초안 상황");
@@ -633,11 +693,29 @@ describe("gcb", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("확인해 주세요");
   });
 
-  it("guides toward a state, not a command or a method", async () => {
+  it("asks the clarifying questions on the same screen", async () => {
+    const { user, mock } = await startWith(
+      journey({
+        prompt: {
+          ...prompt,
+          questions: [{ field: "team_size", question: "몇 명인가요?" }],
+        },
+      }),
+    );
+
+    await user.type(await screen.findByLabelText("몇 명인가요?"), "4");
+    await user.click(
+      screen.getByRole("button", { name: "이 내용으로 결정 시작" }),
+    );
+
+    expect(bodyOf(mock.mock.calls[1]).action.answers).toEqual({ team_size: 4 });
+  });
+
+  it("does not show the graph before there is anything to draw", async () => {
     await startWith(journey({ prompt }));
 
-    expect(await screen.findByText(/달성된 상태로 적어요/)).toBeVisible();
-    expect(screen.getByText(/처리 순서나 방법은 적지 않아요/)).toBeVisible();
+    await screen.findByLabelText(/끝났을 때/);
+    expect(screen.queryByRole("region", { name: "설계 그래프" })).toBeNull();
   });
 });
 
@@ -805,24 +883,31 @@ describe("issues and completion", () => {
     );
 
     expect(
-      await screen.findByRole("heading", { name: "빌드 묶음을 만들었어요" }),
+      await screen.findByRole("heading", { name: "설계가 준비됐어요" }),
     ).toBeVisible();
     expect(screen.getByText("맞춤 설계를 만들지 못했어요.")).toBeVisible();
     expect(screen.getByText("초안을 쓴다")).toBeVisible();
     expect(screen.getByText("뼈대 연결하기")).toBeVisible();
     expect(screen.getByText("아직 정하지 않은 결정: Agent 구조")).toBeVisible();
     expect(
-      screen.getByRole("link", { name: "빌드 묶음 다운로드" }),
+      screen.getByRole("link", { name: "빌드 묶음 다운로드 (파일 2개)" }),
     ).toHaveAttribute("href", `/api/v1/journeys/${ID}/package.zip`);
   });
 
   it("tells apart two cards of the same layer in the progress rail", async () => {
     const twoInLayer = [
       { ...cards()[0], card_id: "agent.a", title: "Agent 구조" },
-      { ...cards()[1], card_id: "agent.b", layer: "agent", title: "사람 확인" },
+      {
+        ...cards()[1],
+        card_id: "agent.b",
+        layer: "agent",
+        stage: 4,
+        title: "사람 확인",
+      },
     ];
-    await startWith(journey({ cards: twoInLayer }));
+    const { user } = await startWith(journey({ cards: twoInLayer }));
 
+    await openStage(user, /^에이전트 설계 \d/);
     const rail = await screen.findByRole("complementary");
     expect(rail).toHaveTextContent("Agent 구조");
     expect(rail).toHaveTextContent("사람 확인");
@@ -833,6 +918,7 @@ describe("issues and completion", () => {
       journey({ cards: cards("decided", "current") }),
     );
 
+    await openStage(user, /^에이전트 설계 \d/);
     await user.click(
       await screen.findByRole("button", {
         name: "agent.hitl 제목 다시 고르기",
@@ -840,7 +926,7 @@ describe("issues and completion", () => {
     );
 
     expect(bodyOf(mock.mock.calls[1]).action).toEqual({
-      action: "reopen",
+      action: "revise",
       card_id: "agent.hitl",
     });
   });
@@ -850,10 +936,11 @@ describe("issues and completion", () => {
       journey({ cards: cards("decided", "pending") }),
     );
 
+    await openStage(user, /^에이전트 설계 \d/);
     await user.click(await screen.findByText("agent.hitl 제목"));
 
     expect(bodyOf(mock.mock.calls[1]).action).toEqual({
-      action: "reopen",
+      action: "revise",
       card_id: "agent.hitl",
     });
   });
@@ -863,6 +950,7 @@ describe("issues and completion", () => {
       journey({ cards: cards("current", "pending") }),
     );
 
+    await openStage(user, /^시스템 구성 \d/);
     await user.click(
       await screen.findByRole("button", {
         name: "cloud.target 제목 먼저 정하기",
@@ -880,6 +968,7 @@ describe("issues and completion", () => {
     flagged[0] = { ...flagged[0], needs_review: true };
     const { user, mock } = await startWith(journey({ cards: flagged }));
 
+    await openStage(user, /^에이전트 설계 \d.*다시 확인 1/);
     expect(await screen.findByText(/앞 단계가 바뀌었어요/)).toBeVisible();
     await user.click(
       screen.getByRole("button", { name: "agent.hitl 제목 현재 결정 유지" }),
@@ -891,13 +980,74 @@ describe("issues and completion", () => {
     });
   });
 
-  it("groups cards under the stages of the project", async () => {
-    await startWith(journey());
+  it("shows the held option and offers to cancel while changing", async () => {
+    const { user, mock } = await startWith(
+      journey({
+        cards: [{ ...cards("decided", "pending")[0], editing: true }],
+        prompt: decisionPrompt({ current_option_id: "none" }),
+      }),
+    );
 
+    expect(await screen.findByText(/지금 결정은 그대로예요/)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "없음 그대로 두기" }));
+
+    expect(bodyOf(mock.mock.calls[1]).action).toEqual({ action: "defer" });
+  });
+
+  it("says what a change would affect before it is made", async () => {
+    await startWith(
+      journey({
+        cards: [{ ...cards("decided", "pending")[0], editing: true }],
+        prompt: decisionPrompt(
+          { current_option_id: "none" },
+          {
+            to_review: ["Agent 구조: 단일", "실행 추적: 로그"],
+            options: [
+              optionView("none", "없음"),
+              optionView("question", "질문", {
+                must_change: ["상태 저장: 메모리"],
+              }),
+            ],
+          },
+        ),
+      }),
+    );
+
+    expect(
+      await screen.findByText("바꾸면 뒤 단계 결정 2개를 다시 확인하게 돼요"),
+    ).toBeVisible();
+    expect(
+      screen.getByText("Agent 구조: 단일 · 실행 추적: 로그"),
+    ).toBeVisible();
+    expect(screen.getByText("바꿔야 할 가능성이 높아요")).toBeVisible();
+    expect(screen.getByText("상태 저장: 메모리")).toBeVisible();
+  });
+
+  it("groups cards under the stages of the project", async () => {
+    const { user } = await startWith(journey());
+
+    await openStage(user, /^시스템 구성 \d/);
     const rail = await screen.findByRole("complementary");
     expect(rail).toHaveTextContent("에이전트 설계");
-    expect(rail).toHaveTextContent("시스템 구성");
-    expect(rail).toHaveTextContent("아직 열리지 않은 단계예요");
+    expect(rail).toHaveTextContent(/팀 실행 단계는 아직 열리지 않았어요/);
+    expect(
+      within(rail).queryByRole("button", { name: /^팀 실행/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("puts the card first in the DOM when the panels stack", async () => {
+    vi.stubGlobal("matchMedia", () => ({
+      matches: true,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+    await startWith(journey());
+
+    const graph = await screen.findByRole("region", { name: "설계 그래프" });
+    const card = document.querySelector(".workspace-card")!;
+    expect(
+      card.compareDocumentPosition(graph) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("reopens a decision after the journey finished", async () => {
@@ -911,12 +1061,13 @@ describe("issues and completion", () => {
     );
 
     expect(await screen.findByText(/다시 만들어요/)).toBeVisible();
+    await openStage(user, /^에이전트 설계 \d/);
     await user.click(
       screen.getByRole("button", { name: "agent.hitl 제목 다시 고르기" }),
     );
 
     expect(bodyOf(mock.mock.calls[1]).action).toEqual({
-      action: "reopen",
+      action: "revise",
       card_id: "agent.hitl",
     });
   });
@@ -940,6 +1091,7 @@ describe("issues and completion", () => {
       journey({ cards: [current, { ...skipped, skip_confidence: 0.92 }] }),
     );
 
+    await openStage(user, /^시스템 구성 \d/);
     const rail = await screen.findByRole("complementary", {
       name: "결정 진행 상황",
     });
@@ -966,6 +1118,7 @@ describe("issues and completion", () => {
     );
 
     await screen.findByRole("heading", { name: "모든 결정을 마쳤어요" });
+    await openStage(user, /^시스템 구성 \d/);
     await user.click(
       screen.getByRole("button", { name: "cloud.target 제목 다시 넣기" }),
     );
@@ -990,7 +1143,7 @@ describe("screen changes and the main action", () => {
       }),
     );
     const heading = await screen.findByRole("heading", {
-      name: "프로젝트의 목표와 기준을 정리해요",
+      name: "추천에 쓸 내용을 확인해 주세요",
     });
     expect(heading).toHaveFocus();
   });
@@ -1009,12 +1162,13 @@ describe("screen changes and the main action", () => {
     expect(heading).toHaveFocus();
   });
 
-  it("makes accepting the recommendation the one primary action", async () => {
+  it("makes the recommended option the one primary action", async () => {
     await startWith(journey());
-    const accept = await screen.findByRole("button", { name: "추천대로 진행" });
+    const accept = await screen.findByRole("button", { name: "없음 선택" });
 
     expect(accept).toHaveClass("primary");
-    expect(screen.getByRole("button", { name: "없음 선택" })).not.toHaveClass(
+    expect(accept).toHaveTextContent("이걸로 정하기");
+    expect(screen.getByRole("button", { name: "승인 선택" })).not.toHaveClass(
       "primary",
     );
   });
@@ -1022,7 +1176,7 @@ describe("screen changes and the main action", () => {
   it("does not show the internal problem codes", async () => {
     await startWith(journey());
 
-    await screen.findByRole("button", { name: "추천대로 진행" });
+    await screen.findByRole("button", { name: "없음 선택" });
     expect(screen.queryByText(/DiV/)).not.toBeInTheDocument();
   });
 });

@@ -126,9 +126,12 @@ class OptionView(BaseModel):
     option: CardOption
     note: str = ""
     blocked_reason: str | None = None
+    icon: str | None = None
     implies: dict[CardId, str] = {}  # card_id -> option_id
     implied_messages: list[str] = []
     warnings: list[str] = []
+    # While changing a decision: answers elsewhere that stop fitting if this option is chosen.
+    must_change: list[str] = []
     artifacts: list[str] = []
 
 
@@ -141,8 +144,18 @@ class CardPresentation(BaseModel):
     recommendation: Recommendation
     evidence: list[Evidence] = []
     advice_source: str
+    # While changing a decision: later decisions that get marked for another look.
+    to_review: list[str] = []
     learning_refs: list[str] = []
     div_refs: list[str] = []
+
+
+class CardBrief(BaseModel):
+    """What the models said about a card, kept so reopening it costs no call."""
+
+    advice: Advice
+    recommendation: Recommendation
+    evidence: list[Evidence] = []
 
 
 class CardQA(BaseModel):
@@ -187,13 +200,16 @@ class JourneyState(BaseModel):
     focus_card: CardId | None = None
     # What a reopened card held, so choosing the same option again changes nothing downstream.
     previous_choices: dict[CardId, str] = {}
+    # A decided card opened to be changed. Its decision stands until another option is chosen.
+    editing_card: CardId | None = None
     # Decisions in later stages made before an earlier stage changed.
     needs_review: list[CardId] = []
     advice: Advice | None = None
     recommendation: Recommendation | None = None
     evidence: list[Evidence] = []
     current_card: CardPresentation | None = None
-    gate_outcome: Literal["advance", "ask", "invalid", "keep"] | None = None
+    card_briefs: dict[CardId, CardBrief] = {}
+    gate_outcome: Literal["advance", "ask", "invalid", "keep", "unchanged"] | None = None
     gate_error: str | None = None
     pending_question: str | None = None
     qa_history: list[CardQA] = []
@@ -202,6 +218,14 @@ class JourneyState(BaseModel):
     artifacts: dict[str, str] = {}
     design: DesignState = DesignState()
     trace: Annotated[list[NodeEvent], operator.add] = []
+
+    @property
+    def saved_brief(self) -> CardBrief | None:
+        """Looking at a decision costs nothing, unless an earlier change made it out of date."""
+        card_id = self.current_card_id
+        if card_id != self.editing_card or card_id in self.needs_review:
+            return None
+        return self.card_briefs.get(card_id)
 
     @property
     def all_decisions(self) -> dict[CardId, Decision]:
@@ -241,6 +265,11 @@ class ReopenAction(_Action):
     card_id: CardId
 
 
+class ReviseAction(_Action):
+    action: Literal["revise"]
+    card_id: CardId
+
+
 class FocusAction(_Action):
     action: Literal["focus"]
     card_id: CardId
@@ -256,6 +285,8 @@ class GcbAction(_Action):
     goal: str = Field(default="", max_length=MAX_GCB_CHARS)
     context: str = Field(default="", max_length=MAX_GCB_CHARS)
     boundary: str = Field(default="", max_length=MAX_GCB_CHARS)
+    # Sent when the screen asked the clarifying questions together with these fields.
+    answers: dict[str, Any] | None = Field(default=None, max_length=len(CLARIFY_QUESTIONS))
 
 
 class ClarifyAction(_Action):
@@ -269,6 +300,7 @@ GateAction = Annotated[
     | DeferAction
     | AskAction
     | ReopenAction
+    | ReviseAction
     | FocusAction
     | KeepAction,
     Field(discriminator="action"),
@@ -279,6 +311,7 @@ JourneyAction = Annotated[
     | DeferAction
     | AskAction
     | ReopenAction
+    | ReviseAction
     | FocusAction
     | KeepAction
     | ClarifyAction
@@ -288,4 +321,6 @@ JourneyAction = Annotated[
 GCB_ACTION = TypeAdapter(GcbAction)
 GATE_ACTION = TypeAdapter(GateAction)
 ISSUE_ACTION = TypeAdapter(ReopenAction)
-DONE_ACTION = TypeAdapter(Annotated[ReopenAction | KeepAction, Field(discriminator="action")])
+DONE_ACTION = TypeAdapter(
+    Annotated[ReopenAction | ReviseAction | KeepAction, Field(discriminator="action")]
+)

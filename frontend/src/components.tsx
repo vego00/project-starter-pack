@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import type { FormEvent } from "react";
-import { designViewUrl, packageUrl, summaryUrl } from "./api";
+import type { FormEvent, KeyboardEvent, ReactNode } from "react";
+import { packageUrl, summaryUrl } from "./api";
 import type {
   Action,
   CardStatus,
@@ -10,19 +10,20 @@ import type {
   IssuesPrompt,
   Journey,
 } from "./api";
+import { OptionIcon } from "./blueprint";
 
 const LAYER_NAMES: Record<string, string> = {
-  agent: "Agent 설계",
+  agent: "에이전트 설계",
   model: "모델",
-  data: "데이터·검색",
-  backend: "백엔드·실행",
-  devops: "DevOps",
-  mlops: "MLOps",
-  cloud: "Cloud",
+  data: "데이터와 검색",
+  backend: "백엔드 실행",
+  devops: "실행 환경",
+  mlops: "모델 서빙",
+  cloud: "배포",
   product: "제품 형태",
-  ops: "검증·운영",
+  ops: "검증과 운영",
 };
-// ADR-021. Stages without a card yet stay visible so the whole path can be seen.
+// ADR-021. Stages without a card yet are named once, so the whole path can still be seen.
 const STAGE_NAMES = [
   "제약 확인",
   "데이터 이해",
@@ -77,9 +78,11 @@ function useFocusedHeading(screenKey?: string | number) {
 export function StartForm({
   busy,
   onStart,
+  preview,
 }: {
   busy: boolean;
   onStart: (idea: string) => void;
+  preview?: ReactNode;
 }) {
   const [idea, setIdea] = useState("");
   const length = Array.from(idea.trim()).length;
@@ -91,41 +94,59 @@ export function StartForm({
   }
 
   return (
-    <form className="panel" onSubmit={submit}>
-      <h2>어떤 프로젝트를 만들고 싶나요?</h2>
-      <p className="muted">
-        Agent 설계부터 배포까지 필요한 결정을 하나씩 비교하며 직접 골라요.
-      </p>
-      <label htmlFor="idea">프로젝트 아이디어</label>
-      <textarea
-        id="idea"
-        rows={5}
-        value={idea}
-        onChange={(event) => setIdea(event.target.value)}
-        placeholder="누가 어떤 문제를 겪고, 무엇을 만들고 싶은지 적어 주세요."
-      />
-      <div className="row between">
-        <span className="muted">
-          {length.toLocaleString()} / {MAX_IDEA.toLocaleString()}자 (최소{" "}
-          {MIN_IDEA}자)
-        </span>
-        <button className="primary" disabled={!valid || busy}>
-          {busy ? "시작하는 중…" : "결정 시작하기"}
-        </button>
-      </div>
-      <p className="muted privacy">
-        개인정보나 회사 기밀은 적지 마세요. 입력한 내용은 저장되고, 모델이
-        연결된 경우 외부 모델 API로 전송돼요.
-      </p>
-      <p className="muted examples-label">예시로 시작하기</p>
-      <div className="examples">
-        {EXAMPLES.map((example) => (
-          <button type="button" key={example} onClick={() => setIdea(example)}>
-            {example}
+    <div className="start">
+      <form className="start-form" onSubmit={submit}>
+        <h2>만들고 싶은 서비스를 적으면, 설계와 빌드 묶음까지 함께 정해요</h2>
+        <p className="muted">
+          모델, 저장소, 배포처럼 나중에 되돌리기 어려운 결정을 하나씩 비교하며
+          직접 골라요.
+        </p>
+        <label htmlFor="idea">프로젝트 아이디어</label>
+        <textarea
+          id="idea"
+          rows={5}
+          value={idea}
+          onChange={(event) => setIdea(event.target.value)}
+          placeholder="누가 어떤 문제를 겪고, 무엇을 만들고 싶은지 적어 주세요."
+        />
+        <div className="row between">
+          <span className="muted">
+            {length.toLocaleString()} / {MAX_IDEA.toLocaleString()}자 (최소{" "}
+            {MIN_IDEA}자)
+          </span>
+          <button className="primary" disabled={!valid || busy}>
+            {busy ? "시작하는 중…" : "결정 시작하기"}
           </button>
-        ))}
-      </div>
-    </form>
+        </div>
+        <p className="muted examples-label">이런 걸 만들 수 있어요</p>
+        <div className="examples">
+          {EXAMPLES.map((example) => (
+            <button
+              type="button"
+              key={example}
+              onClick={() => setIdea(example)}
+            >
+              {example}
+            </button>
+          ))}
+        </div>
+        <p className="muted privacy">
+          개인정보나 회사 기밀은 적지 마세요. 입력한 내용은 저장되고, 모델이
+          연결된 경우 외부 모델 API로 전송돼요.
+        </p>
+      </form>
+      <section className="start-preview" aria-label="끝나면 받는 것">
+        <h2>끝나면 이런 구성도를 받아요</h2>
+        <p className="muted">
+          고른 서비스로 그려지고, 결정을 바꾸면 함께 바뀌어요.
+        </p>
+        {preview}
+        <p>
+          <strong>빌드 묶음:</strong> 결정과 설계를 담은 파일을 내려받아 Claude
+          Code나 Codex에 그대로 맡길 수 있어요.
+        </p>
+      </section>
+    </div>
   );
 }
 
@@ -133,91 +154,22 @@ const MAX_GCB = 1000;
 const GCB_FIELDS = [
   {
     name: "goal",
-    label: "Goal: 끝났을 때 어떤 상태면 되나요?",
-    hint: "'만들어줘' 같은 명령이 아니라 달성된 상태로 적어요. 기술이나 방법은 적지 않아요.",
+    label: "끝났을 때 어떤 상태면 되나요?",
     placeholder: "예: 수강생이 강의 내용을 출처와 함께 바로 찾을 수 있는 상태",
   },
   {
     name: "context",
-    label: "Context: 판단에 필요한 상황은 무엇인가요?",
-    hint: "왜 필요한지, 누가 쓰는지, 배경과 제약을 적어요. 관련 없는 정보는 빼요.",
+    label: "판단에 필요한 상황은 무엇인가요?",
     placeholder:
       "예: 부트캠프 수강생이 복습할 때 쓴다. 자료가 여러 곳에 흩어져 있다.",
   },
   {
     name: "boundary",
-    label: "Boundary: 결과가 꼭 지켜야 할 기준은 무엇인가요?",
-    hint: "결과가 갖춰야 할 조건을 적어요. 처리 순서나 방법은 적지 않아요.",
+    label: "결과가 꼭 지켜야 할 기준은 무엇인가요?",
     placeholder:
       "예: 답변마다 출처를 표시한다. 개인정보를 외부로 보내지 않는다.",
   },
 ] as const;
-
-export function GcbForm({
-  prompt,
-  busy,
-  act,
-}: {
-  prompt: GcbPrompt;
-  busy: boolean;
-  act: Act;
-}) {
-  const heading = useFocusedHeading();
-
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const value = (name: string) => String(form.get(name) ?? "").trim();
-    act({
-      action: "gcb",
-      goal: value("goal"),
-      context: value("context"),
-      boundary: value("boundary"),
-    });
-  }
-
-  return (
-    <form className="panel" onSubmit={submit}>
-      <h2 ref={heading} tabIndex={-1}>
-        프로젝트의 목표와 기준을 정리해요
-      </h2>
-      {prompt.source === "llm" && (
-        <p className="muted">
-          AI가 아이디어를 읽고 쓴 초안이에요. 틀릴 수 있으니 직접 확인하고 고쳐
-          주세요.
-        </p>
-      )}
-      {prompt.source === "unavailable" && (
-        <p className="muted">AI 초안을 만들지 못했어요. 직접 적어 주세요.</p>
-      )}
-      <p className="muted">
-        뒤에 나오는 추천과 설명이 이 내용을 기준으로 해요. 모르면 비워도 돼요.
-      </p>
-      {prompt.error && (
-        <p className="alert" role="alert">
-          {prompt.error}
-        </p>
-      )}
-      {GCB_FIELDS.map((field) => (
-        <div className="field" key={field.name}>
-          <label htmlFor={`gcb-${field.name}`}>{field.label}</label>
-          <p className="muted hint">{field.hint}</p>
-          <textarea
-            id={`gcb-${field.name}`}
-            name={field.name}
-            rows={3}
-            maxLength={MAX_GCB}
-            defaultValue={prompt.draft[field.name]}
-            placeholder={field.placeholder}
-          />
-        </div>
-      ))}
-      <button className="primary" disabled={busy}>
-        다음
-      </button>
-    </form>
-  );
-}
 
 function ClarifyField({ field, id }: { field: string; id: string }) {
   if (field === "deployment_target")
@@ -261,6 +213,94 @@ function toAnswer(field: string, raw: string): unknown {
   return Number(raw);
 }
 
+function collectAnswers(
+  form: FormData,
+  questions: { field: string }[],
+): Record<string, unknown> {
+  const answers: Record<string, unknown> = {};
+  for (const { field } of questions) {
+    const raw = String(form.get(field) ?? "").trim();
+    if (raw) answers[field] = toAnswer(field, raw);
+  }
+  return answers;
+}
+
+export function GcbForm({
+  prompt,
+  busy,
+  act,
+}: {
+  prompt: GcbPrompt;
+  busy: boolean;
+  act: Act;
+}) {
+  const heading = useFocusedHeading();
+  const questions = prompt.questions ?? [];
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const value = (name: string) => String(form.get(name) ?? "").trim();
+    act({
+      action: "gcb",
+      goal: value("goal"),
+      context: value("context"),
+      boundary: value("boundary"),
+      ...(questions.length > 0 && {
+        answers: collectAnswers(form, questions),
+      }),
+    });
+  }
+
+  return (
+    <form className="brief" onSubmit={submit}>
+      <h2 ref={heading} tabIndex={-1}>
+        추천에 쓸 내용을 확인해 주세요
+      </h2>
+      <p className="muted">
+        {prompt.source === "llm"
+          ? "AI가 아이디어를 읽고 채운 초안이에요. 틀린 곳만 고치고, 모르면 비워도 돼요."
+          : prompt.source === "unavailable"
+            ? "AI 초안을 만들지 못했어요. 직접 적거나 비워 두어도 돼요."
+            : "뒤에 나오는 추천이 이 내용을 기준으로 해요. 모르면 비워도 돼요."}
+      </p>
+      {prompt.error && (
+        <p className="alert" role="alert">
+          {prompt.error}
+        </p>
+      )}
+      <div className="brief-grid">
+        <div>
+          {GCB_FIELDS.map((field) => (
+            <div className="field" key={field.name}>
+              <label htmlFor={`gcb-${field.name}`}>{field.label}</label>
+              <textarea
+                id={`gcb-${field.name}`}
+                name={field.name}
+                rows={3}
+                maxLength={MAX_GCB}
+                defaultValue={prompt.draft[field.name]}
+                placeholder={field.placeholder}
+              />
+            </div>
+          ))}
+        </div>
+        <div>
+          {questions.map(({ field, question }) => (
+            <div className="field" key={field}>
+              <label htmlFor={`clarify-${field}`}>{question}</label>
+              <ClarifyField field={field} id={`clarify-${field}`} />
+            </div>
+          ))}
+          <button className="primary brief-submit" disabled={busy}>
+            이 내용으로 결정 시작
+          </button>
+        </div>
+      </div>
+    </form>
+  );
+}
+
 export function ClarifyForm({
   prompt,
   busy,
@@ -274,18 +314,18 @@ export function ClarifyForm({
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const answers: Record<string, unknown> = {};
-    for (const { field } of prompt.questions) {
-      const raw = String(form.get(field) ?? "").trim();
-      if (raw) answers[field] = toAnswer(field, raw);
-    }
-    act({ action: "clarify", answers });
+    act({
+      action: "clarify",
+      answers: collectAnswers(
+        new FormData(event.currentTarget),
+        prompt.questions,
+      ),
+    });
   }
 
   return (
     // Fields are uncontrolled, so a new round must start from an empty form.
-    <form className="panel" key={prompt.round} onSubmit={submit}>
+    <form className="brief" key={prompt.round} onSubmit={submit}>
       <h2 ref={heading} tabIndex={-1}>
         프로젝트를 조금 더 알려 주세요
       </h2>
@@ -309,45 +349,55 @@ export function ClarifyForm({
 function OptionCard({
   view,
   recommended,
+  reason,
+  held,
+  changing,
   busy,
   act,
 }: {
   view: DecisionPrompt["card"]["options"][number];
   recommended: boolean;
+  reason: ReactNode;
+  held: boolean;
+  changing: boolean;
   busy: boolean;
   act: Act;
 }) {
   const { option } = view;
   const blocked = view.blocked_reason !== null;
+  const primary = recommended && !changing;
   return (
     <article
-      className={`option${blocked ? " blocked" : ""}${recommended ? " recommended" : ""}`}
+      className={`option${blocked ? " blocked" : ""}${primary ? " recommended" : ""}${held ? " held" : ""}`}
     >
       <header>
+        {view.icon && <OptionIcon icon={view.icon} />}
         <h3>{option.name}</h3>
         {recommended && <span className="badge">추천</span>}
+        {held && <span className="badge">현재 선택</span>}
       </header>
-      <p>{view.note || option.summary}</p>
-      <h4>장점</h4>
-      <ul>
+      {recommended && reason}
+      <p className="option-summary">{view.note || option.summary}</p>
+      <ul className="tradeoffs">
         {option.pros.map((item) => (
-          <li key={item}>{item}</li>
+          <li key={item}>
+            <span className="sr-only">장점 </span>
+            <span aria-hidden>+ </span>
+            {item}
+          </li>
         ))}
-      </ul>
-      <h4>단점</h4>
-      <ul>
         {option.cons.map((item) => (
-          <li key={item}>{item}</li>
+          <li key={item}>
+            <span className="sr-only">단점 </span>
+            <span aria-hidden>− </span>
+            {item}
+          </li>
         ))}
       </ul>
-      <dl>
-        <dt>학습 난이도</dt>
-        <dd>{LEVELS[option.learning_difficulty]}</dd>
-        <dt>운영 부담</dt>
-        <dd>{LEVELS[option.ops_burden]}</dd>
-        <dt>비용</dt>
-        <dd>{option.cost_nature}</dd>
-      </dl>
+      <p className="option-meta">
+        학습 {LEVELS[option.learning_difficulty]} · 운영{" "}
+        {LEVELS[option.ops_burden]} · {option.cost_nature}
+      </p>
       {view.implied_messages.length > 0 && (
         <div className="note">
           <strong>선택하면 같이 바뀌는 것</strong>
@@ -364,18 +414,35 @@ function OptionCard({
           ))}
         </div>
       )}
+      {view.must_change.length > 0 && (
+        <div className="note warn">
+          <strong>바꿔야 할 가능성이 높아요</strong>
+          {view.must_change.map((answer) => (
+            <p key={answer}>{answer}</p>
+          ))}
+        </div>
+      )}
       {blocked && (
         <p className="note warn">
           <strong>지금은 고를 수 없어요.</strong> {view.blocked_reason}
         </p>
       )}
-      <button
-        className="choose"
-        disabled={blocked || busy}
-        onClick={() => act({ action: "select", option_id: option.id })}
-      >
-        {option.name} 선택
-      </button>
+      {!held && (
+        <button
+          className={primary ? "primary choose" : "choose"}
+          disabled={blocked || busy}
+          aria-label={`${option.name} 선택`}
+          onClick={() =>
+            act(
+              primary
+                ? { action: "accept_recommendation" }
+                : { action: "select", option_id: option.id },
+            )
+          }
+        >
+          {primary ? "이걸로 정하기" : changing ? "바꾸기" : "선택"}
+        </button>
+      )}
     </article>
   );
 }
@@ -393,8 +460,16 @@ export function DecisionView({
   const [question, setQuestion] = useState("");
   const heading = useFocusedHeading(card.card_id);
   const recommendation = card.recommendation;
-  const recommended = card.options.find(
+  const heldId = prompt.current_option_id ?? null;
+  const held = card.options.find((view) => view.option.id === heldId);
+  const hasRecommendation = card.options.some(
     (view) => view.option.id === recommendation.option_id,
+  );
+  // The recommended option leads, and carries its own reason.
+  const ordered = [...card.options].sort(
+    (a, b) =>
+      Number(b.option.id === recommendation.option_id) -
+      Number(a.option.id === recommendation.option_id),
   );
 
   useEffect(() => {
@@ -409,94 +484,96 @@ export function DecisionView({
     }
   }
 
-  return (
-    <section className="panel">
-      <p className="eyebrow">{LAYER_NAMES[card.layer] ?? card.layer}</p>
-      <h2 ref={heading} tabIndex={-1}>
-        {card.question}
-      </h2>
-      {prompt.error && (
-        <p className="alert" role="alert">
-          {prompt.error}
-        </p>
+  const reason = (
+    <>
+      {recommendation.reason && (
+        <p className="option-reason">{recommendation.reason}</p>
       )}
-      <div className="recommendation">
-        {recommended ? (
-          <>
-            <strong>추천: {recommended.option.name}</strong>
-            {recommendation.reason && <p>{recommendation.reason}</p>}
-            {recommendation.decider === "mock" ? (
-              <p className="muted">
-                카드 기본값이에요. 내 프로젝트를 분석한 결과는 아니에요.
-              </p>
-            ) : (
-              recommendation.confidence !== null && (
-                <p className="muted">
-                  판단 확신도 {Math.round(recommendation.confidence * 100)}%
-                </p>
-              )
-            )}
-          </>
-        ) : (
-          <strong>비교 필요: 하나를 추천할 근거가 부족해요.</strong>
-        )}
-        {card.evidence.map((item) => (
-          <p className="evidence" key={`${item.source_id}-${item.location}`}>
-            <strong>내 강의 필기:</strong>{" "}
-            {item.url ? (
-              <a href={item.url} target="_blank" rel="noreferrer">
-                {item.title}
-              </a>
-            ) : (
-              item.title
-            )}{" "}
-            ({item.location}) · {item.why}
+      {recommendation.decider !== "mock" &&
+        recommendation.confidence !== null && (
+          <p className="option-reason">
+            판단 확신도 {Math.round(recommendation.confidence * 100)}%
           </p>
-        ))}
-        <p className="muted">
-          {card.evidence.length > 0
-            ? "개인 필기이며 강의 원문이 아니에요."
-            : "연결된 강의 자료 없음"}
-        </p>
-        {recommended && (
-          <button
-            className="primary accept"
-            disabled={busy}
-            onClick={() => act({ action: "accept_recommendation" })}
-          >
-            추천대로 진행
-          </button>
         )}
-      </div>
-      {card.advice_source === "llm" && (
-        <p className="muted">
-          선택지 설명은 AI가 내 프로젝트를 기준으로 쓴 내용이에요. 틀릴 수
-          있어요.
-        </p>
-      )}
-      {card.advice_source === "card_text" && (
-        <p className="muted">
-          AI 설명을 만들지 못해 카드의 기본 설명을 보여드려요.
-        </p>
-      )}
-      <div className="options">
-        {card.options.map((view) => (
-          <OptionCard
-            key={view.option.id}
-            view={view}
-            recommended={view.option.id === recommendation.option_id}
-            busy={busy}
-            act={act}
-          />
-        ))}
-      </div>
-      <div className="row">
-        <button disabled={busy} onClick={() => act({ action: "defer" })}>
-          나중에 결정
-        </button>
-      </div>
-      <form className="ask" onSubmit={ask}>
-        <label htmlFor="card-question">이 카드에 대해 질문하기</label>
+    </>
+  );
+
+  return (
+    <section className="decision">
+      <div className="decision-body">
+        <p className="eyebrow">{LAYER_NAMES[card.layer] ?? card.layer}</p>
+        <h2 ref={heading} tabIndex={-1}>
+          {card.question}
+        </h2>
+        {prompt.error && (
+          <p className="alert" role="alert">
+            {prompt.error}
+          </p>
+        )}
+        {held && (
+          <p className="muted option-source">
+            지금 결정은 그대로예요. 다른 선택지를 고를 때만 바뀌어요.
+          </p>
+        )}
+        {card.to_review.length > 0 && (
+          <div className="note">
+            <strong>
+              바꾸면 뒤 단계 결정 {card.to_review.length}개를 다시 확인하게 돼요
+            </strong>
+            <p>{card.to_review.join(" · ")}</p>
+          </div>
+        )}
+        {!hasRecommendation && (
+          <p className="note">
+            <strong>비교 필요: 하나를 추천할 근거가 부족해요.</strong>
+          </p>
+        )}
+        {card.evidence.length > 0 && (
+          <div className="note">
+            {card.evidence.map((item) => (
+              <p
+                className="evidence"
+                key={`${item.source_id}-${item.location}`}
+              >
+                <strong>내 강의 필기:</strong>{" "}
+                {item.url ? (
+                  <a href={item.url} target="_blank" rel="noreferrer">
+                    {item.title}
+                  </a>
+                ) : (
+                  item.title
+                )}{" "}
+                ({item.location}) · {item.why}
+              </p>
+            ))}
+            <p className="muted">개인 필기이며 강의 원문이 아니에요.</p>
+          </div>
+        )}
+        {card.advice_source === "llm" && (
+          <p className="muted option-source">
+            선택지 설명은 AI가 내 프로젝트를 기준으로 쓴 내용이에요. 틀릴 수
+            있어요.
+          </p>
+        )}
+        {card.advice_source === "card_text" && (
+          <p className="muted option-source">
+            AI 설명을 만들지 못해 카드의 기본 설명을 보여드려요.
+          </p>
+        )}
+        <div className="options">
+          {ordered.map((view) => (
+            <OptionCard
+              key={view.option.id}
+              view={view}
+              recommended={view.option.id === recommendation.option_id}
+              reason={reason}
+              held={view.option.id === heldId}
+              changing={held !== undefined}
+              busy={busy}
+              act={act}
+            />
+          ))}
+        </div>
         {prompt.qa.map((item, index) => (
           <div className="qa" key={index}>
             <p>
@@ -507,16 +584,40 @@ export function DecisionView({
             </p>
           </div>
         ))}
-        <div className="row">
-          <input
-            id="card-question"
-            value={question}
-            maxLength={2000}
-            onChange={(event) => setQuestion(event.target.value)}
-          />
-          <button disabled={busy || !question.trim()}>질문</button>
+      </div>
+      {held ? (
+        <div className="decision-foot">
+          <button
+            className="primary keep-held"
+            disabled={busy}
+            onClick={() => act({ action: "defer" })}
+          >
+            {held.option.name} 그대로 두기
+          </button>
         </div>
-      </form>
+      ) : (
+        <form className="decision-foot" onSubmit={ask}>
+          <label htmlFor="card-question">이 카드에 대해 질문하기</label>
+          <div className="row">
+            <input
+              id="card-question"
+              value={question}
+              maxLength={2000}
+              placeholder="헷갈리는 점을 물어보세요"
+              onChange={(event) => setQuestion(event.target.value)}
+            />
+            <button disabled={busy || !question.trim()}>질문</button>
+            <button
+              type="button"
+              className="quiet"
+              disabled={busy}
+              onClick={() => act({ action: "defer" })}
+            >
+              나중에 결정
+            </button>
+          </div>
+        </form>
+      )}
     </section>
   );
 }
@@ -578,120 +679,135 @@ const NODE_KIND: Record<string, string> = {
 
 export function CompletedView({
   journey,
+  graph,
   onRestart,
 }: {
   journey: Journey;
+  graph: ReactNode;
   onRestart: () => void;
 }) {
   const heading = useFocusedHeading();
   const design = journey.design;
+  const count = journey.cards.filter((card) => card.option_name).length;
   return (
-    <section className="panel">
-      <h2 ref={heading} tabIndex={-1}>
-        {design ? "빌드 묶음을 만들었어요" : "모든 결정을 마쳤어요"}
-      </h2>
-      <p className="muted">{journey.idea}</p>
-      {design && (
-        <>
-          {design.error && (
-            <p className="note warn">
-              <strong>참고용</strong> {design.error}
+    <>
+      <section className="done-band">
+        <div className="done-title">
+          <p className="muted">결정 {count}개를 모두 마쳤어요</p>
+          <h2 ref={heading} tabIndex={-1}>
+            {design ? "설계가 준비됐어요" : "모든 결정을 마쳤어요"}
+          </h2>
+          <p>{journey.idea}</p>
+          {design && (
+            <p className="muted">
+              압축을 풀고 Claude Code나 Codex에 <code>BUILD.md</code>대로 만들어
+              달라고 요청하세요.
             </p>
           )}
-          <h3>에이전트 구성</h3>
-          <ol className="summary">
-            {design.nodes.map((node) => (
-              <li key={node.id}>
-                <span className="eyebrow">
-                  {NODE_KIND[node.kind] ?? node.kind}
-                </span>
-                <strong>{node.id}</strong>
-                <span>{node.responsibility}</span>
-              </li>
-            ))}
-          </ol>
-          <h3>첫 작업</h3>
-          <p>{design.first_task}</p>
-          <p className="muted">완료 확인: {design.first_task_check}</p>
-          {design.unknowns.length > 0 && (
-            <>
-              <h3>먼저 확인할 것</h3>
-              <ul>
-                {design.unknowns.map((unknown) => (
-                  <li key={unknown}>{unknown}</li>
-                ))}
-              </ul>
-            </>
-          )}
-          {design.warnings.map((warning) => (
-            <p className="note warn" key={warning}>
-              <strong>확인 필요</strong> {warning}
-            </p>
-          ))}
-          <p className="muted">
-            압축을 풀고 Claude Code나 Codex에 <code>BUILD.md</code>대로 만들어
-            달라고 요청하세요. 파일 {design.files.length}개가 들어 있어요.
-          </p>
-          <div className="row">
+        </div>
+        <div className="done-actions">
+          {design && (
             <a
               className="button primary"
               href={packageUrl(journey.journey_id)}
               download="starter-pack.zip"
             >
-              빌드 묶음 다운로드
+              빌드 묶음 다운로드 (파일 {design.files.length}개)
             </a>
-            <a className="button" href={designViewUrl(journey.journey_id)}>
-              설계 그래프로 보기
-            </a>
-          </div>
-          <h3>내가 고른 기술</h3>
-        </>
+          )}
+          <a
+            className={design ? "button" : "button primary"}
+            href={summaryUrl(journey.journey_id)}
+            download="decision-summary.md"
+          >
+            결정 요약 다운로드
+          </a>
+          <button onClick={onRestart}>새 프로젝트 시작</button>
+        </div>
+      </section>
+      {design?.error && (
+        <p className="note warn">
+          <strong>참고용</strong> {design.error}
+        </p>
       )}
+      {design?.warnings.map((warning) => (
+        <p className="note warn" key={warning}>
+          <strong>확인 필요</strong> {warning}
+        </p>
+      ))}
       {journey.warnings.map((warning) => (
         <p className="note warn" key={warning}>
           <strong>확인 필요</strong> {warning}
         </p>
       ))}
-      <ol className="summary">
-        {journey.cards.map((card) => (
-          <li key={card.card_id}>
-            <span className="eyebrow">
-              {LAYER_NAMES[card.layer] ?? card.layer}
-            </span>
-            <span>{card.question}</span>
-            <strong>
-              {card.option_name ??
-                (card.state === "skipped" ? STATE_LABEL.skipped : null)}
-            </strong>
-            {card.by && <span className="badge">{BY_LABEL[card.by]}</span>}
-            {card.by === "implied" && (
-              <span className="muted">{card.rationale}</span>
-            )}
-          </li>
-        ))}
-      </ol>
-      {journey.can_reopen && (
-        <p className="muted">
-          바꾸고 싶은 결정이 있으면 진행 목록에서 그 카드를 누르세요. 바꾼
-          결정에 맞춰 설계와 빌드 묶음을 다시 만들어요. 그래프에서 직접 고친
-          내용은 새 설계에 다시 적용해요.
-        </p>
-      )}
-      <p className="muted">
-        요약 문서에는 결정 이유와 감수할 점, 먼저 확인할 일이 들어 있어요.
-        팀원과 함께 읽어 보세요.
-      </p>
-      <div className="row">
-        <a
-          className={design ? "button" : "button primary"}
-          href={summaryUrl(journey.journey_id)}
-          download="decision-summary.md"
-        >
-          결정 요약 다운로드
-        </a>
-        <button onClick={onRestart}>새 프로젝트 시작</button>
+      <div className="done-grid">
+        <div className="done-main">
+          {graph}
+          {design && (
+            <>
+              <h3>에이전트 구성</h3>
+              <ol className="summary">
+                {design.nodes.map((node) => (
+                  <li key={node.id}>
+                    <span className="eyebrow">
+                      {NODE_KIND[node.kind] ?? node.kind}
+                    </span>
+                    <strong>{node.id}</strong>
+                    <span>{node.responsibility}</span>
+                  </li>
+                ))}
+              </ol>
+            </>
+          )}
+        </div>
+        <aside className="done-side" aria-label="결과 요약">
+          {design && (
+            <>
+              <h3>가장 먼저 할 일</h3>
+              <p>{design.first_task}</p>
+              <p className="muted">완료 확인: {design.first_task_check}</p>
+              {design.unknowns.length > 0 && (
+                <>
+                  <h3>먼저 확인할 것</h3>
+                  <ul>
+                    {design.unknowns.map((unknown) => (
+                      <li key={unknown}>{unknown}</li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </>
+          )}
+          <h3>내가 고른 기술</h3>
+          <ol className="summary">
+            {[...journey.cards]
+              .sort((a, b) => a.stage - b.stage)
+              .map((card) => (
+                <li key={card.card_id}>
+                  <span className="eyebrow">{card.title}</span>
+                  <strong>
+                    {card.option_name ??
+                      (card.state === "skipped" ? STATE_LABEL.skipped : null)}
+                  </strong>
+                  {card.by && (
+                    <span className="badge">{BY_LABEL[card.by]}</span>
+                  )}
+                  {card.by === "implied" && (
+                    <span className="muted">{card.rationale}</span>
+                  )}
+                </li>
+              ))}
+          </ol>
+          {journey.can_reopen && (
+            <p className="muted">
+              바꾸고 싶은 결정은 구성도의 아이콘이나 위쪽 단계에서 고칠 수
+              있어요. 다른 선택지를 고르면 설계와 빌드 묶음을 다시 만들어요.
+              그래프에서 직접 고친 내용은 새 설계에 다시 적용해요.
+            </p>
+          )}
+        </aside>
       </div>
-    </section>
+    </>
   );
 }
 
@@ -711,9 +827,32 @@ export function ProgressRail({
   const total = journey.cards.filter((card) => card.state !== "skipped").length;
   const canReopen = journey.prompt?.type === "decision" || journey.can_reopen;
   const canFocus = journey.prompt?.type === "decision";
+  const stages = STAGE_NAMES.map((name, stage) => ({
+    name,
+    cards: journey.cards.filter((card) => card.stage === stage),
+  }));
+  const unopened = stages.filter((stage) => stage.cards.length === 0);
+  const opened = stages.filter((stage) => stage.cards.length > 0);
+  const [picked, setPicked] = useState<string | null>(null);
+  const shown = opened.find((stage) => stage.name === picked);
+  const root = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (!picked) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!root.current?.contains(event.target as Node)) setPicked(null);
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    return () => document.removeEventListener("pointerdown", closeOutside);
+  }, [picked]);
+
+  function closeOnEscape(event: KeyboardEvent) {
+    if (event.key === "Escape") setPicked(null);
+  }
 
   function row(card: CardStatus) {
-    const reopen = canReopen ? REOPEN_LABEL[card.state] : undefined;
+    const reopen =
+      canReopen && !card.editing ? REOPEN_LABEL[card.state] : undefined;
     const focus = canFocus ? FOCUS_LABEL[card.state] : undefined;
     const action = reopen ?? focus;
     const value = (
@@ -729,7 +868,7 @@ export function ProgressRail({
     return (
       <li
         key={card.card_id}
-        className={`step ${card.state}${action ? " clickable" : ""}${card.needs_review ? " review" : ""}`}
+        className={`step ${card.editing ? "current" : card.state}${action ? " clickable" : ""}${card.needs_review ? " review" : ""}`}
         aria-current={card.state === "current" ? "step" : undefined}
       >
         {action ? (
@@ -737,13 +876,17 @@ export function ProgressRail({
             className="step-button"
             disabled={busy}
             aria-label={`${card.title} ${action}`}
-            onClick={() =>
+            onClick={() => {
+              setPicked(null);
               act(
                 reopen
-                  ? { action: "reopen", card_id: card.card_id }
+                  ? {
+                      action: card.state === "decided" ? "revise" : "reopen",
+                      card_id: card.card_id,
+                    }
                   : { action: "focus", card_id: card.card_id },
-              )
-            }
+              );
+            }}
           >
             <span className="step-head">
               <span className="step-layer">{card.title}</span>
@@ -778,29 +921,68 @@ export function ProgressRail({
   }
 
   return (
-    <aside className="rail" aria-label="결정 진행 상황">
-      <p className="rail-title">
-        <strong>
-          {done} / {total}
-        </strong>{" "}
-        결정 완료
-      </p>
-      <progress value={done} max={total} aria-hidden />
-      {STAGE_NAMES.map((name, stage) => {
-        const inStage = journey.cards.filter((card) => card.stage === stage);
-        return (
-          <section className="stage" key={name}>
-            <h3>
-              <span aria-hidden>{stage}</span> {name}
-            </h3>
-            {inStage.length > 0 ? (
-              <ol>{inStage.map(row)}</ol>
-            ) : (
-              <p className="muted stage-empty">아직 열리지 않은 단계예요</p>
-            )}
-          </section>
-        );
-      })}
+    <aside
+      className="rail"
+      aria-label="결정 진행 상황"
+      ref={root}
+      onKeyDown={closeOnEscape}
+    >
+      <div className="rail-head">
+        <div className="stage-strip">
+          {opened.map((stage) => {
+            const counted = stage.cards.filter((c) => c.state !== "skipped");
+            const decided = counted.filter(
+              (c) => c.state === "decided" || c.state === "implied",
+            ).length;
+            const reviews = stage.cards.filter((c) => c.needs_review).length;
+            const isCurrent = stage.cards.some(
+              (c) => c.state === "current" || c.editing,
+            );
+            return (
+              <button
+                key={stage.name}
+                className={`stage-tab${isCurrent ? " current" : ""}`}
+                aria-expanded={shown?.name === stage.name}
+                aria-current={isCurrent ? "step" : undefined}
+                aria-label={`${stage.name} ${decided}/${counted.length}${reviews > 0 ? ` 다시 확인 ${reviews}` : ""}`}
+                onClick={() =>
+                  setPicked(shown?.name === stage.name ? null : stage.name)
+                }
+              >
+                {stage.name}
+                <span className="ticks" aria-hidden>
+                  {counted.map((c) => (
+                    <span
+                      key={c.card_id}
+                      className={`tick${c.state === "current" || c.editing ? " now" : c.state === "decided" || c.state === "implied" ? " done" : ""}`}
+                    />
+                  ))}
+                </span>
+                {reviews > 0 && (
+                  <span className="stage-review">다시 확인 {reviews}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+        <p className="rail-title">
+          <strong>
+            {done} / {total}
+          </strong>{" "}
+          결정
+        </p>
+      </div>
+      {shown && (
+        <div className="stage-panel">
+          <ol>{shown.cards.map(row)}</ol>
+          {unopened.length > 0 && (
+            <p className="muted stage-empty">
+              {unopened.map((stage) => stage.name).join(", ")} 단계는 아직
+              열리지 않았어요.
+            </p>
+          )}
+        </div>
+      )}
     </aside>
   );
 }

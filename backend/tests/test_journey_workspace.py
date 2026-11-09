@@ -6,6 +6,7 @@ from uuid import UUID
 
 import pytest
 from app.config import Settings
+from app.journey.constraints import displaced
 from app.journey.design import DesignState, ServiceDesign
 from app.journey.design_constraints import derive_design_constraints
 from app.journey.design_edit import DesignEdit, apply_design_edit, keep_human_edits
@@ -512,3 +513,215 @@ def test_a_design_nobody_edited_is_left_alone(client):
 
     previous = DesignState(status="review_required", current=base)
     assert keep_human_edits(previous, fresh, constraints) is fresh
+
+
+def revise(client, view, card_id):
+    return ok(client, view, action="revise", card_id=card_id)
+
+
+def another_option(card, held):
+    return next(
+        o["option"]["id"]
+        for o in card["options"]
+        if o["option"]["id"] != held and not o["blocked_reason"]
+    )
+
+
+def test_revising_keeps_the_decision_until_another_option_is_chosen(client):
+    view = ok(client, start(client), action="select", option_id="web")
+
+    view = revise(client, view, "product.surface")
+
+    assert card_of(view)["card_id"] == "product.surface"
+    assert view["prompt"]["current_option_id"] == "web"
+    surface = status(view, "product.surface")
+    assert (surface["state"], surface["option_id"], surface["editing"]) == ("decided", "web", True)
+    assert any(node["id"] == "surface" for node in view["blueprint"]["system"]["nodes"])
+
+    view = ok(client, view, action="select", option_id="report")
+
+    surface = status(view, "product.surface")
+    assert (surface["option_id"], surface["editing"]) == ("report", False)
+
+
+def test_cancelling_a_revision_changes_nothing(client):
+    view = ok(client, start(client), action="select", option_id="web")
+    following = card_of(view)["card_id"]
+    decided_at = status(view, "product.surface")
+
+    view = revise(client, view, "product.surface")
+    view = ok(client, view, action="defer")
+
+    assert card_of(view)["card_id"] == following
+    assert status(view, "product.surface") == decided_at
+    assert status(view, "product.surface")["state"] != "deferred"
+
+
+def test_choosing_the_same_option_does_not_ask_to_review_later_ones(client):
+    view = ok(client, start(client), action="select", option_id="web")
+    view = ok(client, view, action="select", option_id=recommended(card_of(view)))
+
+    view = revise(client, view, "product.surface")
+    view = ok(client, view, action="select", option_id="web")
+
+    assert not status(view, "agent.topology")["needs_review"]
+
+
+def test_changing_a_revised_decision_asks_to_review_later_ones(client):
+    view = ok(client, start(client), action="select", option_id="web")
+    view = ok(client, view, action="select", option_id=recommended(card_of(view)))
+
+    view = revise(client, view, "product.surface")
+    view = ok(client, view, action="select", option_id="report")
+
+    assert status(view, "agent.topology")["needs_review"]
+
+
+def test_cancelling_after_the_end_returns_without_a_new_design(client):
+    view = decide_all(client, start(client))
+    revision = design_of(client, view)["design_revision"]
+
+    view = revise(client, view, "product.surface")
+    assert view["prompt"]["type"] == "decision"
+    view = ok(client, view, action="defer")
+
+    assert view["prompt"] is None and view["can_reopen"]
+    assert view["status"] == "completed"
+    assert design_of(client, view)["design_revision"] == revision
+
+
+def test_the_same_option_after_the_end_keeps_the_design(client):
+    view = decide_all(client, start(client))
+    revision = design_of(client, view)["design_revision"]
+    held = status(view, "product.surface")["option_id"]
+
+    view = revise(client, view, "product.surface")
+    view = ok(client, view, action="select", option_id=held)
+
+    assert view["prompt"] is None and view["can_reopen"]
+    assert design_of(client, view)["design_revision"] == revision
+
+
+def test_another_option_after_the_end_makes_a_new_design(client):
+    view = decide_all(client, start(client))
+    revision = design_of(client, view)["design_revision"]
+    held = status(view, "product.surface")["option_id"]
+
+    view = revise(client, view, "product.surface")
+    view = ok(client, view, action="select", option_id=another_option(card_of(view), held))
+    view = decide_all(client, view)
+
+    assert view["prompt"] is None and view["can_reopen"]
+    assert design_of(client, view)["design_revision"] > revision
+
+
+def test_a_card_that_was_not_decided_cannot_be_revised(client):
+    view = start(client)
+
+    view = revise(client, view, "ops.tracing")
+
+    assert view["prompt"]["error"]
+    assert card_of(view)["card_id"] == "product.surface"
+
+
+def gcb_view(client):
+    response = client.post(
+        JOURNEYS, json={"idea": "강의 자료를 찾아 답하는 서비스를 만들고 싶어요"}
+    )
+    assert response.status_code == 201
+    view = response.json()
+    assert view["prompt"]["type"] == "gcb"
+    return view
+
+
+def test_the_first_screen_asks_everything_at_once(client):
+    view = gcb_view(client)
+    assert [q["field"] for q in view["prompt"]["questions"]]
+
+    view = ok(
+        client,
+        view,
+        action="gcb",
+        goal="찾을 수 있는 상태",
+        answers={"team_size": 3, "expected_users": "숫자가 아님"},
+    )
+
+    assert view["prompt"]["type"] == "decision"
+
+
+def test_the_gcb_step_alone_still_leads_to_clarifying(client):
+    view = ok(client, gcb_view(client), action="gcb", goal="찾을 수 있는 상태")
+
+    assert view["prompt"]["type"] in ("clarify", "decision")
+
+
+def test_options_carry_their_icons_before_being_chosen(client):
+    view = ok(client, start(client), action="select", option_id="web")
+    view = ok(client, view, action="focus", card_id="data.primary_db")
+
+    icons = {o["option"]["id"]: o["icon"] for o in card_of(view)["options"]}
+
+    assert icons["postgres"] == "postgresql"
+    assert icons["none"] == "none"
+
+
+def model_steps(client, view):
+    service = client.app.state.journeys
+    state = JourneyState.model_validate(service._snapshot(UUID(view["journey_id"])).values)
+    return [event.node for event in state.trace if event.node in ("advisor", "recommender")]
+
+
+def test_opening_a_decided_card_calls_no_model(client):
+    view = ok(client, start(client), action="select", option_id="web")
+    calls = model_steps(client, view)
+
+    view = revise(client, view, "product.surface")
+
+    assert model_steps(client, view) == calls
+    assert card_of(view)["recommendation"]["option_id"] == "web"
+
+
+def test_a_card_an_earlier_change_affected_is_advised_again(client):
+    view = ok(client, start(client), action="select", option_id="web")
+    view = ok(client, view, action="select", option_id=recommended(card_of(view)))
+    view = revise(client, view, "product.surface")
+    view = ok(client, view, action="select", option_id="report")
+    assert status(view, "agent.topology")["needs_review"]
+    calls = len(model_steps(client, view))
+
+    view = revise(client, view, "agent.topology")
+
+    assert len(model_steps(client, view)) == calls + 2
+
+
+def test_opening_a_decided_card_after_the_end_calls_no_model(client):
+    view = decide_all(client, start(client))
+    calls = model_steps(client, view)
+
+    view = revise(client, view, "product.surface")
+
+    assert view["prompt"]["type"] == "decision"
+    assert model_steps(client, view) == calls
+
+
+def test_changing_an_answer_names_a_later_answer_it_contradicts():
+    chosen = {"mlops.model_serving": "external_api"}
+
+    assert displaced(load_registry(), chosen, "model.provider", "gemini", "ollama") == chosen
+
+
+def test_changing_an_answer_names_an_automatic_choice_it_releases():
+    assert displaced(load_registry(), {}, "model.provider", "ollama", "gemini") == {
+        "mlops.model_serving": "ollama"
+    }
+
+
+def test_a_card_being_changed_lists_the_later_decisions_to_look_at_again(client):
+    view = ok(client, start(client), action="select", option_id="web")
+    assert card_of(view)["to_review"] == []
+    view = ok(client, view, action="select", option_id=recommended(card_of(view)))
+
+    view = revise(client, view, "product.surface")
+
+    held = status(view, "agent.topology")["option_name"]
+    assert card_of(view)["to_review"] == [f"Agent 구조: {held}"]

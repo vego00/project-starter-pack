@@ -41,6 +41,7 @@ import {
 import type { FlowNode, Point } from "./graph";
 import type { DesignCase } from "./mock";
 import { loadDesignCases } from "./source";
+import { ThemeToggle, useTheme } from "../theme";
 import { KIND_LABEL } from "./types";
 import type { Design, DesignEdge, DesignNode, NodeKind } from "./types";
 import "./studio.css";
@@ -602,6 +603,7 @@ type SaveDesign = (
 ) => Promise<Design>;
 
 function Studio({ item, onSave }: { item: DesignCase; onSave?: SaveDesign }) {
+  const theme = useTheme();
   const [history, setHistory] = useState({
     past: [] as Design[],
     present: item.design,
@@ -764,6 +766,7 @@ function Studio({ item, onSave }: { item: DesignCase; onSave?: SaveDesign }) {
         )}
         <div className="studio-canvas" style={{ height: canvasHeight(design) }}>
           <ReactFlow
+            colorMode={theme}
             nodes={flowNodes}
             edges={flowEdges}
             nodeTypes={NODE_TYPES}
@@ -806,7 +809,7 @@ function Studio({ item, onSave }: { item: DesignCase; onSave?: SaveDesign }) {
             minZoom={0.3}
           >
             <RefitOnChange signal={`${design.nodes.length}/${moved.size}`} />
-            <Background gap={24} color="#e0e3ec" />
+            <Background gap={24} color="var(--line)" />
             <Controls showInteractive={false} />
           </ReactFlow>
         </div>
@@ -898,9 +901,12 @@ function JourneyDesign({ journeyId }: { journeyId: string }) {
     <div className="app studio">
       <header className="topbar">
         <h1>설계 구조 보기</h1>
-        <a className="button" href={`/?journey=${journeyId}`}>
-          결과로 돌아가기
-        </a>
+        <div className="topbar-actions">
+          <a className="button" href={`/?journey=${journeyId}`}>
+            결과로 돌아가기
+          </a>
+          <ThemeToggle />
+        </div>
       </header>
       {failure && (
         <p className="note warn" role="alert">
@@ -958,6 +964,7 @@ function MockDesigns() {
             ))}
           </select>
         </label>
+        <ThemeToggle />
       </header>
       <p className="note warn">
         <strong>예시 데이터</strong> {item.idea} 모델이 만든 설계가 아니고, 고친

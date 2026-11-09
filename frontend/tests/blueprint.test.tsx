@@ -6,7 +6,9 @@ import userEvent from "@testing-library/user-event";
 import {
   BlueprintPanel,
   layoutBlueprint,
+  changedNodes,
   layoutSystem,
+  mergeEdges,
   ServiceDiagram,
 } from "../src/blueprint";
 import { SERVICE_ICONS } from "../src/serviceIcons";
@@ -91,6 +93,50 @@ describe("layoutBlueprint", () => {
   });
 });
 
+describe("changedNodes", () => {
+  it("names new and relabelled nodes and the targets of new edges", () => {
+    const before: BlueprintGraph = {
+      nodes: [node("a"), node("b")],
+      edges: [edge("a", "b")],
+    };
+    const after: BlueprintGraph = {
+      nodes: [node("a"), { ...node("b"), label: "바뀐 이름" }, node("c")],
+      edges: [edge("a", "b"), edge("a", "c")],
+    };
+
+    expect([...changedNodes(before, after)].sort()).toEqual(["b", "c"]);
+  });
+
+  it("marks the target when only a connection was added", () => {
+    const nodes = [node("a"), node("b")];
+
+    expect([
+      ...changedNodes({ nodes, edges: [] }, { nodes, edges: [edge("a", "b")] }),
+    ]).toEqual(["b"]);
+  });
+});
+
+describe("mergeEdges", () => {
+  it("draws parallel edges once with every label", () => {
+    const drawn = mergeEdges([
+      { source: "a", target: "b", label: "저장", dashed: false },
+      { source: "a", target: "b", label: "체크포인트", dashed: true },
+      { source: "a", target: "b", label: "저장", dashed: true },
+      { source: "b", target: "a", label: null, dashed: true },
+    ]);
+
+    expect(drawn).toEqual([
+      {
+        source: "a",
+        target: "b",
+        labels: ["저장", "체크포인트"],
+        dashed: false,
+      },
+      { source: "b", target: "a", labels: [], dashed: true },
+    ]);
+  });
+});
+
 describe("ServiceDiagram", () => {
   const graph: BlueprintGraph = {
     nodes: [
@@ -162,6 +208,101 @@ describe("BlueprintPanel", () => {
     pointer("pointerup", 150);
 
     expect(moved.getAttribute("transform")).toContain(`translate(${x + 100} `);
+  });
+
+  it("opens a decided card for change without removing it", async () => {
+    const user = userEvent.setup();
+    const act = vi.fn();
+    const decided = journey();
+    decided.cards = [{ ...decided.cards[0], state: "decided" }];
+    render(<BlueprintPanel journey={decided} busy={false} act={act} />);
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "미정 blank-agent.topology 이름 다시 고르기",
+      }),
+    );
+
+    expect(act).toHaveBeenCalledWith({
+      action: "revise",
+      card_id: "agent.topology",
+    });
+  });
+
+  it("does not offer a change once the screen is not on a decision", async () => {
+    const user = userEvent.setup();
+    const act = vi.fn();
+    const decided = journey({ prompt: null, can_reopen: false });
+    decided.cards = [{ ...decided.cards[0], state: "decided" }];
+    render(<BlueprintPanel journey={decided} busy={false} act={act} />);
+
+    await user.click(screen.getByRole("button", { name: "에이전트 흐름" }));
+    await user.click(
+      screen.getByRole("button", { name: "미정 blank-agent.topology 이름" }),
+    );
+
+    expect(act).not.toHaveBeenCalled();
+  });
+
+  it("zooms with buttons and returns to fitting the panel", async () => {
+    const user = userEvent.setup();
+    const { svg, width } = drawnGraph();
+    const fit = screen.getByRole("button", { name: "화면 맞춤" });
+    expect(fit).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "확대" }));
+    expect(Number(svg.getAttribute("width"))).toBeCloseTo(width * 1.25);
+    expect(screen.getByText("125%")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "축소" }));
+    expect(Number(svg.getAttribute("width"))).toBeCloseTo(width);
+
+    await user.click(fit);
+    expect(Number(svg.getAttribute("width"))).toBeCloseTo(width * 1.5);
+    expect(fit).toBeDisabled();
+  });
+
+  it("zooms with ctrl and the wheel, and leaves a plain wheel to scroll", () => {
+    const { svg } = drawnGraph();
+    const canvas = svg.parentElement!;
+
+    fireEvent.wheel(canvas, { deltaY: -100 });
+    expect(screen.getByText("맞춤")).toBeVisible();
+
+    fireEvent.wheel(canvas, { deltaY: -100, ctrlKey: true });
+    expect(screen.getByText("125%")).toBeVisible();
+  });
+
+  it("moves a node with the arrow keys", () => {
+    drawnGraph();
+    const moved = screen.getByRole("button", { name: "코드 input 이름" });
+    const x = Number(
+      moved.getAttribute("transform")!.match(/translate\(([\d.]+)/)![1],
+    );
+
+    fireEvent.keyDown(moved, { key: "ArrowRight" });
+
+    expect(moved.getAttribute("transform")).toContain(`translate(${x + 16} `);
+  });
+
+  it("says the examples are loading until they arrive", async () => {
+    const user = userEvent.setup();
+    let arrive = (_: Response) => {};
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise<Response>((done) => (arrive = done))),
+    );
+    render(<BlueprintPanel journey={journey()} busy={false} act={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "완성 예시" }));
+    expect(
+      screen.getByRole("button", { name: "예시를 불러오는 중…" }),
+    ).toBeDisabled();
+
+    arrive(Response.json([]));
+    expect(
+      await screen.findByRole("button", { name: "내 작업" }),
+    ).toBeVisible();
   });
 
   it("moves to the card when a blank is pressed", async () => {

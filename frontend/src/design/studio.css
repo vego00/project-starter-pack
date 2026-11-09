@@ -14,7 +14,7 @@
   padding: 8px;
   border: 1px solid var(--control-line);
   border-radius: 8px;
-  background: white;
+  background: var(--surface);
 }
 .studio-body {
   display: grid;
@@ -38,15 +38,21 @@
 .studio-canvas {
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: white;
+  background: var(--surface);
   overflow: hidden;
 }
 .studio-outline {
   margin-top: 8px;
 }
 .studio-outline summary {
-  padding: 10px 0;
+  padding: 11px 0;
   cursor: pointer;
+}
+.studio-canvas .react-flow__attribution a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 8px;
 }
 .studio-panel {
   position: sticky;
@@ -86,7 +92,7 @@
   padding: 8px 10px;
   border: 1px solid var(--control-line);
   border-radius: 8px;
-  background: white;
+  background: var(--surface);
 }
 .studio .field.grow {
   flex: 1;
@@ -148,7 +154,6 @@
   gap: 2px;
   width: 100%;
   text-align: left;
-  border-color: var(--line);
 }
 .requirement.active {
   border-color: var(--primary-dark);
@@ -159,8 +164,8 @@
 .flow-node {
   padding: 8px 12px;
   border: 1px solid var(--control-line);
-  background: white;
-  color: #293248;
+  background: var(--surface);
+  color: var(--text);
   font-size: 13px;
   line-height: 1.4;
   cursor: pointer;
@@ -191,7 +196,7 @@
   padding-inline: 20px;
 }
 .flow-node.selected {
-  outline: 3px solid #293248;
+  outline: 3px solid var(--text);
   outline-offset: 2px;
 }
 .flow-node.highlighted {
@@ -207,8 +212,8 @@
 .flow-node-tags .tag {
   padding: 0 6px;
   border-radius: 4px;
-  background: #293248;
-  color: white;
+  background: var(--text);
+  color: var(--bg);
 }
 .flow-node-issue {
   display: block;
@@ -220,8 +225,8 @@
 .flow-node .react-flow__handle {
   width: 12px;
   height: 12px;
-  background: white;
-  border: 2px solid #293248;
+  background: var(--surface);
+  border: 2px solid var(--text);
 }
 .flow-node .react-flow__handle.side {
   opacity: 0;
