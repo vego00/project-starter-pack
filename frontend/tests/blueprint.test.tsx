@@ -26,7 +26,7 @@ const node = (
   card_id: string | null = null,
   icon: string | null = null,
   group: string | null = null,
-) => ({ id, label: `${id} 이름`, kind, card_id, icon, group });
+) => ({ id, label: `${id} 이름`, kind, card_id, icon, group, rows: [] });
 const edge = (source: string, target: string) => ({
   source,
   target,
@@ -66,6 +66,7 @@ function journey(overrides: Partial<Journey> = {}): Journey {
         edges: [edge("input", "blank-agent.topology")],
       },
       system: { nodes: [node("api", "sys")], edges: [] },
+      notes: [],
       agent_is_draft: true,
     },
     can_reopen: false,
@@ -273,6 +274,122 @@ describe("BlueprintPanel", () => {
     expect(screen.getByText("125%")).toBeVisible();
   });
 
+  describe("decisions that share or lack a service", () => {
+    const decidedCard = (card_id: string) => ({
+      ...journey().cards[0],
+      card_id,
+      state: "decided" as const,
+    });
+    const shared = () =>
+      journey({
+        cards: [
+          decidedCard("data.primary_db"),
+          decidedCard("data.vector_store"),
+          decidedCard("data.checkpointer"),
+        ],
+        blueprint: {
+          agent: { nodes: [], edges: [] },
+          system: {
+            nodes: [
+              {
+                ...node("database", "sys", null, "postgresql", "data"),
+                rows: [
+                  {
+                    role: "데이터 저장",
+                    label: "PostgreSQL",
+                    card_id: "data.primary_db",
+                  },
+                  {
+                    role: "벡터 검색",
+                    label: "pgvector",
+                    card_id: "data.vector_store",
+                  },
+                ],
+              },
+            ],
+            edges: [],
+          },
+          notes: [
+            {
+              group: "data",
+              label: "상태 저장: 메모리",
+              card_id: "data.checkpointer",
+            },
+          ],
+          agent_is_draft: true,
+        },
+      });
+
+    async function openSystem(act = vi.fn()) {
+      const user = userEvent.setup();
+      render(<BlueprintPanel journey={shared()} busy={false} act={act} />);
+      await user.click(screen.getByRole("button", { name: "시스템 구성" }));
+      return { user, act };
+    }
+
+    it("opens each decision from its own line", async () => {
+      const { user, act } = await openSystem();
+
+      await user.click(
+        screen.getByRole("button", {
+          name: "시스템 벡터 검색: pgvector 다시 고르기",
+        }),
+      );
+
+      expect(act).toHaveBeenCalledWith({
+        action: "revise",
+        card_id: "data.vector_store",
+      });
+    });
+
+    it("moves the whole service from any of its lines", async () => {
+      await openSystem();
+      const line = screen.getByRole("button", {
+        name: "시스템 데이터 저장: PostgreSQL 다시 고르기",
+      });
+      const service = line.parentElement!;
+      const before = service.getAttribute("transform");
+
+      fireEvent.keyDown(line, { key: "ArrowDown" });
+
+      expect(service.getAttribute("transform")).not.toBe(before);
+    });
+
+    it("opens an answer that draws no service from below the graph", async () => {
+      const { user, act } = await openSystem();
+
+      await user.click(
+        screen.getByRole("button", { name: "상태 저장: 메모리 다시 고르기" }),
+      );
+
+      expect(act).toHaveBeenCalledWith({
+        action: "revise",
+        card_id: "data.checkpointer",
+      });
+    });
+
+    it("keeps those answers out of the agent graph", () => {
+      render(<BlueprintPanel journey={shared()} busy={false} act={vi.fn()} />);
+
+      expect(screen.queryByText("상태 저장: 메모리")).not.toBeInTheDocument();
+    });
+
+    it("gives a shared service room for every line", () => {
+      const graph = shared().blueprint.system;
+      const points = layoutSystem({
+        ...graph,
+        nodes: [
+          ...graph.nodes,
+          node("search", "sys", "data.vector_store", "search", "data"),
+        ],
+      });
+
+      expect(points.search.y - points.database.y).toBeGreaterThanOrEqual(
+        40 + 2 * 68,
+      );
+    });
+  });
+
   it("moves a node with the arrow keys", () => {
     drawnGraph();
     const moved = screen.getByRole("button", { name: "코드 input 이름" });
@@ -347,6 +464,7 @@ describe("BlueprintPanel", () => {
             blueprint: {
               agent: { nodes: [node("example-node")], edges: [] },
               system: { nodes: [], edges: [] },
+              notes: [],
               agent_is_draft: true,
             },
           },

@@ -220,6 +220,42 @@ def test_pressing_a_decided_icon_keeps_the_decision_until_changed(page: Page):
     expect(page.get_by_role("button", name="시스템 웹 화면 다시 고르기")).to_be_visible()
 
 
+def reach_data_cards(page: Page) -> None:
+    start(page)
+    skip_clarify(page)
+    choose_surface(page)
+    choose(page, "에이전트를 어떤 구조로 구성할까요?", "고정 파이프라인")
+    choose(page, "에이전트가 실행 중간에 사람의 확인을 받아야 하나요?", "승인 후 실행")
+    choose(page, "어떤 경로로 LLM을 사용할까요?", "Gemini")
+    choose(page, "서비스가 다루는 데이터를 어디에 저장할까요?", "PostgreSQL")
+
+
+def test_each_decision_on_one_postgres_opens_from_its_own_line(page: Page):
+    reach_data_cards(page)
+    choose(
+        page, "문서를 의미로 검색하는 벡터 저장소를 무엇으로 할까요?", "pgvector (PostgreSQL 확장)"
+    )
+    choose(page, "에이전트 실행 상태를 어디에 저장할까요?", "PostgreSQL 체크포인터")
+    page.get_by_role("button", name="시스템 구성", exact=True).click()
+    shot(page, "stacked-service")
+
+    page.get_by_role("button", name=re.compile("^시스템 벡터 검색: .* 다시 고르기$")).click()
+
+    expect(page.get_by_role("heading", name="문서를 의미로 검색하는")).to_be_visible()
+    page.get_by_role("button", name=re.compile("그대로 두기$")).click()
+    expect(page.get_by_role("heading", name="문서를 의미로 검색하는")).to_be_hidden()
+
+
+def test_an_answer_without_a_service_opens_from_the_line_below_the_graph(page: Page):
+    reach_data_cards(page)
+    choose(page, "문서를 의미로 검색하는 벡터 저장소를 무엇으로 할까요?", "불필요")
+    page.get_by_role("button", name="시스템 구성", exact=True).click()
+
+    page.get_by_role("button", name="검색 저장소: 불필요 다시 고르기").click()
+
+    expect(page.get_by_role("heading", name="문서를 의미로 검색하는")).to_be_visible()
+
+
 def test_the_graph_stays_put_while_the_card_scrolls(browser: Browser):
     context = browser.new_context(viewport={"width": 1280, "height": 700}, locale="ko-KR")
     page = context.new_page()

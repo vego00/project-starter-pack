@@ -180,6 +180,7 @@ describe("DesignStudio for a journey", () => {
           blueprint: {
             agent: { nodes: [], edges: [] },
             system: { nodes: [], edges: [] },
+            notes: [],
             agent_is_draft: false,
           },
         }),

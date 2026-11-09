@@ -50,6 +50,28 @@ OPTION_ICONS = {
     ("ops.tracing", "langsmith"): "langchain",
     ("ops.tracing", "logs"): "log",
 }
+# Decisions one PostgreSQL can answer together: drawn as one service with a line for each.
+POSTGRES_ROLES = (
+    ("data.primary_db", "데이터 저장", "postgres"),
+    ("data.checkpointer", "상태 저장", "postgres"),
+    ("data.vector_store", "벡터 검색", "pgvector"),
+)
+
+
+class BlueprintRow(BaseModel):
+    """One decision answered by a service that answers several."""
+
+    role: str
+    label: str
+    card_id: str
+
+
+class BlueprintNote(BaseModel):
+    """A decided card whose answer draws no service, kept within reach of the graph."""
+
+    group: Group
+    label: str
+    card_id: str
 
 
 class BlueprintNode(BaseModel):
@@ -59,6 +81,7 @@ class BlueprintNode(BaseModel):
     card_id: str | None = None
     icon: str | None = None
     group: Group | None = None
+    rows: list[BlueprintRow] = []
 
 
 class BlueprintEdge(BaseModel):
@@ -76,6 +99,7 @@ class BlueprintGraph(BaseModel):
 class Blueprint(BaseModel):
     agent: BlueprintGraph
     system: BlueprintGraph
+    notes: list[BlueprintNote] = []
     # True until a design exists: the agent flow is then only what the cards imply.
     agent_is_draft: bool
 
@@ -91,6 +115,7 @@ class _Canvas:
     def __init__(self, registry: Registry, choices: dict[str, str], skipped: set[str]):
         self.registry, self.choices, self.skipped = registry, choices, skipped
         self.graph = BlueprintGraph()
+        self.notes: list[BlueprintNote] = []
 
     def node(
         self,
@@ -100,10 +125,17 @@ class _Canvas:
         card_id: str | None = None,
         icon: str | None = None,
         group: Group | None = None,
+        rows: list[BlueprintRow] | None = None,
     ) -> str:
         self.graph.nodes.append(
             BlueprintNode(
-                id=node_id, label=label, kind=kind, card_id=card_id, icon=icon, group=group
+                id=node_id,
+                label=label,
+                kind=kind,
+                card_id=card_id,
+                icon=icon,
+                group=group,
+                rows=rows or [],
             )
         )
         return node_id
@@ -125,6 +157,13 @@ class _Canvas:
     def choice(self, card_id: str) -> str | None:
         return self.choices.get(card_id)
 
+    def option_name(self, card_id: str) -> str:
+        return self.registry.card(card_id).option(self.choices[card_id]).name
+
+    def note(self, card_id: str, group: Group) -> None:
+        label = f"{self.registry.card(card_id).title}: {self.option_name(card_id)}"
+        self.notes.append(BlueprintNote(group=group, label=label, card_id=card_id))
+
     def option_node(self, card_id: str, node_id: str, blank: str, group: Group) -> str | None:
         """Draws the chosen option under its own name, or a blank to fill in."""
         if not self.in_play(card_id):
@@ -135,6 +174,38 @@ class _Canvas:
         label = self.registry.card(card_id).option(option_id).name
         icon = OPTION_ICONS.get((card_id, option_id), "server")
         return self.node(node_id, label, "sys", card_id, icon=icon, group=group)
+
+
+def _data(canvas: _Canvas, runner: str) -> None:
+    rows = [
+        BlueprintRow(role=role, label=canvas.option_name(card_id), card_id=card_id)
+        for card_id, role, option_id in POSTGRES_ROLES
+        if canvas.choice("data.primary_db") == "postgres" and canvas.choice(card_id) == option_id
+    ]
+    shared = {row.card_id for row in rows} if len(rows) > 1 else set()
+    if shared:
+        canvas.node("database", "PostgreSQL", "sys", icon="postgresql", group="data", rows=rows)
+        canvas.edge(runner, "database")
+
+    if "data.primary_db" not in shared:
+        if canvas.choice("data.primary_db") == "none":
+            canvas.note("data.primary_db", "data")
+        elif database := canvas.option_node(
+            "data.primary_db", "database", "데이터 저장소?", "data"
+        ):
+            canvas.edge(runner, database, "저장")
+
+    if "data.checkpointer" not in shared:
+        if canvas.choice("data.checkpointer") == "memory":
+            canvas.note("data.checkpointer", "data")
+        elif state := canvas.option_node("data.checkpointer", "checkpoint", "상태 저장?", "data"):
+            canvas.edge(runner, state, "체크포인트", dashed=True)
+
+    if "data.vector_store" not in shared:
+        if canvas.choice("data.vector_store") == "none":
+            canvas.note("data.vector_store", "data")
+        elif search := canvas.option_node("data.vector_store", "search", "검색 저장소?", "data"):
+            canvas.edge(runner, search, "검색")
 
 
 def _system(canvas: _Canvas) -> None:
@@ -153,6 +224,8 @@ def _system(canvas: _Canvas) -> None:
     execution = canvas.choice("backend.execution")
     if not canvas.in_play("backend.execution") or execution == "sync":
         canvas.edge(api, runner, "실행")
+        if execution == "sync":
+            canvas.note("backend.execution", "app")
     elif execution is None:
         blank = canvas.option_node("backend.execution", "execution", "작업 실행?", "app")
         canvas.chain(api, blank, runner)
@@ -170,30 +243,10 @@ def _system(canvas: _Canvas) -> None:
             serving = canvas.option_node("mlops.model_serving", "serving", "모델 서빙?", "model")
             if serving:
                 canvas.edge(model, serving)
+    if canvas.choice("mlops.model_serving") == "external_api":
+        canvas.note("mlops.model_serving", "model")
 
-    database = None
-    if canvas.choice("data.primary_db") != "none":
-        database = canvas.option_node("data.primary_db", "database", "데이터 저장소?", "data")
-        if database:
-            canvas.edge(runner, database, "저장")
-
-    if canvas.in_play("data.checkpointer") and canvas.choice("data.checkpointer") != "memory":
-        postgres_again = (
-            canvas.choice("data.checkpointer") == "postgres"
-            and canvas.choice("data.primary_db") == "postgres"
-        )
-        if postgres_again:
-            canvas.edge(runner, database, "체크포인트", dashed=True)
-        else:
-            state = canvas.option_node("data.checkpointer", "checkpoint", "상태 저장?", "data")
-            canvas.edge(runner, state, "체크포인트", dashed=True)
-
-    if canvas.choice("data.vector_store") != "none" and canvas.in_play("data.vector_store"):
-        if canvas.choice("data.vector_store") == "pgvector" and database:
-            canvas.edge(runner, database, "벡터 검색", dashed=True)
-        else:
-            search = canvas.option_node("data.vector_store", "search", "검색 저장소?", "data")
-            canvas.edge(runner, search, "검색")
+    _data(canvas, runner)
 
     orchestration = canvas.option_node("devops.orchestration", "orchestration", "실행 환경?", "ops")
     cloud = canvas.option_node("cloud.target", "cloud", "배포 위치?", "ops")
@@ -202,10 +255,10 @@ def _system(canvas: _Canvas) -> None:
     if orchestration and cloud:
         canvas.edge(orchestration, cloud, "배포", dashed=True)
 
-    if canvas.choice("ops.tracing") != "none":
-        tracing = canvas.option_node("ops.tracing", "tracing", "실행 추적?", "ops")
-        if tracing:
-            canvas.edge(runner, tracing, "실행 추적", dashed=True)
+    if canvas.choice("ops.tracing") == "none":
+        canvas.note("ops.tracing", "ops")
+    elif tracing := canvas.option_node("ops.tracing", "tracing", "실행 추적?", "ops"):
+        canvas.edge(runner, tracing, "실행 추적", dashed=True)
 
 
 def _agent_draft(canvas: _Canvas) -> None:
@@ -256,7 +309,9 @@ def _build(
         _agent_from_design(agent, design)
     system = _Canvas(registry, choices, skipped)
     _system(system)
-    return Blueprint(agent=agent.graph, system=system.graph, agent_is_draft=design is None)
+    return Blueprint(
+        agent=agent.graph, system=system.graph, notes=system.notes, agent_is_draft=design is None
+    )
 
 
 def build_blueprint(state: JourneyState, registry: Registry) -> Blueprint:
