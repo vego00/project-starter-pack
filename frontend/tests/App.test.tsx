@@ -301,6 +301,45 @@ describe("restoring", () => {
   });
 });
 
+describe("workspace tabs", () => {
+  const press = (name: string) => screen.findByRole("button", { name });
+
+  it("closes and reopens each side", async () => {
+    const { user } = await startWith(journey());
+
+    await user.click(await press("단계 탭 닫기"));
+    expect(screen.getByRole("main")).toHaveClass("no-rail");
+    expect(await press("단계 탭 열기")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(screen.getByRole("main")).not.toHaveClass("no-card");
+
+    await user.click(await press("단계 탭 열기"));
+    expect(screen.getByRole("main")).not.toHaveClass("no-rail");
+  });
+
+  it("gives the graph the page and can bring both sides back", async () => {
+    const { user } = await startWith(journey());
+
+    await user.click(await press("그래프 넓게 보기"));
+    expect(screen.getByRole("main")).toHaveClass("no-rail", "no-card");
+
+    await user.click(await press("탭 모두 열기"));
+    expect(screen.getByRole("main")).not.toHaveClass("no-rail");
+    expect(screen.getByRole("main")).not.toHaveClass("no-card");
+  });
+
+  it("shows the card tab when moving to another card", async () => {
+    const { user } = await startWith(journey());
+
+    await user.click(await press("카드 탭 닫기"));
+    await user.click(await press("cloud.target 제목 먼저 정하기"));
+
+    expect(screen.getByRole("main")).not.toHaveClass("no-card");
+  });
+});
+
 describe("decision card", () => {
   it("is honest that the recommendation is a mock default", async () => {
     await startWith(journey());

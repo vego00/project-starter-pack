@@ -133,14 +133,12 @@ describe("BlueprintPanel", () => {
     const svg = screen.getByRole("group", {
       name: "에이전트 흐름",
     }) as unknown as SVGSVGElement;
-    return { svg, width: Number(svg.getAttribute("width")) };
+    return { svg, width: Number(svg.getAttribute("viewBox")!.split(" ")[2]) };
   }
 
-  it("scales to the panel but keeps labels readable", () => {
+  it("scales with the panel between readable and enlarged limits", () => {
     const { svg, width } = drawnGraph();
-    expect(svg.getAttribute("viewBox")).toBe(
-      `0 0 ${width} ${svg.getAttribute("height")}`,
-    );
+    expect(Number(svg.getAttribute("width"))).toBeCloseTo(width * 1.5);
     expect(parseFloat(svg.style.minWidth)).toBeCloseTo(width * 0.65);
   });
 

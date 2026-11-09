@@ -225,6 +225,27 @@ def test_the_system_diagram_fits_a_wide_panel(browser: Browser):
     context.close()
 
 
+def test_closing_the_tabs_gives_the_graph_the_page(browser: Browser):
+    context = browser.new_context(viewport={"width": 1600, "height": 900}, locale="ko-KR")
+    page = context.new_page()
+    page.goto(BASE_URL)
+    start(page)
+    skip_clarify(page)
+    canvas = page.locator(".blueprint-canvas")
+    question = page.get_by_role("heading", name=SURFACE)
+    before = canvas.bounding_box()["width"]
+
+    page.get_by_role("button", name="그래프 넓게 보기").click()
+    expect(page.get_by_role("complementary")).to_be_hidden()
+    expect(question).to_be_hidden()
+    assert canvas.bounding_box()["width"] > before + 500
+    shot(page, "9-graph-only")
+
+    page.get_by_role("button", name="미정 에이전트 구조?").click()
+    expect(page.get_by_role("heading", name="에이전트를 어떤 구조로")).to_be_visible()
+    context.close()
+
+
 def test_phone_width_has_no_horizontal_scroll(browser: Browser):
     context = browser.new_context(viewport={"width": 375, "height": 800}, locale="ko-KR")
     page = context.new_page()

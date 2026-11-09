@@ -22,6 +22,7 @@ const DRAG_START = 4;
 const MAX_LABEL = 11;
 // Below this the labels are too small to read, so a narrow panel scrolls instead.
 const MIN_SCALE = 0.65;
+const MAX_SCALE = 1.5;
 
 const KIND_LABEL: Record<BlueprintNode["kind"], string> = {
   code: "코드",
@@ -531,8 +532,8 @@ export function BlueprintPanel({
       </p>
       <div className="blueprint-canvas">
         <svg
-          width={width}
-          height={height}
+          width={width * MAX_SCALE}
+          height={height * MAX_SCALE}
           viewBox={`0 0 ${width} ${height}`}
           style={{ minWidth: width * MIN_SCALE }}
           role="group"
