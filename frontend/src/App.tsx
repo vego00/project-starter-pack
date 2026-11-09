@@ -48,6 +48,8 @@ export default function App() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [restoring, setRestoring] = useState(() => savedJourneyId() !== null);
+  const [railOpen, setRailOpen] = useState(true);
+  const [cardOpen, setCardOpen] = useState(true);
   const inFlight = useRef(false);
 
   function show(next: Journey) {
@@ -115,13 +117,24 @@ export default function App() {
     });
   }
 
+  /** Moving to a card from the rail or the graph has to show that card. */
+  function actAndShowCard(action: Action) {
+    if (action.action === "focus" || action.action === "reopen") {
+      setCardOpen(true);
+    }
+    act(action);
+  }
+
   function restart() {
     rememberJourney(null);
     setJourney(null);
     setError("");
+    setRailOpen(true);
+    setCardOpen(true);
   }
 
   const prompt = journey?.prompt ?? null;
+  const graphOnly = !railOpen && !cardOpen;
   return (
     <div className={journey ? "app wide" : "app"}>
       <header className="topbar">
@@ -148,9 +161,33 @@ export default function App() {
           <StartForm busy={busy} onStart={start} />
         </main>
       ) : (
-        <main className="workspace">
-          <ProgressRail journey={journey} busy={busy} act={act} />
-          <BlueprintPanel journey={journey} busy={busy} act={act} />
+        <main
+          className={`workspace${railOpen ? "" : " no-rail"}${cardOpen ? "" : " no-card"}`}
+        >
+          <div className="panel-toggles">
+            <button
+              aria-expanded={railOpen}
+              onClick={() => setRailOpen(!railOpen)}
+            >
+              {railOpen ? "단계 탭 닫기" : "단계 탭 열기"}
+            </button>
+            <button
+              onClick={() => {
+                setRailOpen(graphOnly);
+                setCardOpen(graphOnly);
+              }}
+            >
+              {graphOnly ? "탭 모두 열기" : "그래프 넓게 보기"}
+            </button>
+            <button
+              aria-expanded={cardOpen}
+              onClick={() => setCardOpen(!cardOpen)}
+            >
+              {cardOpen ? "카드 탭 닫기" : "카드 탭 열기"}
+            </button>
+          </div>
+          <ProgressRail journey={journey} busy={busy} act={actAndShowCard} />
+          <BlueprintPanel journey={journey} busy={busy} act={actAndShowCard} />
           <div className="workspace-card">
             {prompt?.type === "gcb" && (
               <GcbForm prompt={prompt} busy={busy} act={act} />

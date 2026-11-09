@@ -20,6 +20,9 @@ const GAP_Y = 34;
 const PAD = 26;
 const DRAG_START = 4;
 const MAX_LABEL = 11;
+// Below this the labels are too small to read, so a narrow panel scrolls instead.
+const MIN_SCALE = 0.65;
+const MAX_SCALE = 1.5;
 
 const KIND_LABEL: Record<BlueprintNode["kind"], string> = {
   code: "코드",
@@ -330,6 +333,7 @@ export function BlueprintPanel({
     startX: number;
     startY: number;
     origin: Point;
+    scale: number;
     moved: boolean;
   } | null>(null);
   const seen = useRef(new Map<string, Set<string>>());
@@ -376,11 +380,13 @@ export function BlueprintPanel({
     node: BlueprintNode,
   ) {
     event.currentTarget.setPointerCapture?.(event.pointerId);
+    const shown = event.currentTarget.ownerSVGElement?.getBoundingClientRect();
     drag.current = {
       id: node.id,
       startX: event.clientX,
       startY: event.clientY,
       origin: point(node.id),
+      scale: shown?.width ? shown.width / width : 1,
       moved: false,
     };
   }
@@ -395,8 +401,8 @@ export function BlueprintPanel({
     setMoved((old) => ({
       ...old,
       [`${scope}/${current.id}`]: {
-        x: Math.max(4, current.origin.x + dx),
-        y: Math.max(4, current.origin.y + dy),
+        x: Math.max(4, current.origin.x + dx / current.scale),
+        y: Math.max(4, current.origin.y + dy / current.scale),
       },
     }));
   }
@@ -526,8 +532,10 @@ export function BlueprintPanel({
       </p>
       <div className="blueprint-canvas">
         <svg
-          width={width}
-          height={height}
+          width={width * MAX_SCALE}
+          height={height * MAX_SCALE}
+          viewBox={`0 0 ${width} ${height}`}
+          style={{ minWidth: width * MIN_SCALE }}
           role="group"
           aria-label={layer === "agent" ? "에이전트 흐름" : "시스템 구성"}
         >

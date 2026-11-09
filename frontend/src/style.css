@@ -471,6 +471,27 @@ ul {
   gap: 12px;
   align-items: start;
 }
+.panel-toggles {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+@media (min-width: 1101px) {
+  .workspace.no-rail {
+    grid-template-columns: minmax(0, 1fr) 380px;
+  }
+  .workspace.no-card {
+    grid-template-columns: 250px minmax(0, 1fr);
+  }
+  .workspace.no-rail.no-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .workspace.no-rail .rail,
+  .workspace.no-card .workspace-card {
+    display: none;
+  }
+}
 .workspace .rail {
   max-height: calc(100vh - 32px);
   overflow: auto;
@@ -565,6 +586,9 @@ ul {
 }
 .blueprint-canvas svg {
   display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
 }
 .blueprint-detail {
   display: flex;
@@ -743,6 +767,9 @@ ul {
   }
 }
 @media (max-width: 1100px) {
+  .panel-toggles {
+    display: none;
+  }
   .workspace {
     grid-template-columns: minmax(0, 1fr);
   }
