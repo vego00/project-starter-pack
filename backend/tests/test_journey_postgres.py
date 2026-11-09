@@ -61,7 +61,8 @@ def select(option_id):
 def test_journey_continues_across_processes_until_completed():
     journey_id = uuid4()
 
-    assert step(journey_id, "start", SPEC)["card_id"] == "agent.topology"
+    assert step(journey_id, "start", SPEC)["card_id"] == "product.surface"
+    assert step(journey_id, "resume", select("web"))["card_id"] == "agent.topology"
     assert step(journey_id, "resume", select("pipeline"))["card_id"] == "agent.hitl"
     assert step(journey_id, "resume", select("question"))["card_id"] == "model.provider"
 
@@ -69,9 +70,10 @@ def test_journey_continues_across_processes_until_completed():
     for option_id in walk:
         result = step(journey_id, "resume", select(option_id))
     assert result["card_id"] == "cloud.target"
-    assert len(result["decisions"]) == 9
+    assert len(result["decisions"]) == 10
 
-    final = step(journey_id, "resume", select("local"))
+    assert step(journey_id, "resume", select("local"))["card_id"] == "ops.tracing"
+    final = step(journey_id, "resume", select("none"))
     assert final["card_id"] is None
     assert final["status"] == "completed"
     assert len(final["decisions"]) == len(load_registry().cards)
@@ -84,7 +86,7 @@ def test_invalid_answer_after_restart_keeps_the_same_card():
 
     result = step(journey_id, "resume", {})
 
-    assert result["card_id"] == "agent.topology"
+    assert result["card_id"] == "product.surface"
     assert result["decisions"] == []
 
 
@@ -102,8 +104,8 @@ def test_journeys_are_isolated_and_setup_is_repeatable():
         graph.invoke(journey_input(second, spec), journey_config(second))
         missing = graph.get_state(journey_config(uuid4()))
 
-    assert step(first, "resume", select("supervisor"))["decisions"] == ["agent.topology"]
-    assert step(second, "resume", select("pipeline"))["card_id"] == "agent.hitl"
+    assert step(first, "resume", select("web"))["decisions"] == ["product.surface"]
+    assert step(second, "resume", select("report"))["card_id"] == "agent.topology"
     assert missing.values == {}
 
 
