@@ -22,6 +22,7 @@ RESTART_CMD = os.environ.get("E2E_RESTART_CMD")
 CHROMIUM_PATH = os.environ.get("E2E_CHROMIUM_PATH")
 GOAL = "수강생이 강의 내용을 출처와 함께 바로 찾을 수 있는 상태"
 IDEA = "부트캠프 강의 자료를 찾아 질문에 답하고 출처를 알려주는 서비스를 만들고 싶어요."
+SURFACE = "사용자가 이 서비스를 어디서 쓰나요?"
 
 pytestmark = pytest.mark.skipif(not BASE_URL, reason="E2E_BASE_URL is not set")
 
@@ -83,6 +84,10 @@ def choose(page: Page, heading: str, option: str) -> None:
     expect(page.get_by_role("heading", name=heading)).to_be_hidden()
 
 
+def choose_surface(page: Page, option: str = "웹 화면") -> None:
+    choose(page, SURFACE, option)
+
+
 def test_all_cards_to_completion_with_reload_and_restart(page: Page):
     shot(page, "1-start")
     start(page)
@@ -100,13 +105,16 @@ def test_all_cards_to_completion_with_reload_and_restart(page: Page):
 
     expect(page.get_by_text("내 프로젝트를 분석한 결과는 아니에요")).to_be_visible()
     shot(page, "3-card")
+    choose_surface(page)
     choose(page, "에이전트를 어떤 구조로 구성할까요?", "고정 파이프라인")
     choose(page, "에이전트가 실행 중간에 사람의 확인을 받아야 하나요?", "승인 후 실행")
     choose(page, "어떤 경로로 LLM을 사용할까요?", "Gemini")
+    choose(page, "서비스가 다루는 데이터를 어디에 저장할까요?", "PostgreSQL")
+    choose(page, "문서를 의미로 검색하는 벡터 저장소를 무엇으로 할까요?", "불필요")
 
     page.reload()
     expect(page.get_by_role("heading", name="에이전트 실행 상태를 어디에")).to_be_visible()
-    expect(page.get_by_text("3 / 8")).to_be_visible()
+    expect(page.get_by_text("6 / 12")).to_be_visible()
 
     if RESTART_CMD:
         subprocess.run(RESTART_CMD, shell=True, check=True, timeout=120)
@@ -123,9 +131,10 @@ def test_all_cards_to_completion_with_reload_and_restart(page: Page):
     expect(page.get_by_text("재시작해도 남는 체크포인터가 필요합니다").first).to_be_visible()
     shot(page, "4-blocked")
     choose(page, "어디에 배포할까요?", "로컬만")
+    choose(page, "완성된 서비스의 실행 기록을 어떻게 볼까요?", "자체 실행 기록")
 
     expect(page.get_by_role("heading", name="빌드 묶음을 만들었어요")).to_be_visible()
-    expect(page.get_by_text("8 / 8")).to_be_visible()
+    expect(page.get_by_text("12 / 12")).to_be_visible()
     shot(page, "5-completed")
 
     with page.expect_download() as download:
@@ -151,6 +160,7 @@ def test_all_cards_to_completion_with_reload_and_restart(page: Page):
 def test_questions_defer_and_reopen(page: Page):
     start(page)
     skip_clarify(page)
+    choose_surface(page)
     choose(page, "에이전트를 어떤 구조로 구성할까요?", "고정 파이프라인")
     page.get_by_label("이 카드에 대해 질문하기").fill("interrupt가 뭐예요?")
     page.get_by_role("button", name="질문", exact=True).click()
@@ -167,9 +177,28 @@ def test_questions_defer_and_reopen(page: Page):
     expect(page.get_by_text("자동 확정")).to_be_hidden()
 
 
+def test_changing_an_earlier_decision_asks_to_review_later_ones(page: Page):
+    start(page)
+    skip_clarify(page)
+    choose_surface(page)
+    choose(page, "에이전트를 어떤 구조로 구성할까요?", "고정 파이프라인")
+    shot(page, "7-graph")
+
+    page.get_by_role("button", name="사용 위치 다시 고르기").click()
+    choose_surface(page, "정기 리포트")
+
+    notice = page.get_by_text("앞 단계가 바뀌었어요. 다시 확인해 주세요.")
+    expect(notice).to_be_visible()
+    shot(page, "8-review")
+
+    page.get_by_role("button", name="현재 결정 유지").click()
+    expect(notice).to_be_hidden()
+
+
 def test_stale_tab_cannot_answer_the_wrong_card(browser: Browser, page: Page):
     start(page)
     skip_clarify(page)
+    choose_surface(page)
     other = page.context.new_page()
     other.goto(page.url)
     expect(other.get_by_role("button", name="Supervisor 라우팅 선택")).to_be_visible()
@@ -180,7 +209,7 @@ def test_stale_tab_cannot_answer_the_wrong_card(browser: Browser, page: Page):
     other.get_by_role("button", name="Supervisor 라우팅 선택").click()
     expect(other.get_by_role("alert").first).to_contain_text("최신 상태가 아니에요")
     expect(other.get_by_role("heading", name="에이전트가 실행 중간에")).to_be_visible()
-    expect(other.get_by_text("1 / 8")).to_be_visible()
+    expect(other.get_by_text("2 / 12")).to_be_visible()
 
 
 def test_phone_width_has_no_horizontal_scroll(browser: Browser):
