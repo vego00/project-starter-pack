@@ -15,6 +15,8 @@ LAYER_NAMES = {
     "devops": "DevOps",
     "mlops": "MLOps",
     "cloud": "Cloud",
+    "product": "제품 형태",
+    "ops": "검증·운영",
 }
 BY_LABELS = {"user": "직접 선택", "recommended": "추천 수락", "implied": "규칙으로 자동 확정"}
 SPEC_LABELS = {

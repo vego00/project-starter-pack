@@ -8,8 +8,16 @@ from weakref import WeakValueDictionary
 from langgraph.types import Checkpointer, StateSnapshot
 from pydantic import BaseModel
 
+from app.journey.blueprint import Blueprint, BlueprintExample, blueprint_examples, build_blueprint
 from app.journey.composers.summary import ARTIFACT_KEY
-from app.journey.design import ServiceDesign
+from app.journey.design import DesignState, ServiceDesign
+from app.journey.design_constraints import derive_design_constraints
+from app.journey.design_edit import (
+    DesignEdit,
+    DesignEditError,
+    apply_design_edit,
+    compose_renames,
+)
 from app.journey.graph import build_graph, journey_config, journey_input
 from app.journey.nodes import resume_command
 from app.journey.package import build_package, package_zip
@@ -20,6 +28,7 @@ from app.journey.state import (
     GcbAction,
     JourneyAction,
     JourneyState,
+    KeepAction,
     ProjectSpec,
     ReopenAction,
 )
@@ -42,9 +51,11 @@ class JourneyError(Exception):
 class CardStatus(BaseModel):
     card_id: str
     layer: str
+    stage: int
     title: str
     question: str
     state: Literal["decided", "implied", "deferred", "current", "pending", "skipped"]
+    needs_review: bool = False
     option_id: str | None = None
     option_name: str | None = None
     by: Literal["user", "recommended", "implied"] | None = None
@@ -82,6 +93,7 @@ class JourneyView(BaseModel):
     warnings: list[str]
     notice: str | None
     design: DesignView | None = None
+    blueprint: Blueprint
     # Finished journeys made before the end wait existed cannot change a decision.
     can_reopen: bool = False
 
@@ -101,7 +113,7 @@ def _resume_payload(action: JourneyAction) -> Any:
 
 def _allowed(prompt_type: str, action: JourneyAction) -> bool:
     if prompt_type == "done":
-        return isinstance(action, ReopenAction)
+        return isinstance(action, ReopenAction | KeepAction)
     if prompt_type == "clarify":
         return isinstance(action, ClarifyAction)
     if prompt_type == "gcb":
@@ -141,13 +153,15 @@ class JourneyService:
                 )
             prompt = _pending_prompt(snapshot)
             finished = prompt is None or prompt["type"] == "done"
-            if finished and not (prompt is not None and isinstance(action, ReopenAction)):
+            if finished and not (
+                prompt is not None and isinstance(action, ReopenAction | KeepAction)
+            ):
                 raise JourneyError(409, "journey_finished", "이미 끝난 여정이에요.")
             if not _allowed(prompt["type"], action):
                 raise JourneyError(
                     409, "action_not_allowed", "지금 단계에서 할 수 없는 동작이에요."
                 )
-            if prompt["type"] == "done":
+            if prompt["type"] == "done" and isinstance(action, ReopenAction):
                 self._check_reopen(JourneyState.model_validate(snapshot.values), action)
             config = journey_config(journey_id)
             self._graph.invoke(resume_command(_resume_payload(action)), config)
@@ -167,6 +181,49 @@ class JourneyService:
         if state.design.current is None:
             raise JourneyError(409, "design_unavailable", "결정을 모두 마치면 볼 수 있어요.")
         return state.design.current
+
+    def save_design(self, journey_id: UUID, edit: DesignEdit) -> ServiceDesign:
+        """Saves graph edits as a new revision; the download then follows the edited design."""
+        with self._lock(journey_id):
+            snapshot = self._snapshot(journey_id)
+            state = JourneyState.model_validate(snapshot.values)
+            current = state.design.current
+            if current is None:
+                raise JourneyError(409, "design_unavailable", "결정을 모두 마치면 고칠 수 있어요.")
+            prompt = _pending_prompt(snapshot)
+            if prompt is None or prompt["type"] != "done":
+                raise JourneyError(409, "design_not_editable", "지금은 설계를 고칠 수 없어요.")
+            if edit.design_revision != current.design_revision:
+                raise JourneyError(
+                    409, "stale_design", "설계가 그새 바뀌었어요. 다시 불러온 뒤 고쳐 주세요."
+                )
+            constraints = derive_design_constraints(state, self._registry)
+            try:
+                saved = apply_design_edit(current, edit, constraints)
+            except DesignEditError as exc:
+                raise JourneyError(422, "design_has_errors", " / ".join(exc.problems)) from None
+            history = state.design.confirmed_history
+            status = state.design.status
+            if status == "confirmed":
+                history, status = [*history, current], "review_required"
+            design = DesignState(
+                status=status,
+                current=saved,
+                confirmed_history=history,
+                error=state.design.error,
+                generated=state.design.generated or current,
+                human_renames=compose_renames(state.design.human_renames, edit.renames),
+            )
+            self._graph.update_state(
+                journey_config(journey_id),
+                {"design": design.model_dump(mode="json")},
+                as_node="designer",
+            )
+            self._snapshot(journey_id)
+            return saved
+
+    def blueprint_examples(self) -> list[BlueprintExample]:
+        return blueprint_examples(self._registry)
 
     def package(self, journey_id: UUID) -> bytes:
         with self._lock(journey_id):
@@ -250,9 +307,11 @@ class JourneyService:
                 CardStatus(
                     card_id=card.card_id,
                     layer=card.layer,
+                    stage=card.stage,
                     title=card.title,
                     question=card.question,
                     state=kind,
+                    needs_review=card.card_id in state.needs_review,
                     option_id=decision.option_id if decision else None,
                     option_name=option.name if option else None,
                     by=decision.by if decision else None,
@@ -287,5 +346,6 @@ class JourneyService:
             warnings=[c.message for c in state.conflicts if c.severity == "warning"],
             notice=self._notice(),
             design=self._design_view(state),
+            blueprint=build_blueprint(state, self._registry),
             can_reopen=waiting_at_end,
         )

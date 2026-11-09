@@ -183,11 +183,17 @@ class JourneyState(BaseModel):
     blocked_options: dict[CardId, dict[str, str]] = {}
     conflicts: list[Conflict] = []
     current_card_id: CardId | None = None
+    # The open card the user moved to, ahead of the normal order.
+    focus_card: CardId | None = None
+    # What a reopened card held, so choosing the same option again changes nothing downstream.
+    previous_choices: dict[CardId, str] = {}
+    # Decisions in later stages made before an earlier stage changed.
+    needs_review: list[CardId] = []
     advice: Advice | None = None
     recommendation: Recommendation | None = None
     evidence: list[Evidence] = []
     current_card: CardPresentation | None = None
-    gate_outcome: Literal["advance", "ask", "invalid"] | None = None
+    gate_outcome: Literal["advance", "ask", "invalid", "keep"] | None = None
     gate_error: str | None = None
     pending_question: str | None = None
     qa_history: list[CardQA] = []
@@ -235,6 +241,16 @@ class ReopenAction(_Action):
     card_id: CardId
 
 
+class FocusAction(_Action):
+    action: Literal["focus"]
+    card_id: CardId
+
+
+class KeepAction(_Action):
+    action: Literal["keep"]
+    card_id: CardId
+
+
 class GcbAction(_Action):
     action: Literal["gcb"]
     goal: str = Field(default="", max_length=MAX_GCB_CHARS)
@@ -248,7 +264,13 @@ class ClarifyAction(_Action):
 
 
 GateAction = Annotated[
-    SelectAction | AcceptRecommendationAction | DeferAction | AskAction | ReopenAction,
+    SelectAction
+    | AcceptRecommendationAction
+    | DeferAction
+    | AskAction
+    | ReopenAction
+    | FocusAction
+    | KeepAction,
     Field(discriminator="action"),
 ]
 JourneyAction = Annotated[
@@ -257,6 +279,8 @@ JourneyAction = Annotated[
     | DeferAction
     | AskAction
     | ReopenAction
+    | FocusAction
+    | KeepAction
     | ClarifyAction
     | GcbAction,
     Field(discriminator="action"),
@@ -264,3 +288,4 @@ JourneyAction = Annotated[
 GCB_ACTION = TypeAdapter(GcbAction)
 GATE_ACTION = TypeAdapter(GateAction)
 ISSUE_ACTION = TypeAdapter(ReopenAction)
+DONE_ACTION = TypeAdapter(Annotated[ReopenAction | KeepAction, Field(discriminator="action")])

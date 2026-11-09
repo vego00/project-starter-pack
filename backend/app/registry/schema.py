@@ -5,8 +5,20 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-LAYERS = ("agent", "model", "data", "backend", "devops", "mlops", "cloud")
-Layer = Literal["agent", "model", "data", "backend", "devops", "mlops", "cloud"]
+LAYERS = ("agent", "model", "data", "backend", "devops", "mlops", "cloud", "product", "ops")
+Layer = Literal["agent", "model", "data", "backend", "devops", "mlops", "cloud", "product", "ops"]
+# Project stages (ADR-021), ordered so that changing an earlier one can invalidate a later one.
+LAYER_STAGE = {
+    "product": 3,
+    "agent": 4,
+    "model": 5,
+    "data": 5,
+    "backend": 5,
+    "devops": 5,
+    "mlops": 5,
+    "cloud": 5,
+    "ops": 6,
+}
 Level = Literal["low", "medium", "high"]
 
 
@@ -114,6 +126,10 @@ class DecisionCard(_Frozen):
         if unknown := referenced - set(ids):
             raise ValueError(f"{self.card_id}: unknown option ids {sorted(unknown)}")
         return self
+
+    @property
+    def stage(self) -> int:
+        return LAYER_STAGE[self.layer]
 
     def option(self, option_id: str) -> CardOption | None:
         return next((option for option in self.options if option.id == option_id), None)

@@ -19,7 +19,20 @@ const LAYER_NAMES: Record<string, string> = {
   devops: "DevOps",
   mlops: "MLOps",
   cloud: "Cloud",
+  product: "제품 형태",
+  ops: "검증·운영",
 };
+// ADR-021. Stages without a card yet stay visible so the whole path can be seen.
+const STAGE_NAMES = [
+  "제약 확인",
+  "데이터 이해",
+  "주제 확정",
+  "제품 형태",
+  "에이전트 설계",
+  "시스템 구성",
+  "검증·운영",
+  "팀 실행",
+];
 const LEVELS = { low: "낮음", medium: "보통", high: "높음" };
 const BY_LABEL = {
   user: "직접 선택",
@@ -30,6 +43,10 @@ const BY_LABEL = {
 const REOPEN_LABEL: Partial<Record<string, string>> = {
   decided: "다시 고르기",
   skipped: "다시 넣기",
+};
+const FOCUS_LABEL: Partial<Record<string, string>> = {
+  pending: "먼저 정하기",
+  deferred: "먼저 정하기",
 };
 const STATE_LABEL = {
   deferred: "나중에",
@@ -656,7 +673,8 @@ export function CompletedView({
       {journey.can_reopen && (
         <p className="muted">
           바꾸고 싶은 결정이 있으면 진행 목록에서 그 카드를 누르세요. 바꾼
-          결정에 맞춰 설계와 빌드 묶음을 다시 만들어요.
+          결정에 맞춰 설계와 빌드 묶음을 다시 만들어요. 그래프에서 직접 고친
+          내용은 새 설계에 다시 적용해요.
         </p>
       )}
       <p className="muted">
@@ -692,6 +710,73 @@ export function ProgressRail({
   // Skipped cards are not asked, so they are not part of what is left to decide.
   const total = journey.cards.filter((card) => card.state !== "skipped").length;
   const canReopen = journey.prompt?.type === "decision" || journey.can_reopen;
+  const canFocus = journey.prompt?.type === "decision";
+
+  function row(card: CardStatus) {
+    const reopen = canReopen ? REOPEN_LABEL[card.state] : undefined;
+    const focus = canFocus ? FOCUS_LABEL[card.state] : undefined;
+    const action = reopen ?? focus;
+    const value = (
+      <span className="step-value">
+        {card.option_name ??
+          STATE_LABEL[card.state as keyof typeof STATE_LABEL]}
+        {card.state === "implied" && " · 자동 확정"}
+        {card.state === "skipped" &&
+          card.skip_confidence != null &&
+          ` · 확신도 ${Math.round(card.skip_confidence * 100)}%`}
+      </span>
+    );
+    return (
+      <li
+        key={card.card_id}
+        className={`step ${card.state}${action ? " clickable" : ""}${card.needs_review ? " review" : ""}`}
+        aria-current={card.state === "current" ? "step" : undefined}
+      >
+        {action ? (
+          <button
+            className="step-button"
+            disabled={busy}
+            aria-label={`${card.title} ${action}`}
+            onClick={() =>
+              act(
+                reopen
+                  ? { action: "reopen", card_id: card.card_id }
+                  : { action: "focus", card_id: card.card_id },
+              )
+            }
+          >
+            <span className="step-head">
+              <span className="step-layer">{card.title}</span>
+              <span className="step-action" aria-hidden>
+                {action}
+              </span>
+            </span>
+            {value}
+          </button>
+        ) : (
+          <>
+            <span className="step-layer">{card.title}</span>
+            {value}
+          </>
+        )}
+        {card.needs_review && (
+          <div className="step-review">
+            <span>앞 단계가 바뀌었어요. 다시 확인해 주세요.</span>
+            {canReopen && (
+              <button
+                disabled={busy}
+                aria-label={`${card.title} 현재 결정 유지`}
+                onClick={() => act({ action: "keep", card_id: card.card_id })}
+              >
+                현재 결정 유지
+              </button>
+            )}
+          </div>
+        )}
+      </li>
+    );
+  }
+
   return (
     <aside className="rail" aria-label="결정 진행 상황">
       <p className="rail-title">
@@ -701,52 +786,21 @@ export function ProgressRail({
         결정 완료
       </p>
       <progress value={done} max={total} aria-hidden />
-      <ol>
-        {journey.cards.map((card) => {
-          const action = canReopen ? REOPEN_LABEL[card.state] : undefined;
-          const value = (
-            <span className="step-value">
-              {card.option_name ??
-                STATE_LABEL[card.state as keyof typeof STATE_LABEL]}
-              {card.state === "implied" && " · 자동 확정"}
-              {card.state === "skipped" &&
-                card.skip_confidence != null &&
-                ` · 확신도 ${Math.round(card.skip_confidence * 100)}%`}
-            </span>
-          );
-          return (
-            <li
-              key={card.card_id}
-              className={`step ${card.state}${action ? " clickable" : ""}`}
-              aria-current={card.state === "current" ? "step" : undefined}
-            >
-              {action ? (
-                <button
-                  className="step-button"
-                  disabled={busy}
-                  aria-label={`${card.title} ${action}`}
-                  onClick={() =>
-                    act({ action: "reopen", card_id: card.card_id })
-                  }
-                >
-                  <span className="step-head">
-                    <span className="step-layer">{card.title}</span>
-                    <span className="step-action" aria-hidden>
-                      {action}
-                    </span>
-                  </span>
-                  {value}
-                </button>
-              ) : (
-                <>
-                  <span className="step-layer">{card.title}</span>
-                  {value}
-                </>
-              )}
-            </li>
-          );
-        })}
-      </ol>
+      {STAGE_NAMES.map((name, stage) => {
+        const inStage = journey.cards.filter((card) => card.stage === stage);
+        return (
+          <section className="stage" key={name}>
+            <h3>
+              <span aria-hidden>{stage}</span> {name}
+            </h3>
+            {inStage.length > 0 ? (
+              <ol>{inStage.map(row)}</ol>
+            ) : (
+              <p className="muted stage-empty">아직 열리지 않은 단계예요</p>
+            )}
+          </section>
+        );
+      })}
     </aside>
   );
 }

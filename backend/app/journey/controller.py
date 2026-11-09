@@ -3,8 +3,13 @@
 from collections.abc import Sequence
 
 
-def next_card(pending: Sequence[str], deferred: Sequence[str]) -> str | None:
-    """Undeferred cards first, in registry order; then deferred cards, oldest deferral first."""
+def next_card(
+    pending: Sequence[str], deferred: Sequence[str], focus: str | None = None
+) -> str | None:
+    """The card the user moved to, if still open; then undeferred cards in the given order;
+    then deferred cards, oldest deferral first."""
+    if focus in pending:
+        return focus
     deferred_set = set(deferred)
     for card_id in pending:
         if card_id not in deferred_set:

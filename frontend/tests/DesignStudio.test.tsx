@@ -6,7 +6,7 @@ import userEvent from "@testing-library/user-event";
 import DesignStudio from "../src/design/DesignStudio";
 import { DESIGN_CASES } from "../src/design/mock";
 
-beforeAll(() => {
+function stubGraphApis() {
   vi.stubGlobal(
     "ResizeObserver",
     class {
@@ -21,7 +21,9 @@ beforeAll(() => {
       m22 = 1;
     },
   );
-});
+}
+
+beforeAll(stubGraphApis);
 afterEach(cleanup);
 
 async function openNode(
@@ -154,7 +156,10 @@ describe("DesignStudio", () => {
 
 describe("DesignStudio for a journey", () => {
   const ID = "e29a4ac6-f90c-4f97-91d6-d99acf27351f";
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    stubGraphApis();
+  });
 
   function serve(design: { status: number; body: unknown }) {
     const fetchMock = vi.fn(async (path: string) => {
@@ -172,6 +177,11 @@ describe("DesignStudio for a journey", () => {
           cards: [],
           warnings: [],
           notice: null,
+          blueprint: {
+            agent: { nodes: [], edges: [] },
+            system: { nodes: [], edges: [] },
+            agent_is_draft: false,
+          },
         }),
       );
     });
@@ -193,6 +203,63 @@ describe("DesignStudio for a journey", () => {
     const outline = screen.getByText(/글로 보기/).closest("details")!;
     const first = DESIGN_CASES[1].design.nodes[0].id;
     expect(within(outline).getByRole("button", { name: first })).toBeVisible();
+  });
+
+  function editFirstNode() {
+    const user = userEvent.setup();
+    return (async () => {
+      await screen.findByText(/실제 여정의 아이디어/);
+      await user.click(screen.getByText(/글로 보기/));
+      const outline = screen.getByText(/글로 보기/).closest("details")!;
+      const first = DESIGN_CASES[1].design.nodes[0].id;
+      await user.click(within(outline).getByRole("button", { name: first }));
+      const field = within(panel()).getByLabelText("하는 일");
+      await user.clear(field);
+      await user.type(field, "직접 고친 일");
+      await user.tab();
+      return user;
+    })();
+  }
+
+  it("saves edits with the revision they were based on", async () => {
+    const body = { ...DESIGN_CASES[1].design, design_revision: 3 };
+    const fetchMock = serve({ status: 200, body });
+    render(<DesignStudio journeyId={ID} />);
+
+    const user = await editFirstNode();
+    await user.click(screen.getByRole("button", { name: "저장" }));
+
+    expect(await screen.findByText(/저장했어요/)).toBeVisible();
+    const call = fetchMock.mock.calls.find(
+      (args) => (args as unknown[])[1] && JSON.stringify(args).includes("POST"),
+    ) as unknown as [string, RequestInit];
+    const sent = JSON.parse(call[1].body as string);
+    expect(sent.design_revision).toBe(3);
+    expect(sent.nodes[0].responsibility).toBe("직접 고친 일");
+  });
+
+  it("shows why the server refused the edits", async () => {
+    const body = { ...DESIGN_CASES[1].design, design_revision: 3 };
+    const fetchMock = serve({ status: 200, body });
+    render(<DesignStudio journeyId={ID} />);
+    const user = await editFirstNode();
+    fetchMock.mockImplementationOnce(async () =>
+      Response.json(
+        {
+          error: {
+            code: "design_has_errors",
+            message: "노드 A의 입력을 만드는 곳이 없어요",
+          },
+        },
+        { status: 422 },
+      ),
+    );
+
+    await user.click(screen.getByRole("button", { name: "저장" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "입력을 만드는 곳이 없어요",
+    );
   });
 
   it("explains when the design is not ready", async () => {

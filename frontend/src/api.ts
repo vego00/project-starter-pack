@@ -88,6 +88,42 @@ const promptSchema = z.discriminatedUnion("type", [
   }),
 ]);
 
+const blueprintGraphSchema = z.object({
+  nodes: z.array(
+    z.object({
+      id: z.string(),
+      label: z.string(),
+      kind: z.enum(["code", "agent", "human", "blank", "sys"]),
+      card_id: z.string().nullable(),
+      icon: z.string().nullable(),
+      group: z.string().nullable(),
+    }),
+  ),
+  edges: z.array(
+    z.object({
+      source: z.string(),
+      target: z.string(),
+      label: z.string().nullable(),
+      dashed: z.boolean(),
+    }),
+  ),
+});
+
+const blueprintSchema = z.object({
+  agent: blueprintGraphSchema,
+  system: blueprintGraphSchema,
+  agent_is_draft: z.boolean(),
+});
+
+const blueprintExamplesSchema = z.array(
+  z.object({
+    id: z.string(),
+    name: z.string(),
+    note: z.string(),
+    blueprint: blueprintSchema,
+  }),
+);
+
 const journeySchema = z.object({
   journey_id: z.string().uuid(),
   revision: z.number(),
@@ -98,6 +134,8 @@ const journeySchema = z.object({
     z.object({
       card_id: z.string(),
       layer: z.string(),
+      stage: z.number(),
+      needs_review: z.boolean(),
       title: z.string(),
       question: z.string(),
       state: z.enum([
@@ -136,6 +174,7 @@ const journeySchema = z.object({
     })
     .nullable()
     .optional(),
+  blueprint: blueprintSchema,
   can_reopen: z.boolean().optional().default(false),
 });
 
@@ -146,6 +185,10 @@ export type GcbPrompt = Extract<Prompt, { type: "gcb" }>;
 export type ClarifyPrompt = Extract<Prompt, { type: "clarify" }>;
 export type IssuesPrompt = Extract<Prompt, { type: "issues" }>;
 export type CardStatus = Journey["cards"][number];
+export type Blueprint = Journey["blueprint"];
+export type BlueprintGraph = Blueprint["agent"];
+export type BlueprintNode = BlueprintGraph["nodes"][number];
+export type BlueprintExample = z.infer<typeof blueprintExamplesSchema>[number];
 
 export type Action =
   | { action: "select"; option_id: string; rationale?: string }
@@ -153,6 +196,8 @@ export type Action =
   | { action: "defer" }
   | { action: "ask"; question: string }
   | { action: "reopen"; card_id: string }
+  | { action: "focus"; card_id: string }
+  | { action: "keep"; card_id: string }
   | { action: "clarify"; answers: Record<string, unknown> }
   | { action: "gcb"; goal: string; context: string; boundary: string };
 
@@ -225,6 +270,29 @@ export function getJourney(id: string): Promise<Journey> {
 
 export function getDesign(id: string): Promise<Design> {
   return request(`/api/v1/journeys/${id}/design`, designSchema);
+}
+
+export function saveDesign(
+  id: string,
+  design: Design,
+  renames: Record<string, string>,
+): Promise<Design> {
+  return request(`/api/v1/journeys/${id}/design`, designSchema, {
+    method: "POST",
+    body: JSON.stringify({
+      design_revision: design.design_revision,
+      nodes: design.nodes,
+      workflow: design.workflow,
+      requirement_nodes: Object.fromEntries(
+        design.requirements.map((item) => [item.id, item.node_ids]),
+      ),
+      renames,
+    }),
+  });
+}
+
+export function getBlueprintExamples(): Promise<BlueprintExample[]> {
+  return request("/api/v1/blueprint/examples", blueprintExamplesSchema);
 }
 
 export function designViewUrl(id: string): string {

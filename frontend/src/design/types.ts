@@ -29,6 +29,7 @@ const edge = z.object({
 });
 
 export const designSchema = z.object({
+  design_revision: z.number().optional(),
   requirements: z.array(
     z.object({
       id: z.string(),

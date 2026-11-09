@@ -38,7 +38,9 @@ def test_a_case_runs_with_mock_deps(mode):
     if mode == "flow":
         assert result["status"] == "completed"
         assert result["must_ask_missed"] == []
-        assert result["asked"] == list(REGISTRY.card_ids)  # The mock skips nothing.
+        # The mock skips nothing, and earlier stages are asked first.
+        by_stage = sorted(REGISTRY.cards, key=lambda card: card.stage)
+        assert result["asked"] == [card.card_id for card in by_stage]
 
 
 def test_the_case_choice_is_used_and_a_blocked_one_is_never_sent():

@@ -14,7 +14,13 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 # Rule-bearing cards only, so each test states exactly the cards it walks through.
 # Data cards added by ADR-018 are left out too: their own tests walk them.
-S2_CARDS_ONLY = {"agent.topology", "data.primary_db", "data.vector_store"}
+S2_CARDS_ONLY = {
+    "agent.topology",
+    "data.primary_db",
+    "data.vector_store",
+    "product.surface",
+    "ops.tracing",
+}
 REGISTRY = Registry(card for card in load_registry().cards if card.card_id not in S2_CARDS_ONLY)
 IDEA = "민감한고객문의내용을 처리하는 멀티 에이전트 서비스"
 GOAL = "수강생이 근거와 함께 답을 찾을 수 있는 상태"
@@ -544,14 +550,14 @@ def test_node_writing_outside_its_fields_is_rejected():
         node(state)
 
 
-def test_shipped_registry_starts_with_topology_and_completes():
+def test_shipped_registry_starts_at_the_earliest_stage_and_completes():
     saver = InMemorySaver()
     graph = build_graph(load_registry(), checkpointer=saver)
     journey_id = uuid4()
     config = journey_config(journey_id)
 
     result = graph.invoke(journey_input(journey_id, ProjectSpec(**COMPLETE_SPEC)), config)
-    assert result["__interrupt__"][0].value["card"]["card_id"] == "agent.topology"
+    assert result["__interrupt__"][0].value["card"]["card_id"] == "product.surface"
 
     while result["__interrupt__"][0].value["type"] != "done":
         result = graph.invoke(resume_command({"action": "accept_recommendation"}), config)

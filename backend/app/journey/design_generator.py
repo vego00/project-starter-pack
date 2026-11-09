@@ -265,6 +265,16 @@ FIX_HINTS = {
 }
 
 
+def score_design(design: ServiceDesign) -> tuple[int, int]:
+    """Lower is better: broken rules first, then warnings. The validator decides, not a model,
+    so the same design always gets the same score."""
+    issues = design.validation or []
+    return (
+        sum(issue.severity == "error" for issue in issues),
+        sum(issue.severity == "warning" for issue in issues),
+    )
+
+
 def _errors(design: ServiceDesign) -> list[str]:
     return [
         f"{issue.message} (고치는 법: {FIX_HINTS[issue.rule_id]})"
@@ -304,9 +314,10 @@ def generate_design(
     *,
     attempts: int = MAX_ATTEMPTS,
     outage_retries: int = MAX_OUTAGE_RETRIES,
+    candidates: int = 1,
 ) -> DesignOutcome:
     """Each run after a changed decision is a new revision, so an old design never passes as new."""
-    outcome = _generate(state, registry, designer, attempts, outage_retries)
+    outcome = _generate(state, registry, designer, attempts, outage_retries, candidates)
     previous = state.design.current
     if previous is None:
         return outcome
@@ -324,62 +335,97 @@ def _generate(
     designer: Designer | None,
     attempts: int,
     outage_retries: int,
+    candidates: int = 1,
 ) -> DesignOutcome:
+    """Generate k drafts, keep the best by score, then correct it while attempts remain.
+
+    The order of these steps is fixed here (Graph of Thoughts' graph of operations). A model only
+    writes each draft; the validator scores it. With one candidate this is the earlier loop.
+    """
     constraints = derive_design_constraints(state, registry)
     if designer is None or attempts < 1:
         return _failed(state, constraints)
 
-    problems: list[str] = []
+    budget = {"attempts": attempts, "outages": outage_retries}
     usage: dict = {}
-    while attempts > 0:
-        try:
-            attempt = designer.draft(state, constraints, problems)
-            usage = {
-                "model_id": attempt.model_id,
-                "prompt_version": DESIGN_VERSION,
-                "input_tokens": (usage.get("input_tokens") or 0) + (attempt.input_tokens or 0),
-                "output_tokens": (usage.get("output_tokens") or 0) + (attempt.output_tokens or 0),
-            }
-            fields = {name: getattr(attempt.draft, name) for name in DesignDraft.model_fields}
-            design = _with_decisions(
-                fields,
-                constraints,
-                _provenance(
-                    state,
-                    constraints,
-                    source="model",
+
+    def draft(problems: list[str]) -> tuple[ServiceDesign | None, list[str]]:
+        """One Generate call. An outage is retried from its own budget before using an attempt."""
+        while budget["attempts"] > 0:
+            try:
+                attempt = designer.draft(state, constraints, problems)
+                usage.update(
                     model_id=attempt.model_id,
                     prompt_version=DESIGN_VERSION,
-                ),
-            )
-        except ValidationError as exc:
-            attempts -= 1
-            problems = _contract_problems(exc)
-            logger.warning(
-                "Design draft broke the contract fields=%s",
-                [
-                    ".".join(map(str, error["loc"])) + ":" + error["type"]
-                    for error in exc.errors(include_input=False, include_url=False)
-                ],
-            )
-            continue
-        except Exception as exc:  # noqa: BLE001 - model boundary; the prompt holds user text
-            if outage_retries > 0:
-                outage_retries -= 1
-            else:
-                attempts -= 1
-            logger.error(
-                "Design call failed type=%s status=%s",
-                type(exc).__name__,
-                getattr(exc, "code", None),
-            )
-            continue
-        attempts -= 1
-        problems = _errors(design)
-        if not problems:
-            return DesignOutcome(
-                design=DesignState(status="review_required", current=design), **usage
-            )
-        rules = sorted({i.rule_id for i in design.validation or [] if i.severity == "error"})
-        logger.warning("Design failed validation errors=%d rules=%s", len(problems), rules)
+                    input_tokens=(usage.get("input_tokens") or 0) + (attempt.input_tokens or 0),
+                    output_tokens=(usage.get("output_tokens") or 0) + (attempt.output_tokens or 0),
+                )
+                fields = {name: getattr(attempt.draft, name) for name in DesignDraft.model_fields}
+                design = _with_decisions(
+                    fields,
+                    constraints,
+                    _provenance(
+                        state,
+                        constraints,
+                        source="model",
+                        model_id=attempt.model_id,
+                        prompt_version=DESIGN_VERSION,
+                    ),
+                )
+            except ValidationError as exc:
+                budget["attempts"] -= 1
+                logger.warning(
+                    "Design draft broke the contract fields=%s",
+                    [
+                        ".".join(map(str, error["loc"])) + ":" + error["type"]
+                        for error in exc.errors(include_input=False, include_url=False)
+                    ],
+                )
+                return None, _contract_problems(exc)
+            except Exception as exc:  # noqa: BLE001 - model boundary; the prompt holds user text
+                if budget["outages"] > 0:
+                    budget["outages"] -= 1
+                else:
+                    budget["attempts"] -= 1
+                logger.error(
+                    "Design call failed type=%s status=%s",
+                    type(exc).__name__,
+                    getattr(exc, "code", None),
+                )
+                continue
+            budget["attempts"] -= 1
+            errors = _errors(design)
+            if errors:
+                rules = sorted(
+                    {i.rule_id for i in design.validation or [] if i.severity == "error"}
+                )
+                logger.warning("Design failed validation errors=%d rules=%s", len(errors), rules)
+            return design, errors
+        return None, problems
+
+    # Generate: k drafts from scratch, one after another so the requests do not burst (429).
+    drafts: list[ServiceDesign] = []
+    problems: list[str] = []
+    for _ in range(min(candidates, attempts)):
+        design, found = draft([])
+        if design is not None:
+            drafts.append(design)
+        else:
+            problems = found or problems
+    # KeepBest: the fewest broken rules, then the fewest warnings. A draft that broke the
+    # contract is not a candidate. On a tie the earlier draft stays.
+    best = min(drafts, key=score_design, default=None)
+    if best is not None:
+        problems = _errors(best)
+
+    # Correct while attempts remain. A correction replaces the best only if it scores better.
+    while budget["attempts"] > 0 and (best is None or score_design(best)[0] > 0):
+        design, problems = draft(problems)
+        if design is not None and (best is None or score_design(design) < score_design(best)):
+            best = design
+        if best is not None and design is not best:
+            problems = _errors(best)
+
+    if best is not None and score_design(best)[0] == 0:
+        return DesignOutcome(design=DesignState(status="review_required", current=best), **usage)
     return _failed(state, constraints, **usage)

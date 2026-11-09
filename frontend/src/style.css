@@ -461,3 +461,304 @@ ul {
 .row + h3 {
   margin-top: 24px;
 }
+
+.app.wide {
+  max-width: none;
+}
+.workspace {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr) 380px;
+  gap: 12px;
+  align-items: start;
+}
+.workspace .rail {
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+}
+.stage {
+  margin-top: 12px;
+}
+.stage h3 {
+  font-size: 0.95rem;
+  margin-bottom: 4px;
+}
+.stage h3 span {
+  color: var(--primary);
+  margin-right: 2px;
+}
+.stage ol {
+  margin-top: 4px;
+}
+.stage-empty {
+  margin: 0;
+  padding-left: 13px;
+  font-size: 0.85rem;
+}
+.step.review {
+  border-color: var(--warn-text);
+}
+.step-review {
+  display: grid;
+  gap: 4px;
+  padding: 0 8px 8px 10px;
+  color: var(--warn-text);
+  font-size: 0.85rem;
+}
+.step-review button {
+  justify-self: start;
+  min-height: 36px;
+  padding: 3px 10px;
+  font-size: 0.85rem;
+}
+.blueprint {
+  position: sticky;
+  top: 16px;
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  min-width: 0;
+}
+.blueprint-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.blueprint-count {
+  flex: 1;
+  font-size: 0.9rem;
+}
+.segment {
+  display: inline-flex;
+  flex-wrap: wrap;
+  border: 1px solid var(--control-line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.segment button {
+  border: 0;
+  border-radius: 0;
+  min-height: 40px;
+}
+.segment button.on {
+  background: var(--tint-pressed);
+  font-weight: 600;
+}
+.blueprint-note {
+  margin: 0;
+  padding: 6px 12px;
+  background: var(--tint);
+  font-size: 0.9rem;
+}
+.blueprint .alert {
+  margin: 8px 12px;
+}
+.blueprint-canvas {
+  overflow: auto;
+  min-height: 300px;
+  max-height: calc(100vh - 230px);
+  background-image: radial-gradient(var(--line) 1px, transparent 1px);
+  background-size: 18px 18px;
+}
+.blueprint-canvas svg {
+  display: block;
+}
+.blueprint-detail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 57px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
+}
+.bp-node {
+  cursor: grab;
+  touch-action: none;
+  outline: none;
+}
+.bp-node:focus-visible rect {
+  stroke: var(--primary);
+  stroke-width: 3;
+}
+.bp-node rect {
+  fill: white;
+  stroke: var(--control-line);
+  stroke-width: 1.5;
+}
+.bp-node.agent rect {
+  fill: var(--tint);
+  stroke: var(--primary);
+}
+.bp-node.human rect {
+  fill: var(--warn-bg);
+  stroke: var(--warn-text);
+}
+.bp-node.blank rect {
+  fill: transparent;
+  stroke: var(--primary);
+  stroke-dasharray: 6 4;
+}
+.bp-node.selected rect {
+  stroke-width: 3;
+}
+.bp-node.review rect {
+  stroke: var(--warn-text);
+  stroke-width: 2.5;
+  stroke-dasharray: 3 3;
+}
+.bp-node.fresh rect {
+  animation: bp-pop 1.1s ease-out;
+}
+@keyframes bp-pop {
+  from {
+    fill: var(--tint-pressed);
+    stroke-width: 5;
+  }
+}
+.bp-kind,
+.bp-label,
+.bp-edge-label {
+  text-anchor: middle;
+}
+.bp-kind {
+  font-size: 11px;
+  fill: var(--muted);
+}
+.bp-label {
+  font-size: 13px;
+  font-weight: 500;
+  fill: currentColor;
+}
+.bp-edge {
+  fill: none;
+  stroke: var(--control-line);
+  stroke-width: 1.5;
+}
+.bp-edge.dashed {
+  stroke-dasharray: 5 4;
+}
+.bp-edge-label {
+  font-size: 11px;
+  fill: var(--muted);
+  paint-order: stroke;
+  stroke: white;
+  stroke-width: 4px;
+}
+.bp-arrow {
+  fill: var(--control-line);
+}
+.bp-box {
+  fill: none;
+  stroke: var(--control-line);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+.bp-box-title {
+  font-size: 12px;
+  font-weight: 600;
+  fill: var(--muted);
+}
+.bp-service {
+  cursor: grab;
+  touch-action: none;
+  outline: none;
+}
+.bp-tile {
+  fill: white;
+  stroke: var(--line);
+  stroke-width: 1.5;
+}
+.bp-service.blank .bp-tile {
+  fill: transparent;
+  stroke: var(--primary);
+  stroke-dasharray: 5 4;
+}
+.bp-service:focus-visible .bp-tile,
+.bp-service.selected .bp-tile {
+  stroke: var(--primary);
+  stroke-width: 3;
+}
+.bp-service.review .bp-tile {
+  stroke: var(--warn-text);
+  stroke-width: 2.5;
+  stroke-dasharray: 3 3;
+}
+.bp-service.fresh .bp-tile {
+  animation: bp-pop 1.1s ease-out;
+}
+.bp-service-label {
+  font-size: 12.5px;
+  font-weight: 500;
+  fill: currentColor;
+  text-anchor: middle;
+}
+.bp-generic {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.bp-unknown {
+  font-size: 18px;
+  font-weight: 600;
+  fill: var(--primary);
+  text-anchor: middle;
+}
+.workspace-card {
+  min-width: 0;
+}
+.workspace-card .panel {
+  padding: 16px;
+}
+.workspace-card h2 {
+  font-size: 1.1rem;
+}
+.workspace-card .options {
+  grid-template-columns: minmax(0, 1fr);
+}
+.workspace-card .qa p:first-child {
+  background: var(--tint-pressed);
+  border-radius: 8px;
+  padding: 6px 10px;
+  margin: 8px 0 4px auto;
+  width: fit-content;
+  max-width: 92%;
+}
+.workspace-card .qa p:last-child {
+  background: #f5f6fa;
+  border-radius: 8px;
+  padding: 6px 10px;
+  margin: 0;
+  max-width: 92%;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bp-node.fresh rect,
+  .bp-service.fresh .bp-tile {
+    animation: none;
+  }
+}
+@media (max-width: 1100px) {
+  .workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .workspace .rail {
+    position: static;
+    order: 3;
+    max-height: none;
+  }
+  .workspace-card {
+    order: 1;
+  }
+  .blueprint {
+    position: static;
+    order: 2;
+  }
+  .blueprint-canvas {
+    max-height: 420px;
+  }
+}

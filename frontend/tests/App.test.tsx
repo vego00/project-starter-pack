@@ -71,6 +71,8 @@ function cards(first = "current", second = "pending") {
   const status = (card_id: string, layer: string, state: string) => ({
     card_id,
     layer,
+    stage: layer === "agent" ? 4 : 5,
+    needs_review: false,
     title: `${card_id} 제목`,
     question: `${card_id} 질문`,
     state,
@@ -95,6 +97,11 @@ function journey(overrides = {}) {
     cards: cards(),
     warnings: [],
     notice: "모델 미연결 상태입니다.",
+    blueprint: {
+      agent: { nodes: [], edges: [] },
+      system: { nodes: [], edges: [] },
+      agent_is_draft: true,
+    },
     ...overrides,
   };
 }
@@ -810,7 +817,48 @@ describe("issues and completion", () => {
       action: "reopen",
       card_id: "agent.hitl",
     });
-    expect(screen.queryByRole("button", { name: /cloud.target/ })).toBeNull();
+  });
+
+  it("moves to a card that is still open", async () => {
+    const { user, mock } = await startWith(
+      journey({ cards: cards("current", "pending") }),
+    );
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "cloud.target 제목 먼저 정하기",
+      }),
+    );
+
+    expect(bodyOf(mock.mock.calls[1]).action).toEqual({
+      action: "focus",
+      card_id: "cloud.target",
+    });
+  });
+
+  it("asks to review a later decision and can keep it", async () => {
+    const flagged = cards("decided", "current");
+    flagged[0] = { ...flagged[0], needs_review: true };
+    const { user, mock } = await startWith(journey({ cards: flagged }));
+
+    expect(await screen.findByText(/앞 단계가 바뀌었어요/)).toBeVisible();
+    await user.click(
+      screen.getByRole("button", { name: "agent.hitl 제목 현재 결정 유지" }),
+    );
+
+    expect(bodyOf(mock.mock.calls[1]).action).toEqual({
+      action: "keep",
+      card_id: "agent.hitl",
+    });
+  });
+
+  it("groups cards under the stages of the project", async () => {
+    await startWith(journey());
+
+    const rail = await screen.findByRole("complementary");
+    expect(rail).toHaveTextContent("에이전트 설계");
+    expect(rail).toHaveTextContent("시스템 구성");
+    expect(rail).toHaveTextContent("아직 열리지 않은 단계예요");
   });
 
   it("reopens a decision after the journey finished", async () => {

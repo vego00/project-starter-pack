@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { getDesign, getJourney } from "../api";
+import { getDesign, getJourney, saveDesign } from "../api";
 import {
   applyNodeChanges,
   Background,
@@ -16,6 +16,7 @@ import type { Issue } from "./check";
 import {
   addEdge,
   addNode,
+  addRename,
   formatPorts,
   idProblem,
   parsePorts,
@@ -190,12 +191,14 @@ function NodePanel({
   issues,
   commit,
   select,
+  onRename,
 }: {
   design: Design;
   node: DesignNode;
   issues: Issue[];
   commit: (next: Design) => void;
   select: (next: Selection) => void;
+  onRename: (from: string, to: string) => void;
 }) {
   const [idError, setIdError] = useState("");
   const [target, setTarget] = useState("");
@@ -392,6 +395,7 @@ function NodePanel({
             setIdError(problem ?? "");
             if (!problem) {
               commit(renameNode(design, node.id, next));
+              onRename(node.id, next);
               select({ type: "node", id: next });
             }
           }}
@@ -592,13 +596,25 @@ function Overview({
   );
 }
 
-function Studio({ item }: { item: DesignCase }) {
+type SaveDesign = (
+  design: Design,
+  renames: Record<string, string>,
+) => Promise<Design>;
+
+function Studio({ item, onSave }: { item: DesignCase; onSave?: SaveDesign }) {
   const [history, setHistory] = useState({
     past: [] as Design[],
     present: item.design,
     future: [] as Design[],
   });
   const design = history.present;
+  const [saved, setSaved] = useState(item.design);
+  const [renames, setRenames] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState<{
+    text: string;
+    failed: boolean;
+  } | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
   const [highlight, setHighlight] = useState<string | null>(null);
   const [moved, setMoved] = useState<Map<string, Point>>(new Map());
@@ -626,9 +642,34 @@ function Studio({ item }: { item: DesignCase }) {
 
   const issues = useMemo(() => checkDesign(design), [design]);
   const changes = useMemo(
-    () => summarizeChanges(item.design, design),
-    [item.design, design],
+    () => summarizeChanges(saved, design),
+    [saved, design],
   );
+  const hasErrors = issues.some((issue) => issue.severity === "error");
+
+  async function save() {
+    if (!onSave) return;
+    setSaving(true);
+    setSaveMessage(null);
+    try {
+      const next = await onSave(design, renames);
+      setSaved(next);
+      setRenames({});
+      setHistory({ past: [], present: next, future: [] });
+      setSaveMessage({
+        text: "저장했어요. 빌드 묶음도 고친 설계로 바뀌었어요.",
+        failed: false,
+      });
+    } catch (error) {
+      setSaveMessage({
+        text: error instanceof Error ? error.message : "저장하지 못했어요.",
+        failed: true,
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const selectedNode =
     selection?.type === "node"
       ? design.nodes.find((node) => node.id === selection.id)
@@ -703,7 +744,24 @@ function Studio({ item }: { item: DesignCase }) {
           >
             자동 배치
           </button>
+          {onSave && (
+            <button
+              className="primary"
+              disabled={saving || hasErrors || changes.length === 0}
+              onClick={() => void save()}
+            >
+              {saving ? "저장하는 중…" : "저장"}
+            </button>
+          )}
         </div>
+        {saveMessage && (
+          <p
+            className={saveMessage.failed ? "alert" : "note"}
+            role={saveMessage.failed ? "alert" : "status"}
+          >
+            {saveMessage.text}
+          </p>
+        )}
         <div className="studio-canvas" style={{ height: canvasHeight(design) }}>
           <ReactFlow
             nodes={flowNodes}
@@ -789,6 +847,9 @@ function Studio({ item }: { item: DesignCase }) {
             issues={issues}
             commit={commit}
             select={setSelection}
+            onRename={(from, to) =>
+              setRenames((old) => addRename(old, from, to))
+            }
           />
         ) : selectedEdge ? (
           <EdgePanel
@@ -813,7 +874,7 @@ function Studio({ item }: { item: DesignCase }) {
   );
 }
 
-/** The design a finished journey produced. Edits stay in this tab until saving exists. */
+/** The design a finished journey produced. The backend validator decides what can be saved. */
 function JourneyDesign({ journeyId }: { journeyId: string }) {
   const [item, setItem] = useState<DesignCase | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
@@ -852,10 +913,15 @@ function JourneyDesign({ journeyId }: { journeyId: string }) {
       {item && (
         <>
           <p className="note">
-            {item.idea} 고친 내용은 아직 저장되지 않아요. 빌드 묶음은 처음 만든
-            설계 그대로예요.
+            {item.idea} 저장하면 빌드 묶음도 고친 설계로 바뀌어요. 결정을 다시
+            고르면 고친 내용을 새 설계에 다시 적용하고, 맞지 않는 수정은
+            알려드려요.
           </p>
-          <Studio key={item.id} item={item} />
+          <Studio
+            key={item.id}
+            item={item}
+            onSave={(design, renames) => saveDesign(journeyId, design, renames)}
+          />
         </>
       )}
     </div>

@@ -302,6 +302,9 @@ class DesignState(BaseModel):
     # Earlier confirmed designs, kept as history and never shown as the current one.
     confirmed_history: list[ServiceDesign] = Field(default=[], max_length=MAX_ITEMS)
     error: Short | None = None
+    # As generated, before people edited it: comparing it with `current` shows what they changed.
+    generated: ServiceDesign | None = None
+    human_renames: dict[str, str] = {}
 
     @model_validator(mode="after")
     def _status_matches_the_design(self):

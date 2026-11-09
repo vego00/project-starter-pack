@@ -39,6 +39,8 @@ OUT_OF_SCOPE_CARDS = {
     "devops.orchestration": "컨테이너 운영 방식은 배포 설계에서 다룬다",
     "mlops.model_serving": "모델을 실행할 장소는 배포 설계에서 다룬다",
     "cloud.target": "배포 위치는 배포 설계에서 다룬다",
+    "product.surface": "사용 화면은 에이전트 구조를 제약하지 않아 인프라 문서에서 다룬다",
+    "ops.tracing": "실행 기록 도구는 인프라 문서에서 다룬다",
 }
 
 

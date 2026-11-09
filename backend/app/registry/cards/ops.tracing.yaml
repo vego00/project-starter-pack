@@ -1,0 +1,37 @@
+card_id: ops.tracing
+version: 1
+layer: ops
+title: 실행 추적
+question: 완성된 서비스의 실행 기록을 어떻게 볼까요?
+options:
+  - id: langsmith
+    name: LangSmith 연결
+    summary: LangGraph나 LangChain 실행을 노드별로 추적하고 평가합니다.
+    pros: [노드별 입력과 출력을 화면에서 볼 수 있습니다, 실행 기록으로 평가를 이어 갈 수 있습니다]
+    cons: [실행 기록이 외부 서비스로 전송되므로 입력값 처리를 먼저 정해야 합니다]
+    learning_difficulty: low
+    ops_burden: low
+    cost_nature: 사용량 기반
+  - id: logs
+    name: 자체 실행 기록
+    summary: 노드별 시간과 오류를 직접 저장합니다.
+    pros: [데이터를 밖으로 보내지 않습니다]
+    cons: [조회 화면과 보관 기간을 직접 만들어야 합니다]
+    learning_difficulty: medium
+    ops_burden: medium
+    cost_nature: 저장소 운영 비용
+  - id: none
+    name: 지금은 안 함
+    summary: 실행 기록을 따로 남기지 않습니다.
+    pros: [구성이 가장 단순합니다]
+    cons: [문제가 생겼을 때 원인을 찾기 어렵습니다]
+    learning_difficulty: low
+    ops_burden: low
+    cost_nature: 추가 비용 없음
+signals:
+  langsmith: [LangGraph 또는 LangChain 사용, 데이터 외부 전송 허용]
+  logs: [데이터 외부 전송 불가]
+  none: [짧은 데모]
+default_recommendation:
+  option: logs
+  reason: 데이터 전송 조건을 확인하기 전에는 밖으로 보내지 않는 쪽이 안전합니다.

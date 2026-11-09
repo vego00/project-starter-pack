@@ -19,11 +19,11 @@ from app.journey.package import build_package
 from app.journey.service import JourneyService
 from app.journey.services import JourneyDeps, build_deps
 from app.journey.state import JourneyAction, JourneyState, ProjectSpec
-from app.registry.loader import load_registry
+from app.registry.loader import Registry, load_registry
 from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import TypeAdapter
 
-REGISTRY = load_registry()
+REGISTRY = Registry(c for c in load_registry().cards if c.layer not in ("product", "ops"))
 ACTION = TypeAdapter(JourneyAction)
 SPEC = ProjectSpec(
     idea="메모를 저장하고 나중에 찾아 주는 멀티 에이전트 서비스",
