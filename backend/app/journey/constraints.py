@@ -151,6 +151,24 @@ def revived(registry: Registry, effective: Mapping[str, str], skipped: Collectio
     return back
 
 
+def displaced(
+    registry: Registry, chosen: Mapping[str, str], card_id: str, held: str, option_id: str
+) -> dict[str, str]:
+    """Answers elsewhere that stop fitting if `held` becomes `option_id` (card_id -> option_id)."""
+    before = evaluate(registry, {**chosen, card_id: held})
+    after = evaluate(registry, {**chosen, card_id: option_id})
+    known_rules = {conflict.rule_id for conflict in before.conflicts}
+    clashing = [
+        clashed
+        for conflict in after.conflicts
+        if conflict.rule_id not in known_rules
+        for clashed in conflict.card_ids
+    ]
+    released = [target for target in before.implied if target not in after.implied]
+    answers = {**chosen, **{target: i.option_id for target, i in before.implied.items()}}
+    return {target: answers[target] for target in [*clashing, *released] if target in answers}
+
+
 def preview(registry: Registry, chosen: Mapping[str, str], card_id: str, option_id: str) -> Impact:
     """What choosing this option would newly imply or trigger ("선택하면 같이 바뀌는 것")."""
     before = evaluate(registry, chosen)
