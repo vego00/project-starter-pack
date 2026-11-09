@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   BlueprintPanel,
@@ -128,6 +128,44 @@ describe("ServiceDiagram", () => {
 });
 
 describe("BlueprintPanel", () => {
+  function drawnGraph() {
+    render(<BlueprintPanel journey={journey()} busy={false} act={vi.fn()} />);
+    const svg = screen.getByRole("group", {
+      name: "에이전트 흐름",
+    }) as unknown as SVGSVGElement;
+    return { svg, width: Number(svg.getAttribute("width")) };
+  }
+
+  it("scales to the panel but keeps labels readable", () => {
+    const { svg, width } = drawnGraph();
+    expect(svg.getAttribute("viewBox")).toBe(
+      `0 0 ${width} ${svg.getAttribute("height")}`,
+    );
+    expect(parseFloat(svg.style.minWidth)).toBeCloseTo(width * 0.65);
+  });
+
+  it("follows the pointer when the graph is drawn smaller", () => {
+    const { svg, width } = drawnGraph();
+    vi.spyOn(svg, "getBoundingClientRect").mockReturnValue({
+      width: width / 2,
+    } as DOMRect);
+    const moved = screen.getByRole("button", { name: "코드 input 이름" });
+    const before = moved.getAttribute("transform")!;
+    const x = Number(before.match(/translate\(([\d.]+)/)![1]);
+
+    // jsdom's pointer events carry no coordinates; React only reads the event type.
+    const pointer = (type: string, clientX: number) =>
+      fireEvent(
+        moved,
+        new MouseEvent(type, { bubbles: true, clientX, clientY: 100 }),
+      );
+    pointer("pointerdown", 100);
+    pointer("pointermove", 150);
+    pointer("pointerup", 150);
+
+    expect(moved.getAttribute("transform")).toContain(`translate(${x + 100} `);
+  });
+
   it("moves to the card when a blank is pressed", async () => {
     const user = userEvent.setup();
     const act = vi.fn();

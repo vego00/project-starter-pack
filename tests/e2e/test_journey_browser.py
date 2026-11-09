@@ -212,6 +212,19 @@ def test_stale_tab_cannot_answer_the_wrong_card(browser: Browser, page: Page):
     expect(other.get_by_text("2 / 12")).to_be_visible()
 
 
+def test_the_system_diagram_fits_a_wide_panel(browser: Browser):
+    context = browser.new_context(viewport={"width": 1600, "height": 900}, locale="ko-KR")
+    page = context.new_page()
+    page.goto(BASE_URL)
+    start(page)
+    skip_clarify(page)
+    page.get_by_role("button", name="시스템 구성").click()
+    expect(page.get_by_role("group", name="시스템 구성")).to_be_visible()
+
+    assert page.locator(".blueprint-canvas").evaluate("c => c.scrollWidth <= c.clientWidth")
+    context.close()
+
+
 def test_phone_width_has_no_horizontal_scroll(browser: Browser):
     context = browser.new_context(viewport={"width": 375, "height": 800}, locale="ko-KR")
     page = context.new_page()
