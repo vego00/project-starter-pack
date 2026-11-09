@@ -1,0 +1,37 @@
+card_id: product.surface
+version: 1
+layer: product
+title: 사용 위치
+question: 사용자가 이 서비스를 어디서 쓰나요?
+options:
+  - id: web
+    name: 웹 화면
+    summary: 브라우저에서 묻고 결과와 근거를 함께 봅니다.
+    pros: [근거와 표를 한 화면에 보여 주기 좋습니다]
+    cons: [화면을 따로 만들고 운영해야 합니다]
+    learning_difficulty: medium
+    ops_burden: medium
+    cost_nature: 서버 운영 비용
+  - id: messenger
+    name: 메신저 봇
+    summary: 팀이 이미 쓰는 메신저에서 묻고 답을 받습니다.
+    pros: [새 화면을 배우지 않아도 됩니다]
+    cons: [긴 근거와 표를 보여 주기 어렵습니다]
+    learning_difficulty: medium
+    ops_burden: medium
+    cost_nature: 서버 운영 비용
+  - id: report
+    name: 정기 리포트
+    summary: 정해진 시간에 결과를 만들어 보냅니다.
+    pros: [요청을 기다리지 않아 구조가 단순합니다]
+    cons: [그 자리에서 다시 묻거나 고치기 어렵습니다]
+    learning_difficulty: low
+    ops_burden: low
+    cost_nature: 실행 시간 기반
+signals:
+  web: [결과를 보며 고치는 흐름, 근거 확인이 중요함]
+  messenger: [팀이 쓰는 메신저가 정해져 있음, 짧은 답으로 충분함]
+  report: [정해진 주기로 결과를 받음, 사용자 입력이 거의 없음]
+default_recommendation:
+  option: web
+  reason: 결과와 근거를 함께 보고 고치기 가장 쉽습니다.

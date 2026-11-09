@@ -12,7 +12,9 @@ from langgraph.types import Checkpointer
 from pydantic import BaseModel
 
 from app.config import Settings
+from app.journey.blueprint import BlueprintExample
 from app.journey.design import ServiceDesign
+from app.journey.design_edit import DesignEdit
 from app.journey.persistence import open_checkpointer
 from app.journey.service import JourneyError, JourneyService, JourneyView
 from app.journey.services import JourneyDeps, build_deps
@@ -157,6 +159,22 @@ def create_app(
     )
     def get_design(journey_id: UUID, journeys: Journeys):
         return _guarded(journey_id, lambda: journeys.design(journey_id))
+
+    @app.post(
+        "/api/v1/journeys/{journey_id}/design",
+        response_model=ServiceDesign,
+        responses=ERROR_RESPONSES,
+    )
+    def save_design(journey_id: UUID, edit: DesignEdit, journeys: Journeys):
+        return _guarded(journey_id, lambda: journeys.save_design(journey_id, edit))
+
+    @app.get(
+        "/api/v1/blueprint/examples",
+        response_model=list[BlueprintExample],
+        responses=ERROR_RESPONSES,
+    )
+    def get_blueprint_examples(journeys: Journeys):
+        return _guarded(None, journeys.blueprint_examples)
 
     @app.get("/api/v1/journeys/{journey_id}/package.zip", responses=ERROR_RESPONSES)
     def get_package(journey_id: UUID, journeys: Journeys):

@@ -59,6 +59,16 @@ export function renameNode(design: Design, id: string, next: string): Design {
   };
 }
 
+/** Keeps first id -> latest id, so several renames in a row send one mapping. */
+export function addRename(
+  renames: Record<string, string>,
+  from: string,
+  to: string,
+): Record<string, string> {
+  const original = Object.keys(renames).find((key) => renames[key] === from);
+  return { ...renames, [original ?? from]: to };
+}
+
 export function addNode(
   design: Design,
   kind: NodeKind,

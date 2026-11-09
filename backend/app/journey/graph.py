@@ -17,7 +17,15 @@ from app.registry.loader import Registry
 RECURSION_LIMIT = 50  # Per run between two interrupts; a normal run takes far fewer steps.
 
 # Reopening a skipped card puts it back, so every gate may also write `skipped_cards`.
-GATE_WRITES = {"decisions", "skipped_cards", "gate_outcome", "gate_error"}
+GATE_WRITES = {
+    "decisions",
+    "skipped_cards",
+    "gate_outcome",
+    "gate_error",
+    "focus_card",
+    "previous_choices",
+    "needs_review",
+}
 NODE_WRITES: dict[str, set[str]] = {
     "gcb_drafter": {"gcb_draft"},
     "gcb_gate": {"gcb_answer", "gate_outcome", "gate_error"},
@@ -92,7 +100,9 @@ def _after_engine(state: JourneyState) -> str:
 
 
 def _after_decision(state: JourneyState) -> str:
-    return {"ask": "qa", "invalid": "decision_gate"}.get(state.gate_outcome, "constraint_engine")
+    return {"ask": "qa", "invalid": "decision_gate", "keep": "decision_gate"}.get(
+        state.gate_outcome, "constraint_engine"
+    )
 
 
 def _after_review(state: JourneyState) -> str:
@@ -104,7 +114,8 @@ def _after_issue(state: JourneyState) -> str:
 
 
 def _after_done(state: JourneyState) -> str:
-    return "done_gate" if state.gate_outcome == "invalid" else "constraint_engine"
+    # Keeping a decision changes nothing, so the design is not generated again.
+    return "done_gate" if state.gate_outcome in ("invalid", "keep") else "constraint_engine"
 
 
 def build_graph(registry: Registry, *, checkpointer: Checkpointer, deps: JourneyDeps | None = None):

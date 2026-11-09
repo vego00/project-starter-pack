@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError, getJourney, sendAction, startJourney } from "./api";
 import type { Action, Journey } from "./api";
+import { BlueprintPanel } from "./blueprint";
 import {
   ClarifyForm,
   CompletedView,
@@ -122,7 +123,7 @@ export default function App() {
 
   const prompt = journey?.prompt ?? null;
   return (
-    <div className="app">
+    <div className={journey ? "app wide" : "app"}>
       <header className="topbar">
         <h1>프로젝트 스타터팩</h1>
         {journey && journey.status !== "completed" && (
@@ -147,9 +148,10 @@ export default function App() {
           <StartForm busy={busy} onStart={start} />
         </main>
       ) : (
-        <main className="layout">
+        <main className="workspace">
           <ProgressRail journey={journey} busy={busy} act={act} />
-          <div>
+          <BlueprintPanel journey={journey} busy={busy} act={act} />
+          <div className="workspace-card">
             {prompt?.type === "gcb" && (
               <GcbForm prompt={prompt} busy={busy} act={act} />
             )}

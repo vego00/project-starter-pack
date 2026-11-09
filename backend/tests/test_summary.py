@@ -7,7 +7,11 @@ from app.journey.constraints import Conflict, evaluate
 from app.journey.state import Decision, Evidence, JourneyState, ProjectSpec
 from app.registry.loader import Registry, load_registry
 
-REGISTRY = Registry(card for card in load_registry().cards if card.card_id != "agent.topology")
+REGISTRY = Registry(
+    card
+    for card in load_registry().cards
+    if card.card_id not in ("agent.topology", "product.surface", "ops.tracing")
+)
 IDEA = "강의 자료를 찾아 답하는 멀티 에이전트 서비스"
 CHOICES = {
     "agent.hitl": "approval",

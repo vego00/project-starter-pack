@@ -14,7 +14,13 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 JOURNEYS = "/api/v1/journeys"
 # Data cards added by ADR-018 are left out too: their own tests walk them.
-S2_CARDS_ONLY = {"agent.topology", "data.primary_db", "data.vector_store"}
+S2_CARDS_ONLY = {
+    "agent.topology",
+    "data.primary_db",
+    "data.vector_store",
+    "product.surface",
+    "ops.tracing",
+}
 REGISTRY = Registry(card for card in load_registry().cards if card.card_id not in S2_CARDS_ONLY)
 IDEA = "민감한고객문의내용을 처리하는 멀티 에이전트 서비스"
 GOAL = "수강생이 근거와 함께 답을 찾을 수 있는 상태"

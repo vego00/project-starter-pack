@@ -29,6 +29,8 @@ INFRA_CARDS = (
     "devops.orchestration",
     "mlops.model_serving",
     "cloud.target",
+    "ops.tracing",
+    "product.surface",
 )
 EXTERNAL_KEY_PROVIDERS = {"gemini", "openai", "upstage", "openrouter"}
 # Pattern rules narrow the risk; they do not stop every destructive or outbound command.
