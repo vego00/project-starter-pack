@@ -15,8 +15,13 @@ from app.registry.loader import Registry
 NodeKind = Literal["code", "agent", "human", "blank", "sys"]
 # Which box of the system diagram a node sits in.
 Group = Literal["people", "client", "app", "model", "data", "ops"]
-# A brand mark only names a service the user actually chose. Lowercase generic names are shapes.
+# Marks for options. The graph draws one only for a service the user actually chose; a card shows
+# them all so options can be told apart. Lowercase generic names are shapes.
 OPTION_ICONS = {
+    ("data.checkpointer", "memory"): "memory",
+    ("data.primary_db", "none"): "none",
+    ("data.vector_store", "none"): "none",
+    ("ops.tracing", "none"): "none",
     ("product.surface", "web"): "browser",
     ("product.surface", "messenger"): "chat",
     ("product.surface", "report"): "document",

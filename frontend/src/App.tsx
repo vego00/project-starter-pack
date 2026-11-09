@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ApiError, getJourney, sendAction, startJourney } from "./api";
 import type { Action, Journey } from "./api";
-import { BlueprintPanel } from "./blueprint";
+import { BlueprintPanel, SamplePreview } from "./blueprint";
 import {
   ClarifyForm,
   CompletedView,
@@ -11,6 +11,7 @@ import {
   ProgressRail,
   StartForm,
 } from "./components";
+import { ThemeToggle } from "./theme";
 
 const LAST_JOURNEY_KEY = "starter-pack:last-journey:v1";
 
@@ -43,13 +44,29 @@ function messageOf(failure: unknown): string {
     : "요청에 실패했어요. 다시 시도해 주세요.";
 }
 
+const STACKED = "(max-width: 1100px)";
+
+/** Tab follows the DOM, so the DOM has to follow the stacked order the screen shows. */
+function useStacked(): boolean {
+  return useSyncExternalStore(
+    (changed) => {
+      const query = window.matchMedia?.(STACKED);
+      query?.addEventListener("change", changed);
+      return () => query?.removeEventListener("change", changed);
+    },
+    () => window.matchMedia?.(STACKED).matches ?? false,
+  );
+}
+
 export default function App() {
   const [journey, setJourney] = useState<Journey | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [restoring, setRestoring] = useState(() => savedJourneyId() !== null);
-  const [railOpen, setRailOpen] = useState(true);
   const [cardOpen, setCardOpen] = useState(true);
+  const [confirmingRestart, setConfirmingRestart] = useState(false);
+  const [lastAction, setLastAction] = useState<string | null>(null);
+  const stacked = useStacked();
   const inFlight = useRef(false);
 
   function show(next: Journey) {
@@ -98,6 +115,7 @@ export default function App() {
 
   function act(action: Action) {
     if (!journey) return;
+    setLastAction(action.action);
     const current = journey;
     void run(async () => {
       try {
@@ -119,7 +137,7 @@ export default function App() {
 
   /** Moving to a card from the rail or the graph has to show that card. */
   function actAndShowCard(action: Action) {
-    if (action.action === "focus" || action.action === "reopen") {
+    if (["focus", "reopen", "revise"].includes(action.action)) {
       setCardOpen(true);
     }
     act(action);
@@ -129,93 +147,140 @@ export default function App() {
     rememberJourney(null);
     setJourney(null);
     setError("");
-    setRailOpen(true);
     setCardOpen(true);
+    setConfirmingRestart(false);
   }
 
   const prompt = journey?.prompt ?? null;
-  const graphOnly = !railOpen && !cardOpen;
+  const briefing = prompt?.type === "gcb" || prompt?.type === "clarify";
+  const finished = !prompt && journey?.status === "completed";
+  const inWorkspace = journey !== null && !briefing && !finished;
+  // The last decision also generates the design, the one wait that runs long.
+  const makingDesign =
+    prompt?.type === "decision" &&
+    !prompt.current_option_id &&
+    ["select", "accept_recommendation"].includes(lastAction ?? "") &&
+    journey!.cards.filter((c) => !c.option_name && c.state !== "skipped")
+      .length <= 1;
+  const panels = journey && [
+    <BlueprintPanel
+      key="graph"
+      journey={journey}
+      busy={busy}
+      act={actAndShowCard}
+      cardOpen={cardOpen}
+      onToggleCard={() => setCardOpen(!cardOpen)}
+    />,
+    <div
+      key="card"
+      className={`workspace-card${busy ? " is-busy" : ""}`}
+      aria-busy={busy}
+    >
+      {prompt?.type === "decision" && (
+        <DecisionView prompt={prompt} busy={busy} act={act} />
+      )}
+      {prompt?.type === "issues" && (
+        <IssuesView
+          prompt={prompt}
+          cards={journey.cards}
+          busy={busy}
+          act={act}
+        />
+      )}
+      {!prompt && journey.status !== "completed" && (
+        <p className="panel muted">
+          다음 단계를 준비하지 못했어요. 페이지를 새로고침해 주세요.
+        </p>
+      )}
+    </div>,
+  ];
   return (
-    <div className={journey ? "app wide" : "app"}>
+    <div
+      className={`app${journey ? " wide" : " landing"}${inWorkspace ? " shell" : ""}`}
+    >
       <header className="topbar">
         <h1>프로젝트 스타터팩</h1>
-        {journey && journey.status !== "completed" && (
-          <button className="link" onClick={restart}>
-            새 프로젝트
-          </button>
-        )}
+        {journey && <span className="topbar-idea">{journey.idea}</span>}
+        <div className="topbar-actions">
+          {journey?.notice && (
+            <span className="topbar-notice">{journey.notice}</span>
+          )}
+          {journey &&
+            !finished &&
+            (confirmingRestart ? (
+              <span className="confirm">
+                지금 여정에서 나갈까요?
+                <button className="quiet danger" onClick={restart}>
+                  나가기
+                </button>
+                <button
+                  className="quiet"
+                  onClick={() => setConfirmingRestart(false)}
+                >
+                  계속하기
+                </button>
+              </span>
+            ) : (
+              <button
+                className="quiet"
+                onClick={() => setConfirmingRestart(true)}
+              >
+                새 프로젝트
+              </button>
+            ))}
+          <ThemeToggle />
+        </div>
       </header>
-      {journey?.notice && <p className="notice">{journey.notice}</p>}
       {error && (
         <p className="alert page-alert" role="alert">
           {error}
         </p>
       )}
       <p className={busy ? "working" : "sr-only"} role="status">
-        {busy ? "처리하는 중이에요. 모델을 쓸 때는 시간이 조금 걸려요." : ""}
+        {busy
+          ? makingDesign
+            ? "결정을 반영해 설계를 만들고 있어요. 시간이 조금 걸려요."
+            : "처리하는 중이에요. 모델을 쓸 때는 시간이 조금 걸려요."
+          : ""}
       </p>
       {restoring ? (
         <p className="panel muted">저장된 여정을 불러오는 중이에요…</p>
       ) : !journey ? (
-        <main className="single">
-          <StartForm busy={busy} onStart={start} />
+        <main>
+          <StartForm busy={busy} onStart={start} preview={<SamplePreview />} />
         </main>
-      ) : (
-        <main
-          className={`workspace${railOpen ? "" : " no-rail"}${cardOpen ? "" : " no-card"}`}
-        >
-          <div className="panel-toggles">
-            <button
-              aria-expanded={railOpen}
-              onClick={() => setRailOpen(!railOpen)}
-            >
-              {railOpen ? "단계 탭 닫기" : "단계 탭 열기"}
-            </button>
-            <button
-              onClick={() => {
-                setRailOpen(graphOnly);
-                setCardOpen(graphOnly);
-              }}
-            >
-              {graphOnly ? "탭 모두 열기" : "그래프 넓게 보기"}
-            </button>
-            <button
-              aria-expanded={cardOpen}
-              onClick={() => setCardOpen(!cardOpen)}
-            >
-              {cardOpen ? "카드 탭 닫기" : "카드 탭 열기"}
-            </button>
-          </div>
+      ) : briefing ? (
+        <main className="brief-page">
+          {prompt.type === "gcb" ? (
+            <GcbForm prompt={prompt} busy={busy} act={act} />
+          ) : (
+            <ClarifyForm prompt={prompt} busy={busy} act={act} />
+          )}
+        </main>
+      ) : finished ? (
+        <>
           <ProgressRail journey={journey} busy={busy} act={actAndShowCard} />
-          <BlueprintPanel journey={journey} busy={busy} act={actAndShowCard} />
-          <div className="workspace-card">
-            {prompt?.type === "gcb" && (
-              <GcbForm prompt={prompt} busy={busy} act={act} />
-            )}
-            {prompt?.type === "clarify" && (
-              <ClarifyForm prompt={prompt} busy={busy} act={act} />
-            )}
-            {prompt?.type === "decision" && (
-              <DecisionView prompt={prompt} busy={busy} act={act} />
-            )}
-            {prompt?.type === "issues" && (
-              <IssuesView
-                prompt={prompt}
-                cards={journey.cards}
-                busy={busy}
-                act={act}
-              />
-            )}
-            {!prompt && journey.status === "completed" && (
-              <CompletedView journey={journey} onRestart={restart} />
-            )}
-            {!prompt && journey.status !== "completed" && (
-              <p className="panel muted">
-                다음 단계를 준비하지 못했어요. 페이지를 새로고침해 주세요.
-              </p>
-            )}
-          </div>
-        </main>
+          <main className="done-page">
+            <CompletedView
+              journey={journey}
+              onRestart={restart}
+              graph={
+                <BlueprintPanel
+                  journey={journey}
+                  busy={busy}
+                  act={actAndShowCard}
+                />
+              }
+            />
+          </main>
+        </>
+      ) : (
+        <>
+          <ProgressRail journey={journey} busy={busy} act={actAndShowCard} />
+          <main className={`workspace${cardOpen ? "" : " no-card"}`}>
+            {stacked ? [...panels!].reverse() : panels}
+          </main>
+        </>
       )}
     </div>
   );

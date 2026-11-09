@@ -15,6 +15,7 @@ from app.journey.state import JourneyState, NodeEvent, ProjectSpec
 from app.registry.loader import Registry
 
 RECURSION_LIMIT = 50  # Per run between two interrupts; a normal run takes far fewer steps.
+PREPARERS = ("advisor", "recommender", "retriever")
 
 # Reopening a skipped card puts it back, so every gate may also write `skipped_cards`.
 GATE_WRITES = {
@@ -25,10 +26,11 @@ GATE_WRITES = {
     "focus_card",
     "previous_choices",
     "needs_review",
+    "editing_card",
 }
 NODE_WRITES: dict[str, set[str]] = {
     "gcb_drafter": {"gcb_draft"},
-    "gcb_gate": {"gcb_answer", "gate_outcome", "gate_error"},
+    "gcb_gate": {"gcb_answer", "clarifications", "clarify_rounds", "gate_outcome", "gate_error"},
     "intake": {"project_spec"},
     "clarify_gate": {"clarify_passed"},
     "clarify_question": {"clarifications", "clarify_rounds"},
@@ -38,7 +40,7 @@ NODE_WRITES: dict[str, set[str]] = {
     "advisor": {"advice"},
     "recommender": {"recommendation"},
     "retriever": {"evidence"},
-    "present": {"current_card"},
+    "present": {"current_card", "card_briefs"},
     "decision_gate": GATE_WRITES | {"deferred_cards", "pending_question"},
     "qa": {"qa_history"},
     "reviewer": {"review_issues", "status"},
@@ -96,7 +98,14 @@ def _after_clarify(state: JourneyState) -> str:
 
 
 def _after_engine(state: JourneyState) -> str:
-    return "controller" if state.pending_cards else "reviewer"
+    if state.pending_cards or state.editing_card:
+        return "controller"
+    # Nothing changed, so a finished design is not generated again.
+    return "done_gate" if state.gate_outcome == "unchanged" else "reviewer"
+
+
+def _after_controller(state: JourneyState) -> str | list[str]:
+    return "present" if state.saved_brief else list(PREPARERS)
 
 
 def _after_decision(state: JourneyState) -> str:
@@ -133,9 +142,10 @@ def build_graph(registry: Registry, *, checkpointer: Checkpointer, deps: Journey
     )
     graph.add_edge("clarify_question", "intake")
     graph.add_edge("card_selector", "constraint_engine")
-    graph.add_conditional_edges("constraint_engine", _after_engine, ["controller", "reviewer"])
-    for preparer in ("advisor", "recommender", "retriever"):
-        graph.add_edge("controller", preparer)
+    graph.add_conditional_edges(
+        "constraint_engine", _after_engine, ["controller", "reviewer", "done_gate"]
+    )
+    graph.add_conditional_edges("controller", _after_controller, [*PREPARERS, "present"])
     graph.add_edge(["advisor", "recommender", "retriever"], "present")
     graph.add_edge("present", "decision_gate")
     graph.add_conditional_edges(

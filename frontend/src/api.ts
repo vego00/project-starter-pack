@@ -15,8 +15,10 @@ const optionViewSchema = z.object({
   }),
   note: z.string(),
   blocked_reason: z.string().nullable(),
+  icon: z.string().nullable().optional(),
   implied_messages: z.array(z.string()),
   warnings: z.array(z.string()),
+  must_change: z.array(z.string()).default([]), // Absent from journeys saved before it existed.
 });
 
 const recommendationSchema = z.object({
@@ -37,6 +39,9 @@ const issueSchema = z.object({
 const promptSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("gcb"),
+    questions: z
+      .array(z.object({ field: z.string(), question: z.string() }))
+      .optional(),
     draft: z.object({
       goal: z.string(),
       context: z.string(),
@@ -52,6 +57,7 @@ const promptSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("decision"),
+    current_option_id: z.string().nullable().optional(),
     card: z.object({
       card_id: z.string(),
       layer: z.string(),
@@ -59,6 +65,7 @@ const promptSchema = z.discriminatedUnion("type", [
       options: z.array(optionViewSchema),
       recommendation: recommendationSchema,
       advice_source: z.string(),
+      to_review: z.array(z.string()).default([]), // As with must_change.
       evidence: z.array(
         z.object({
           source_id: z.string(),
@@ -136,6 +143,7 @@ const journeySchema = z.object({
       layer: z.string(),
       stage: z.number(),
       needs_review: z.boolean(),
+      editing: z.boolean().optional(),
       title: z.string(),
       question: z.string(),
       state: z.enum([
@@ -196,10 +204,17 @@ export type Action =
   | { action: "defer" }
   | { action: "ask"; question: string }
   | { action: "reopen"; card_id: string }
+  | { action: "revise"; card_id: string }
   | { action: "focus"; card_id: string }
   | { action: "keep"; card_id: string }
   | { action: "clarify"; answers: Record<string, unknown> }
-  | { action: "gcb"; goal: string; context: string; boundary: string };
+  | {
+      action: "gcb";
+      goal: string;
+      context: string;
+      boundary: string;
+      answers?: Record<string, unknown>;
+    };
 
 export class ApiError extends Error {
   constructor(

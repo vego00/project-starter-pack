@@ -11,8 +11,9 @@ from typing import Any
 from langgraph.types import Command, interrupt
 from pydantic import ValidationError
 
+from app.journey.blueprint import OPTION_ICONS
 from app.journey.composers.summary import ARTIFACT_KEY, compose_summary
-from app.journey.constraints import evaluate, preview, revived
+from app.journey.constraints import displaced, evaluate, preview, revived
 from app.journey.controller import next_card
 from app.journey.deciders.base import DeciderQuestion, judge, judge_many
 from app.journey.design_constraints import BLOCKING_CARDS, derive_design_constraints
@@ -32,6 +33,7 @@ from app.journey.state import (
     QA,
     AcceptRecommendationAction,
     AskAction,
+    CardBrief,
     CardPresentation,
     CardQA,
     Decision,
@@ -43,6 +45,7 @@ from app.journey.state import (
     ProjectSpec,
     Recommendation,
     ReopenAction,
+    ReviseAction,
     SelectAction,
     SkippedCard,
 )
@@ -95,6 +98,24 @@ def _reopen(state: JourneyState, card_id: str) -> dict[str, Any]:
     }
 
 
+def _revise(state: JourneyState, card_id: str) -> dict[str, Any]:
+    if card_id in state.implied:
+        return _reject("자동으로 정해진 결정입니다. 이 결정을 만든 앞선 선택을 바꿔 주세요.")
+    if card_id not in state.decisions:
+        return _reject("아직 결정하지 않은 카드는 고칠 수 없습니다.")
+    return {"editing_card": card_id, "gate_outcome": "advance", "gate_error": None}
+
+
+def _later_decisions(registry: Registry, decisions: dict[str, Decision], card_id: str) -> list[str]:
+    stage = registry.card(card_id).stage
+    return [c for c in decisions if registry.card(c).stage > stage]
+
+
+def _answer_label(registry: Registry, card_id: str, option_id: str) -> str:
+    card = registry.card(card_id)
+    return f"{card.title}: {next(o.name for o in card.options if o.id == option_id)}"
+
+
 def _keep(state: JourneyState, card_id: str) -> dict[str, Any]:
     if card_id not in state.needs_review:
         return _reject("다시 확인할 결정이 아닙니다.")
@@ -103,6 +124,19 @@ def _keep(state: JourneyState, card_id: str) -> dict[str, Any]:
         "gate_outcome": "keep",
         "gate_error": None,
     }
+
+
+def _accepted_answers(spec: ProjectSpec, fields: list[str], answers: dict[str, Any]) -> list[QA]:
+    accepted: list[QA] = []
+    for name in fields:
+        if answers.get(name) is None:
+            continue  # Skipping a question is allowed; the signal just stays unknown.
+        try:
+            ProjectSpec.model_validate({**spec.model_dump(), name: answers[name]})
+        except ValidationError:
+            continue
+        accepted.append(QA(field=name, question=CLARIFY_QUESTIONS[name], answer=answers[name]))
+    return accepted
 
 
 def _progress(state: JourneyState, registry: Registry) -> dict[str, int]:
@@ -154,9 +188,15 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
 
     def gcb_gate(state: JourneyState) -> dict[str, Any]:
         draft = state.gcb_draft
+        spec = state.project_spec
+        # Everything both clarifying rounds could ask, so one screen is enough.
+        asked = spec.missing_signals()[: MAX_QUESTIONS_PER_ROUND * MAX_CLARIFY_ROUNDS]
         raw = _wait_for_user(
             {
                 "type": "gcb",
+                "questions": [
+                    {"field": name, "question": CLARIFY_QUESTIONS[name]} for name in asked
+                ],
                 "draft": draft.model_dump(include={"goal", "context", "boundary"}),
                 "source": draft.source,
                 "error": state.gate_error,
@@ -167,7 +207,16 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
         except ValidationError:
             return _reject("입력 내용을 확인해 주세요. 칸마다 1,000자까지 쓸 수 있어요.")
         fields = action.model_dump(include={"goal", "context", "boundary"})
+        answered = (
+            {}
+            if action.answers is None
+            else {
+                "clarifications": _accepted_answers(spec, asked, action.answers),
+                "clarify_rounds": MAX_CLARIFY_ROUNDS,
+            }
+        )
         return {
+            **answered,
             "gcb_answer": {name: text for name, text in fields.items() if text},
             "gate_outcome": "advance",
             "gate_error": None,
@@ -225,15 +274,7 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
             {"type": "clarify", "round": state.clarify_rounds + 1, "questions": questions}
         )
         answers = answers if isinstance(answers, dict) else {}
-        accepted: list[QA] = []
-        for name in fields:
-            if answers.get(name) is None:
-                continue  # Skipping a question is allowed; the signal just stays unknown.
-            try:
-                ProjectSpec.model_validate({**spec.model_dump(), name: answers[name]})
-            except ValidationError:
-                continue
-            accepted.append(QA(field=name, question=CLARIFY_QUESTIONS[name], answer=answers[name]))
+        accepted = _accepted_answers(spec, fields, answers)
         return {
             "clarifications": [*state.clarifications, *accepted],
             "clarify_rounds": state.clarify_rounds + 1,
@@ -259,17 +300,23 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
         effective = {**chosen, **{card_id: d.option_id for card_id, d in implied.items()}}
         # Recomputed on every change, so a card comes back once a decision points at it.
         out = set(state.skipped_cards) - revived(registry, effective, state.skipped_cards)
+        blocked = result.blocked
+        if editing := state.editing_card:
+            # Options are judged as if this card were still open; its own choice blocks nothing.
+            others = {card_id: option for card_id, option in chosen.items() if card_id != editing}
+            blocked = {**blocked, editing: evaluate(registry, others).blocked.get(editing, {})}
         return {
             "implied": implied,
             "pending_cards": [card_id for card_id in result.pending if card_id not in out],
             "conflicts": result.conflicts,
-            "blocked_options": result.blocked,
+            "blocked_options": blocked,
         }
 
     def controller(state: JourneyState) -> dict[str, Any]:
         # Stage first: a decision made here can invalidate the ones in later stages.
         pending = sorted(state.pending_cards, key=lambda card_id: registry.card(card_id).stage)
-        return {"current_card_id": next_card(pending, state.deferred_cards, state.focus_card)}
+        following = next_card(pending, state.deferred_cards, state.focus_card)
+        return {"current_card_id": state.editing_card or following}
 
     def advisor(state: JourneyState) -> dict[str, Any]:
         advice = deps.advisor.advise(state, registry.card(state.current_card_id))
@@ -325,35 +372,61 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
 
     def present(state: JourneyState) -> dict[str, Any]:
         card = registry.card(state.current_card_id)
-        chosen = {card_id: d.option_id for card_id, d in state.decisions.items()}
+        brief = state.saved_brief or CardBrief(
+            advice=state.advice, recommendation=state.recommendation, evidence=state.evidence
+        )
+        chosen = {
+            card_id: d.option_id
+            for card_id, d in state.decisions.items()
+            if card_id != card.card_id
+        }
         blocked = state.blocked_options.get(card.card_id, {})
+        held = (
+            state.decisions[card.card_id].option_id if card.card_id == state.editing_card else None
+        )
         views = []
         for option in card.options:
             impact = preview(registry, chosen, card.card_id, option.id)
+            stops_fitting = (
+                displaced(registry, chosen, card.card_id, held, option.id)
+                if held not in (None, option.id) and option.id not in blocked
+                else {}
+            )
             views.append(
                 OptionView(
                     option=option,
-                    note=state.advice.notes.get(option.id, ""),
+                    note=brief.advice.notes.get(option.id, ""),
                     blocked_reason=blocked.get(option.id),
+                    icon=OPTION_ICONS.get((card.card_id, option.id)),
                     implies={k: v.option_id for k, v in impact.implied.items()},
                     implied_messages=[v.message for v in impact.implied.values()],
                     warnings=[conflict.message for conflict in impact.conflicts],
+                    must_change=[_answer_label(registry, *item) for item in stops_fitting.items()],
                     artifacts=list(card.artifacts.get(option.id, ())),
                 )
             )
         return {
+            "card_briefs": {**state.card_briefs, card.card_id: brief},
             "current_card": CardPresentation(
                 card_id=card.card_id,
                 version=card.version,
                 layer=card.layer,
                 question=card.question,
                 options=views,
-                recommendation=state.recommendation,
-                evidence=state.evidence,
-                advice_source=state.advice.source,
+                recommendation=brief.recommendation,
+                evidence=brief.evidence,
+                advice_source=brief.advice.source,
+                to_review=(
+                    [
+                        _answer_label(registry, later, state.decisions[later].option_id)
+                        for later in _later_decisions(registry, state.decisions, card.card_id)
+                    ]
+                    if held
+                    else []
+                ),
                 learning_refs=list(card.learning_refs),
                 div_refs=list(card.div_refs),
-            )
+            ),
         }
 
     def decision_gate(state: JourneyState) -> dict[str, Any]:
@@ -370,6 +443,11 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
                 "conflicts": [c.model_dump(mode="json") for c in state.conflicts],
                 "progress": _progress(state, registry),
                 "error": state.gate_error,
+                "current_option_id": (
+                    state.decisions[current.card_id].option_id
+                    if state.editing_card == current.card_id
+                    else None
+                ),
             }
         )
         # Every outcome overwrites pending_question, so a stale question is never answered again.
@@ -391,7 +469,10 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
                 "gate_outcome": "ask",
                 "gate_error": None,
             }
+        editing = state.editing_card == current.card_id
         if isinstance(action, DeferAction):
+            if editing:
+                return {"editing_card": None, "gate_outcome": "unchanged", "gate_error": None}
             others = [card_id for card_id in state.deferred_cards if card_id != current.card_id]
             return {
                 "deferred_cards": [*others, current.card_id],
@@ -401,12 +482,19 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
             }
         if isinstance(action, ReopenAction):
             return _reopen(state, action.card_id)
+        if isinstance(action, ReviseAction):
+            return _revise(state, action.card_id)
         if isinstance(action, KeepAction):
             return _keep(state, action.card_id)
         if isinstance(action, FocusAction):
             if action.card_id not in state.pending_cards:
                 return _reject("지금 고를 수 있는 카드가 아닙니다.")
-            return {"focus_card": action.card_id, "gate_outcome": "advance", "gate_error": None}
+            return {
+                "focus_card": action.card_id,
+                "editing_card": None,
+                "gate_outcome": "advance",
+                "gate_error": None,
+            }
 
         if isinstance(action, AcceptRecommendationAction):
             option_id = current.recommendation.option_id
@@ -422,6 +510,9 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
             return _reject("없는 선택지입니다. 목록에서 다시 골라 주세요.")
         if view.blocked_reason is not None:
             return _reject(f"지금은 고를 수 없는 선택지입니다. {view.blocked_reason}")
+        held = state.decisions[current.card_id].option_id if editing else None
+        if held == option_id:
+            return {"editing_card": None, "gate_outcome": "unchanged", "gate_error": None}
         decision = Decision(
             card_id=current.card_id,
             card_version=current.version,
@@ -430,15 +521,15 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
             rationale=rationale,
             at=datetime.now(UTC),
         )
-        previous = state.previous_choices.get(current.card_id)
-        changed_stage = registry.card(current.card_id).stage
+        previous = held or state.previous_choices.get(current.card_id)
         later = (
-            [c for c in state.decisions if registry.card(c).stage > changed_stage]
+            _later_decisions(registry, state.decisions, current.card_id)
             if previous not in (None, option_id)
             else []
         )
         return {
             "decisions": {**state.decisions, current.card_id: decision},
+            "editing_card": None,
             "deferred_cards": [c for c in state.deferred_cards if c != current.card_id],
             "previous_choices": {
                 k: v for k, v in state.previous_choices.items() if k != current.card_id
@@ -521,6 +612,8 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
             return _reject("다시 고를 카드를 지정해 주세요.")
         if isinstance(action, KeepAction):
             return _keep(state, action.card_id)
+        if isinstance(action, ReviseAction):
+            return _revise(state, action.card_id)
         return _reopen(state, action.card_id)
 
     return {

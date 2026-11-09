@@ -7,6 +7,7 @@ E2E_CHROMIUM_PATH uses an already installed Chromium instead of the version Play
 """
 
 import os
+import re
 import subprocess
 import zipfile
 from collections.abc import Iterator
@@ -62,26 +63,25 @@ def start(page: Page) -> None:
     page.get_by_role("button", name="결정 시작하기").click()
 
 
-def confirm_gcb(page: Page, goal: str = "") -> None:
-    expect(page.get_by_role("heading", name="프로젝트의 목표와 기준을 정리해요")).to_be_visible()
-    if goal:
-        page.get_by_label("Goal: 끝났을 때 어떤 상태면 되나요?").fill(goal)
-    page.get_by_role("button", name="다음").click()
+def confirm_brief(page: Page) -> None:
+    expect(page.get_by_role("heading", name="추천에 쓸 내용을 확인해 주세요")).to_be_visible()
+    page.get_by_role("button", name="이 내용으로 결정 시작").click()
 
 
 def skip_clarify(page: Page) -> None:
-    confirm_gcb(page)
-    for _ in range(2):
-        expect(page.get_by_role("heading", name="프로젝트를 조금 더 알려 주세요")).to_be_visible()
-        page.get_by_role("button", name="다음").click()
-        page.wait_for_function("document.querySelector('[role=status]').textContent === ''")
-    expect(page.get_by_text("추천:")).to_be_visible()
+    confirm_brief(page)
+    page.wait_for_function("document.querySelector('[role=status]').textContent === ''")
+    expect(page.locator(".option").first).to_be_visible()
 
 
 def choose(page: Page, heading: str, option: str) -> None:
     expect(page.get_by_role("heading", name=heading)).to_be_visible()
     page.get_by_role("button", name=f"{option} 선택").click()
     expect(page.get_by_role("heading", name=heading)).to_be_hidden()
+
+
+def open_stage(page: Page, stage: str) -> None:
+    page.get_by_role("button", name=re.compile(rf"^{stage} \d")).click()
 
 
 def choose_surface(page: Page, option: str = "웹 화면") -> None:
@@ -92,18 +92,15 @@ def test_all_cards_to_completion_with_reload_and_restart(page: Page):
     shot(page, "1-start")
     start(page)
     shot(page, "1b-gcb")
-    confirm_gcb(page, GOAL)
-
-    expect(page.get_by_role("heading", name="프로젝트를 조금 더 알려 주세요")).to_be_visible()
+    expect(page.get_by_role("heading", name="추천에 쓸 내용을 확인해 주세요")).to_be_visible()
+    page.get_by_label("끝났을 때 어떤 상태면 되나요?").fill(GOAL)
     page.get_by_label("어디까지 배포할 계획인가요?").select_option("small_group")
     page.get_by_label("실제로 사용할 사람은 몇 명 정도인가요?").fill("20")
-    shot(page, "2-clarify")
-    page.get_by_role("button", name="다음").click()
-    expect(page.get_by_label("함께 개발하는 인원은 몇 명인가요?")).to_have_value("")
     page.get_by_label("함께 개발하는 인원은 몇 명인가요?").fill("4")
-    page.get_by_role("button", name="다음").click()
+    shot(page, "2-brief")
+    page.get_by_role("button", name="이 내용으로 결정 시작").click()
 
-    expect(page.get_by_text("내 프로젝트를 분석한 결과는 아니에요")).to_be_visible()
+    expect(page.get_by_text("내 프로젝트를 분석한 결과가 아닙니다")).to_be_visible()
     shot(page, "3-card")
     choose_surface(page)
     choose(page, "에이전트를 어떤 구조로 구성할까요?", "고정 파이프라인")
@@ -133,8 +130,9 @@ def test_all_cards_to_completion_with_reload_and_restart(page: Page):
     choose(page, "어디에 배포할까요?", "로컬만")
     choose(page, "완성된 서비스의 실행 기록을 어떻게 볼까요?", "자체 실행 기록")
 
-    expect(page.get_by_role("heading", name="빌드 묶음을 만들었어요")).to_be_visible()
+    expect(page.get_by_role("heading", name="설계가 준비됐어요")).to_be_visible()
     expect(page.get_by_text("12 / 12")).to_be_visible()
+    assert page.locator(".blueprint-canvas").bounding_box()["height"] > 300
     shot(page, "5-completed")
 
     with page.expect_download() as download:
@@ -170,10 +168,16 @@ def test_questions_defer_and_reopen(page: Page):
     expect(page.get_by_role("heading", name="어떤 경로로 LLM을")).to_be_visible()
 
     choose(page, "어떤 경로로 LLM을 사용할까요?", "Ollama 로컬")
+    open_stage(page, "시스템 구성")
     expect(page.get_by_text("Ollama 컨테이너 · 자동 확정")).to_be_visible()
 
     page.get_by_role("button", name="모델 제공자 다시 고르기").click()
     expect(page.get_by_role("heading", name="어떤 경로로 LLM을")).to_be_visible()
+    open_stage(page, "시스템 구성")
+    expect(page.get_by_text("Ollama 컨테이너 · 자동 확정")).to_be_visible()
+    page.keyboard.press("Escape")
+
+    page.get_by_role("button", name="Gemini 선택").click()
     expect(page.get_by_text("자동 확정")).to_be_hidden()
 
 
@@ -184,15 +188,72 @@ def test_changing_an_earlier_decision_asks_to_review_later_ones(page: Page):
     choose(page, "에이전트를 어떤 구조로 구성할까요?", "고정 파이프라인")
     shot(page, "7-graph")
 
+    open_stage(page, "제품 형태")
     page.get_by_role("button", name="사용 위치 다시 고르기").click()
     choose_surface(page, "정기 리포트")
 
+    expect(page.get_by_role("button", name=re.compile("다시 확인 1"))).to_be_visible()
+    open_stage(page, "에이전트 설계")
     notice = page.get_by_text("앞 단계가 바뀌었어요. 다시 확인해 주세요.")
     expect(notice).to_be_visible()
     shot(page, "8-review")
 
     page.get_by_role("button", name="현재 결정 유지").click()
     expect(notice).to_be_hidden()
+
+
+def test_pressing_a_decided_icon_keeps_the_decision_until_changed(page: Page):
+    start(page)
+    skip_clarify(page)
+    choose_surface(page)
+    page.get_by_role("button", name="시스템 구성", exact=True).click()
+
+    page.get_by_role("button", name="시스템 웹 화면 다시 고르기").click()
+
+    expect(page.get_by_role("heading", name=SURFACE)).to_be_visible()
+    expect(page.get_by_role("button", name="시스템 웹 화면")).to_be_visible()
+    expect(page.get_by_text("1 / 12")).to_be_visible()
+
+    page.get_by_role("button", name="웹 화면 그대로 두기").click()
+    expect(page.get_by_role("heading", name=SURFACE)).to_be_hidden()
+    page.get_by_role("button", name="시스템 구성", exact=True).click()
+    expect(page.get_by_role("button", name="시스템 웹 화면 다시 고르기")).to_be_visible()
+
+
+def test_the_graph_stays_put_while_the_card_scrolls(browser: Browser):
+    context = browser.new_context(viewport={"width": 1280, "height": 700}, locale="ko-KR")
+    page = context.new_page()
+    page.goto(BASE_URL)
+    start(page)
+    skip_clarify(page)
+    graph = page.get_by_role("region", name="설계 그래프")
+    card = page.locator(".workspace-card")
+    before = graph.bounding_box()["y"]
+
+    card.hover()
+    page.mouse.wheel(0, 600)
+    page.wait_for_function("document.querySelector('.workspace-card').scrollTop > 0")
+
+    assert page.evaluate("window.scrollY") == 0
+    assert graph.bounding_box()["y"] == before
+    context.close()
+
+
+def test_a_system_card_shows_the_system_graph_and_what_changed(page: Page):
+    start(page)
+    skip_clarify(page)
+    choose_surface(page)
+    agent_tab = page.get_by_role("button", name="에이전트 흐름", exact=True)
+    expect(agent_tab).to_have_attribute("aria-pressed", "true")
+    choose(page, "에이전트를 어떤 구조로 구성할까요?", "고정 파이프라인")
+    choose(page, "에이전트가 실행 중간에 사람의 확인을 받아야 하나요?", "승인 후 실행")
+
+    system_tab = page.get_by_role("button", name="시스템 구성", exact=True)
+    expect(system_tab).to_have_attribute("aria-pressed", "true")
+    page.get_by_role("button", name="Gemini 선택").click()
+
+    expect(page.get_by_text("방금 반영:")).to_be_visible()
+    expect(page.locator(".bp-service.changed")).not_to_have_count(0)
 
 
 def test_stale_tab_cannot_answer_the_wrong_card(browser: Browser, page: Page):
@@ -218,14 +279,36 @@ def test_the_system_diagram_fits_a_wide_panel(browser: Browser):
     page.goto(BASE_URL)
     start(page)
     skip_clarify(page)
-    page.get_by_role("button", name="시스템 구성").click()
+    page.get_by_role("button", name="시스템 구성", exact=True).click()
     expect(page.get_by_role("group", name="시스템 구성")).to_be_visible()
 
-    assert page.locator(".blueprint-canvas").evaluate("c => c.scrollWidth <= c.clientWidth")
+    canvas = page.locator(".blueprint-canvas")
+    assert canvas.evaluate("c => c.scrollWidth <= c.clientWidth")
+
+    for _ in range(3):
+        page.get_by_role("button", name="확대").click()
+    assert canvas.evaluate("c => c.scrollWidth > c.clientWidth")
+
+    box = canvas.bounding_box()
+    page.mouse.move(box["x"] + 400, box["y"] + 4)
+    page.mouse.down()
+    page.mouse.move(box["x"] + 200, box["y"] + 4, steps=4)
+    page.mouse.up()
+    assert canvas.evaluate("c => c.scrollLeft") > 0
+
+    page.get_by_role("button", name="화면 맞춤").click()
+    assert canvas.evaluate("c => c.scrollWidth <= c.clientWidth")
+
+    page.mouse.move(box["x"] + 300, box["y"] + 200)
+    page.keyboard.down("Control")
+    page.mouse.wheel(0, -200)
+    page.keyboard.up("Control")
+    expect(page.locator(".zoom-value")).not_to_have_text("맞춤")
+    assert page.evaluate("window.visualViewport.scale") == 1
     context.close()
 
 
-def test_closing_the_tabs_gives_the_graph_the_page(browser: Browser):
+def test_closing_the_card_tab_gives_the_graph_the_page(browser: Browser):
     context = browser.new_context(viewport={"width": 1600, "height": 900}, locale="ko-KR")
     page = context.new_page()
     page.goto(BASE_URL)
@@ -235,12 +318,12 @@ def test_closing_the_tabs_gives_the_graph_the_page(browser: Browser):
     question = page.get_by_role("heading", name=SURFACE)
     before = canvas.bounding_box()["width"]
 
-    page.get_by_role("button", name="그래프 넓게 보기").click()
-    expect(page.get_by_role("complementary")).to_be_hidden()
+    page.get_by_role("button", name="카드 닫기").click()
     expect(question).to_be_hidden()
-    assert canvas.bounding_box()["width"] > before + 500
+    assert canvas.bounding_box()["width"] > before + 300
     shot(page, "9-graph-only")
 
+    page.get_by_role("button", name="에이전트 흐름", exact=True).click()
     page.get_by_role("button", name="미정 에이전트 구조?").click()
     expect(page.get_by_role("heading", name="에이전트를 어떤 구조로")).to_be_visible()
     context.close()
@@ -255,7 +338,20 @@ def test_phone_width_has_no_horizontal_scroll(browser: Browser):
     shot(page, "6-phone")
 
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
-    card_top = page.get_by_text("추천:").bounding_box()["y"]
+    card_top = page.locator(".option").first.bounding_box()["y"]
+    graph_top = page.get_by_role("region", name="설계 그래프").bounding_box()["y"]
     rail_top = page.get_by_role("complementary").bounding_box()["y"]
-    assert card_top < rail_top
+    assert rail_top < card_top < graph_top
     context.close()
+
+
+def test_the_theme_can_be_switched_and_is_remembered(page: Page):
+    html = page.locator("html")
+    before = html.get_attribute("data-theme")
+    other = "dark" if before == "light" else "light"
+
+    page.get_by_role("button", name="다크 모드" if before == "light" else "라이트 모드").click()
+    expect(html).to_have_attribute("data-theme", other)
+
+    page.reload()
+    expect(html).to_have_attribute("data-theme", other)

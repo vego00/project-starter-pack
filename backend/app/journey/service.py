@@ -31,6 +31,7 @@ from app.journey.state import (
     KeepAction,
     ProjectSpec,
     ReopenAction,
+    ReviseAction,
 )
 from app.registry.loader import Registry
 
@@ -56,6 +57,7 @@ class CardStatus(BaseModel):
     question: str
     state: Literal["decided", "implied", "deferred", "current", "pending", "skipped"]
     needs_review: bool = False
+    editing: bool = False
     option_id: str | None = None
     option_name: str | None = None
     by: Literal["user", "recommended", "implied"] | None = None
@@ -113,7 +115,7 @@ def _resume_payload(action: JourneyAction) -> Any:
 
 def _allowed(prompt_type: str, action: JourneyAction) -> bool:
     if prompt_type == "done":
-        return isinstance(action, ReopenAction | KeepAction)
+        return isinstance(action, ReopenAction | ReviseAction | KeepAction)
     if prompt_type == "clarify":
         return isinstance(action, ClarifyAction)
     if prompt_type == "gcb":
@@ -154,14 +156,14 @@ class JourneyService:
             prompt = _pending_prompt(snapshot)
             finished = prompt is None or prompt["type"] == "done"
             if finished and not (
-                prompt is not None and isinstance(action, ReopenAction | KeepAction)
+                prompt is not None and isinstance(action, ReopenAction | ReviseAction | KeepAction)
             ):
                 raise JourneyError(409, "journey_finished", "이미 끝난 여정이에요.")
             if not _allowed(prompt["type"], action):
                 raise JourneyError(
                     409, "action_not_allowed", "지금 단계에서 할 수 없는 동작이에요."
                 )
-            if prompt["type"] == "done" and isinstance(action, ReopenAction):
+            if prompt["type"] == "done" and isinstance(action, ReopenAction | ReviseAction):
                 self._check_reopen(JourneyState.model_validate(snapshot.values), action)
             config = journey_config(journey_id)
             self._graph.invoke(resume_command(_resume_payload(action)), config)
@@ -254,7 +256,7 @@ class JourneyService:
             files=sorted(files),
         )
 
-    def _check_reopen(self, state: JourneyState, action: ReopenAction) -> None:
+    def _check_reopen(self, state: JourneyState, action: ReopenAction | ReviseAction) -> None:
         """Rejects before the graph runs, so a finished journey never shows a refusal as a step."""
         if action.card_id in state.skipped:
             return
@@ -312,6 +314,7 @@ class JourneyService:
                     question=card.question,
                     state=kind,
                     needs_review=card.card_id in state.needs_review,
+                    editing=card.card_id == state.editing_card,
                     option_id=decision.option_id if decision else None,
                     option_name=option.name if option else None,
                     by=decision.by if decision else None,
