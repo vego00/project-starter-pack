@@ -933,6 +933,87 @@ ul {
   font-weight: 500;
   fill: currentColor;
 }
+.bp-code {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  fill: var(--muted);
+  text-anchor: middle;
+}
+.step-detail {
+  display: grid;
+  gap: 12px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--line);
+  font-size: 0.93rem;
+}
+.step-detail p {
+  margin: 0;
+}
+.step-detail code {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.88em;
+  overflow-wrap: anywhere;
+}
+.step-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+.step-title {
+  font-weight: 600;
+}
+.step-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
+  gap: 0 28px;
+}
+.step-columns dl {
+  margin: 0;
+}
+.step-row {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: 10px;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+}
+.step-row dt {
+  color: var(--muted);
+  font-size: 0.87rem;
+}
+.step-row dd {
+  margin: 0;
+  min-width: 0;
+}
+.step-row ul {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.step-open dd {
+  color: var(--muted);
+}
+.step-access {
+  color: var(--muted);
+  font-size: 0.85em;
+}
+.step-access.external {
+  color: var(--warn-text);
+  font-weight: 500;
+}
+.step-decisions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.step-decisions > span {
+  color: var(--muted);
+  font-size: 0.87rem;
+}
 .bp-edge {
   fill: none;
   stroke: var(--control-line);
@@ -1211,6 +1292,11 @@ ul {
     display: flex;
     flex-direction: column;
     min-height: 0;
+  }
+  .app.shell .step-detail {
+    flex: none;
+    max-height: 45%;
+    overflow-y: auto;
   }
   .app.shell .blueprint-canvas {
     flex: 1;

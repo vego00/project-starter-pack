@@ -12,7 +12,7 @@ import {
   ServiceDiagram,
 } from "../src/blueprint";
 import { SERVICE_ICONS } from "../src/serviceIcons";
-import type { BlueprintGraph, Journey } from "../src/api";
+import type { BlueprintGraph, BlueprintStep, Journey } from "../src/api";
 import { addRename } from "../src/design/edit";
 
 afterEach(() => {
@@ -26,7 +26,16 @@ const node = (
   card_id: string | null = null,
   icon: string | null = null,
   group: string | null = null,
-) => ({ id, label: `${id} 이름`, kind, card_id, icon, group, rows: [] });
+) => ({
+  id,
+  label: `${id} 이름`,
+  kind,
+  card_id,
+  icon,
+  group,
+  rows: [],
+  step: null,
+});
 const edge = (source: string, target: string) => ({
   source,
   target,
@@ -302,6 +311,146 @@ describe("BlueprintPanel", () => {
 
     fireEvent.wheel(canvas, { deltaY: -100, ctrlKey: true });
     expect(screen.getByText("125%")).toBeVisible();
+  });
+
+  describe("explaining a step of the agent flow", () => {
+    const step: BlueprintStep = {
+      line: "찾은 문단만 근거로 답변을 써요",
+      fixed: [],
+      unknown: [],
+      inputs: ["question: str"],
+      outputs: ["answer: str"],
+      how: "모델 호출 단계예요.",
+      tools: [
+        {
+          name: "publish_answer",
+          access: "external_write" as const,
+          reason: "승인된 답변을 공개해요.",
+        },
+      ],
+      done_when: "출처가 붙어 있어요.",
+      on_failure: "다시 시도를 안내해요.",
+      checks: ["자료에 없는 질문: 찾을 수 없다고 답해요."],
+      first_task: "답변 단계 연결하기",
+      decisions: [{ card_id: "agent.topology", label: "Agent 구조: 단일" }],
+    };
+    function flow(isDraft: boolean, nodeStep: typeof step) {
+      const decided = journey();
+      decided.cards = [{ ...decided.cards[0], state: "decided" }];
+      decided.blueprint = {
+        ...decided.blueprint,
+        agent: {
+          nodes: [{ ...node("draft_answer", "agent"), step: nodeStep }],
+          edges: [],
+        },
+        agent_is_draft: isDraft,
+      };
+      return decided;
+    }
+
+    async function pressStep(isDraft = false, nodeStep = step, act = vi.fn()) {
+      const user = userEvent.setup();
+      render(
+        <BlueprintPanel
+          journey={flow(isDraft, nodeStep)}
+          busy={false}
+          act={act}
+        />,
+      );
+      await user.click(
+        screen.getByRole("button", {
+          name: "에이전트 draft_answer 이름 설명 보기",
+        }),
+      );
+      return { user, act };
+    }
+
+    it("explains how to build the step without opening a card", async () => {
+      const { act } = await pressStep();
+
+      expect(screen.getByText("출처가 붙어 있어요.")).toBeVisible();
+      expect(screen.getByText("question: str")).toBeVisible();
+      expect(screen.getByText("외부 쓰기 (승인 필요)")).toBeVisible();
+      expect(screen.getByText("답변 단계 연결하기")).toBeVisible();
+      expect(act).not.toHaveBeenCalled();
+    });
+
+    it("opens a decision from the explanation", async () => {
+      const { user, act } = await pressStep();
+
+      await user.click(
+        screen.getByRole("button", { name: "Agent 구조: 단일 다시 고르기" }),
+      );
+
+      expect(act).toHaveBeenCalledWith({
+        action: "revise",
+        card_id: "agent.topology",
+      });
+    });
+
+    it("closes from its button and from the same step", async () => {
+      const { user } = await pressStep();
+
+      await user.click(screen.getByRole("button", { name: "설명 닫기" }));
+      expect(screen.queryByText("출처가 붙어 있어요.")).not.toBeInTheDocument();
+
+      const stepButton = screen.getByRole("button", {
+        name: "에이전트 draft_answer 이름 설명 보기",
+      });
+      await user.click(stepButton);
+      await user.click(stepButton);
+      expect(screen.queryByText("출처가 붙어 있어요.")).not.toBeInTheDocument();
+    });
+
+    it("separates what is settled from what is unknown before a design", async () => {
+      await pressStep(true, {
+        ...step,
+        fixed: ["고정 파이프라인: 순서대로 연결합니다."],
+        unknown: ["완료 기준"],
+        inputs: [],
+      });
+
+      expect(
+        screen.getByText("고정 파이프라인: 순서대로 연결합니다."),
+      ).toBeVisible();
+      expect(screen.getByText("아직 모름")).toBeVisible();
+      expect(screen.queryByText("입력")).not.toBeInTheDocument();
+    });
+
+    it("sends a loop back under the row with its label on the line", () => {
+      const { container } = render(
+        <BlueprintPanel
+          journey={{
+            ...journey(),
+            blueprint: {
+              ...journey().blueprint,
+              agent: {
+                nodes: [node("a"), node("b")],
+                edges: [
+                  edge("a", "b"),
+                  {
+                    source: "b",
+                    target: "a",
+                    label: "수정 요청",
+                    dashed: false,
+                  },
+                ],
+              },
+            },
+          }}
+          busy={false}
+          act={vi.fn()}
+        />,
+      );
+
+      const label = container.querySelector(".bp-edge-label")!;
+      const rects = [...container.querySelectorAll(".bp-node")];
+      const y = (element: Element) =>
+        Number(element.getAttribute("transform")!.match(/ ([\d.]+)\)/)![1]);
+      expect(Number(label.getAttribute("y"))).toBeGreaterThan(
+        Math.max(...rects.map(y)) + 96,
+      );
+    });
   });
 
   describe("decisions that share or lack a service", () => {
