@@ -170,6 +170,9 @@ const BOX_HEAD = 24;
 const CELL_GAP = 18;
 const COLUMN_GAP = 62;
 const BOX_GAP = 26;
+const LANE_GAP = 8;
+const LANE_CLEARANCE = 12;
+const LANE_CORNER = 8;
 
 const SERVICE_GROUPS: { id: string; title: string | null; column: number }[] = [
   { id: "people", title: null, column: 0 },
@@ -350,10 +353,56 @@ function edgePoints(node: BlueprintNode, at: Point) {
   };
 }
 
-function serviceEdge(
-  source: ReturnType<typeof edgePoints>,
-  target: ReturnType<typeof edgePoints>,
+type EdgeEnd = ReturnType<typeof edgePoints>;
+type Bounds = { left: number; top: number; right: number; bottom: number };
+
+function roundedPath(points: Point[]): string {
+  const toward = (from: Point, to: Point) => {
+    const length = Math.hypot(to.x - from.x, to.y - from.y);
+    const step = length ? Math.min(LANE_CORNER, length / 2) / length : 0;
+    return {
+      x: from.x + (to.x - from.x) * step,
+      y: from.y + (to.y - from.y) * step,
+    };
+  };
+  return points.reduce((path, at, index) => {
+    if (index === 0) return `M${at.x} ${at.y}`;
+    if (index === points.length - 1) return `${path}L${at.x} ${at.y}`;
+    const into = toward(at, points[index - 1]);
+    const out = toward(at, points[index + 1]);
+    return `${path}L${into.x} ${into.y}Q${at.x} ${at.y} ${out.x} ${out.y}`;
+  }, "");
+}
+
+/** A line that would cross a column goes around its boxes, so it never runs over a service. */
+function laneEdge(
+  source: EdgeEnd,
+  target: EdgeEnd,
+  from: Bounds,
+  to: Bounds,
+  between: Bounds[],
+  over: boolean,
 ) {
+  const lane = over
+    ? Math.min(...between.map((box) => box.top)) - LANE_CLEARANCE
+    : Math.max(...between.map((box) => box.bottom)) + LANE_CLEARANCE;
+  const leave = from.right + LANE_GAP;
+  const arrive = to.left - LANE_GAP;
+  return {
+    d: roundedPath([
+      { x: source.right, y: source.middle },
+      { x: leave, y: source.middle },
+      { x: leave, y: lane },
+      { x: arrive, y: lane },
+      { x: arrive, y: target.middle },
+      { x: target.left - 6, y: target.middle },
+    ]),
+    labelX: (leave + arrive) / 2,
+    labelY: lane + 4,
+  };
+}
+
+function serviceEdge(source: EdgeEnd, target: EdgeEnd) {
   if (Math.abs(source.centre - target.centre) < SERVICE_W / 2) {
     const down = target.top >= source.top;
     const x = source.centre;
@@ -467,6 +516,24 @@ export function ServiceDiagram({
   });
   const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
   const pointsOf = (id: string) => edgePoints(nodeById.get(id)!, point(id));
+  const boxOf = (id: string) =>
+    boxes.find((box) => box.id === groupOf(nodeById.get(id)!));
+  // Alternating keeps two crossing lines from sharing a lane.
+  let crossings = 0;
+  const routeOf = (edge: DrawnEdge) => {
+    const source = pointsOf(edge.source);
+    const target = pointsOf(edge.target);
+    const from = boxOf(edge.source);
+    const to = boxOf(edge.target);
+    const between =
+      from && to
+        ? boxes.filter((box) => box.left >= from.right && box.right <= to.left)
+        : [];
+    if (!from || !to || between.length === 0) {
+      return serviceEdge(source, target);
+    }
+    return laneEdge(source, target, from, to, between, crossings++ % 2 === 0);
+  };
   return (
     <>
       {boxes.map((box) => (
@@ -485,7 +552,7 @@ export function ServiceDiagram({
         </g>
       ))}
       {mergeEdges(graph.edges).map((edge) => {
-        const line = serviceEdge(pointsOf(edge.source), pointsOf(edge.target));
+        const line = routeOf(edge);
         return (
           <g key={`${edge.source}>${edge.target}`}>
             <path

@@ -157,6 +157,36 @@ describe("ServiceDiagram", () => {
     expect(points["blank-model"].y).toBeLessThan(points.db.y);
   });
 
+  it("sends a line around the column it would otherwise cross", () => {
+    const crossing: BlueprintGraph = {
+      nodes: [
+        node("api", "sys", null, "server", "app"),
+        node("model", "sys", null, "agent", "model"),
+        node("orchestration", "sys", null, "docker", "ops"),
+      ],
+      edges: [
+        {
+          source: "api",
+          target: "orchestration",
+          label: "실행 환경",
+          dashed: true,
+        },
+      ],
+    };
+    const points = layoutSystem(crossing);
+    const { container } = render(
+      <svg>
+        <ServiceDiagram graph={crossing} point={(id) => points[id]} />
+      </svg>,
+    );
+
+    const label = container.querySelector(".bp-edge-label")!;
+    const modelBox = container.querySelectorAll(".bp-box")[1];
+    expect(Number(label.getAttribute("y"))).toBeLessThan(
+      Number(modelBox.getAttribute("y")),
+    );
+  });
+
   it("shows a brand mark only for a chosen service, inside a titled box", () => {
     const points = layoutSystem(graph);
     const { container } = render(
