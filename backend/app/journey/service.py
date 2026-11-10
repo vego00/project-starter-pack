@@ -19,6 +19,7 @@ from app.journey.design_edit import (
     compose_renames,
 )
 from app.journey.graph import build_graph, journey_config, journey_input
+from app.journey.modules import ModulePlan, build_module_plan
 from app.journey.nodes import resume_command
 from app.journey.package import build_package, package_zip
 from app.journey.services import JourneyDeps
@@ -34,6 +35,7 @@ from app.journey.state import (
     ReviseAction,
 )
 from app.registry.loader import Registry
+from app.registry.modules import default_module_rules
 
 NO_MODEL_NOTICE = (
     "모델 미연결 상태입니다. 추천은 카드의 기본값이며 내 프로젝트를 분석한 결과가 아닙니다."
@@ -96,6 +98,7 @@ class JourneyView(BaseModel):
     notice: str | None
     design: DesignView | None = None
     blueprint: Blueprint
+    modules: list[ModulePlan] = []
     # Finished journeys made before the end wait existed cannot change a decision.
     can_reopen: bool = False
 
@@ -130,6 +133,7 @@ class JourneyService:
         self, registry: Registry, checkpointer: Checkpointer, deps: JourneyDeps | None = None
     ):
         self._registry = registry
+        self._module_rules = default_module_rules()
         self._deps = deps or JourneyDeps()
         self._graph = build_graph(registry, checkpointer=checkpointer, deps=self._deps)
         # Orders actions within this process. More than one backend instance needs a DB lock.
@@ -350,5 +354,10 @@ class JourneyService:
             notice=self._notice(),
             design=self._design_view(state),
             blueprint=build_blueprint(state, self._registry),
+            modules=build_module_plan(
+                self._registry,
+                self._module_rules,
+                {card_id: d.option_id for card_id, d in state.all_decisions.items()},
+            ),
             can_reopen=waiting_at_end,
         )
