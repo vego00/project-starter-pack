@@ -12,15 +12,19 @@ from app.journey.deciders.jev import JevDecider
 from app.journey.deciders.mock import MockDecider
 from app.journey.design_generator import Designer, LLMDesigner
 from app.journey.llm import GeminiLLM, StructuredLLM
+from app.journey.modules import ModuleChange, ModulePlan, ModuleTurn
 from app.journey.prompts import (
     ADVISOR_SYSTEM,
     ADVISOR_VERSION,
     GCB_SYSTEM,
     GCB_VERSION,
+    MODULE_SYSTEM,
+    MODULE_VERSION,
     QA_SYSTEM,
     QA_VERSION,
     advisor_user,
     gcb_user,
+    module_user,
     qa_user,
 )
 from app.journey.state import (
@@ -258,6 +262,53 @@ class LLMResponder:
         )
 
 
+class ModuleOutput(BaseModel):
+    reply: str
+    changes: list[ModuleChange] = []
+
+
+class ModuleReply(ModuleOutput):
+    model_id: str | None = None
+    prompt_version: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+
+
+class ModuleWriter(Protocol):
+    def write(
+        self, plan: list[ModulePlan], chat: list[ModuleTurn], message: str
+    ) -> ModuleReply | None: ...
+
+
+class LLMModuleWriter:
+    """None on failure: the caller keeps the state as it was, so the message can be sent again."""
+
+    def __init__(self, llm: StructuredLLM):
+        self._llm = llm
+
+    def write(
+        self, plan: list[ModulePlan], chat: list[ModuleTurn], message: str
+    ) -> ModuleReply | None:
+        try:
+            result = self._llm.generate(
+                system=MODULE_SYSTEM, user=module_user(plan, chat, message), schema=ModuleOutput
+            )
+            reply = result.output.reply.strip()
+            if not reply or len(reply) > MAX_ANSWER_CHARS:
+                raise ValueError("reply is empty or too long")
+        except Exception as exc:  # noqa: BLE001 - model boundary; the prompt holds user text
+            logger.error("module reply failed type=%s", type(exc).__name__)
+            return None
+        return ModuleReply(
+            reply=reply,
+            changes=result.output.changes,
+            model_id=result.model_id,
+            prompt_version=MODULE_VERSION,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+        )
+
+
 @dataclass(frozen=True)
 class JourneyDeps:
     decider: Decider = field(default_factory=MockDecider)
@@ -267,6 +318,8 @@ class JourneyDeps:
     drafter: GcbDrafter = field(default_factory=MockGcbDrafter)
     # None means no model: the journey ends with a reference template.
     designer: Designer | None = None
+    # None means no model: the build order is filled in with forms instead of a conversation.
+    module_writer: ModuleWriter | None = None
     card_selection: bool = True
 
     @property
@@ -312,5 +365,6 @@ def build_deps(settings: Settings, registry: Registry) -> JourneyDeps:
         advisor=LLMAdvisor(llm, registry),
         responder=LLMResponder(llm, registry),
         designer=LLMDesigner(design_llm, registry),
+        module_writer=LLMModuleWriter(llm),
         card_selection=settings.card_selection,
     )

@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { ApiError, getJourney, sendAction, startJourney } from "./api";
+import {
+  ApiError,
+  editModule,
+  getJourney,
+  sendAction,
+  sendModuleMessage,
+  startJourney,
+  undoModule,
+} from "./api";
 import type { Action, Journey } from "./api";
 import { BlueprintPanel, SamplePreview } from "./blueprint";
 import {
@@ -11,6 +19,8 @@ import {
   ProgressRail,
   StartForm,
 } from "./components";
+import type { SideView } from "./components";
+import { ModuleChat } from "./moduleChat";
 import { ThemeToggle } from "./theme";
 
 const LAST_JOURNEY_KEY = "starter-pack:last-journey:v1";
@@ -66,6 +76,7 @@ export default function App() {
   const [cardOpen, setCardOpen] = useState(true);
   const [confirmingRestart, setConfirmingRestart] = useState(false);
   const [lastAction, setLastAction] = useState<string | null>(null);
+  const [side, setSide] = useState<SideView>("summary");
   const stacked = useStacked();
   const inFlight = useRef(false);
 
@@ -141,6 +152,32 @@ export default function App() {
       setCardOpen(true);
     }
     act(action);
+  }
+
+  /** Errors go back to the chat or the field that sent them, not to the page. */
+  async function changeModules(
+    work: (current: Journey) => Promise<Journey>,
+  ): Promise<string> {
+    if (!journey) return "";
+    if (inFlight.current)
+      return "앞의 요청을 처리하는 중이에요. 끝나면 다시 보내 주세요.";
+    const current = journey;
+    let failed = "";
+    await run(async () => {
+      try {
+        show(await work(current));
+      } catch (failure) {
+        failed = messageOf(failure);
+        if (failure instanceof ApiError && failure.code === "stale_revision") {
+          try {
+            show(await getJourney(current.journey_id));
+          } catch {
+            // Keep the screen; the message already asks to try again.
+          }
+        }
+      }
+    });
+    return failed;
   }
 
   function restart() {
@@ -264,11 +301,34 @@ export default function App() {
             <CompletedView
               journey={journey}
               onRestart={restart}
+              side={side}
+              onSide={setSide}
+              moduleChat={
+                <ModuleChat
+                  journey={journey}
+                  busy={busy}
+                  onSend={(text) =>
+                    changeModules((current) => sendModuleMessage(current, text))
+                  }
+                  onUndo={() => changeModules(undoModule)}
+                />
+              }
               graph={
                 <BlueprintPanel
                   journey={journey}
                   busy={busy}
                   act={actAndShowCard}
+                  onLayerChange={(layer) => {
+                    if (layer === "order") setSide("chat");
+                  }}
+                  editModule={
+                    journey.module_mode === "closed"
+                      ? undefined
+                      : (change) =>
+                          changeModules((current) =>
+                            editModule(current, change),
+                          )
+                  }
                 />
               }
             />

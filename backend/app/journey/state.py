@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from app.journey.constraints import Conflict
 from app.journey.design import DesignState
+from app.journey.modules import ModuleNote, ModuleTurn
 from app.registry.schema import CardOption
 
 CardId = str
@@ -217,6 +218,11 @@ class JourneyState(BaseModel):
     status: Literal["in_progress", "needs_fix", "completed"] = "in_progress"
     artifacts: dict[str, str] = {}
     design: DesignState = DesignState()
+    # The build order's conversation (ADR-022). Each change pushes the notes it replaced.
+    module_notes: dict[str, ModuleNote] = {}
+    module_chat: list[ModuleTurn] = []
+    module_undo: list[dict[str, ModuleNote]] = []
+    module_revision: int = 0
     trace: Annotated[list[NodeEvent], operator.add] = []
 
     @property

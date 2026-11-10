@@ -17,6 +17,7 @@ from app.journey.design_generator import (
     template_design,
 )
 from app.journey.llm import provider_schema
+from app.journey.modules import ModuleNote
 from app.journey.package import build_package, package_zip
 from app.journey.services import JourneyDeps, llm_calls_used
 from app.journey.state import (
@@ -411,6 +412,26 @@ def test_every_start_condition_gets_a_line_to_record_it(design):
         if line.startswith("- ") and "(이유: " in line:
             assert f"- [ ] {line[2 : line.index(' (이유: ')]}" in gates
     assert "정할 값: 답변 응답 시간 목표치:" in gates
+
+
+def test_what_people_said_about_a_module_reaches_the_package(design):
+    notes = {
+        "agent": ModuleNote(
+            goal="강의 자료로 답한다",
+            include=["근거 표시"],
+            exclude=["음성 입력"],
+            targets={"답변 응답 시간": "5초 이내"},
+        )
+    }
+
+    files = build_package(design, REGISTRY, IDEA, notes)
+
+    build = files["BUILD.md"]
+    assert "목표: 강의 자료로 답한다" in build
+    assert "이번에 만들 것\n\n- 근거 표시" in build
+    assert "이번에 안 만들 것\n\n- 음성 입력" in build
+    assert "답변 응답 시간: 목표치 5초 이내" in build
+    assert "정할 값: 답변 응답 시간 목표치: 5초 이내" in files["docs/gates.md"]
 
 
 def test_the_build_order_follows_the_decisions_the_design_was_made_from(design):

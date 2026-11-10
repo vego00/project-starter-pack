@@ -1095,6 +1095,77 @@ ul {
   border: 1.5px solid var(--control-line);
   border-radius: 3px;
 }
+.module-edit {
+  justify-self: start;
+  font-size: 0.87rem;
+}
+.module-edit-form {
+  display: grid;
+  gap: 6px;
+}
+.module-edit-form .row {
+  margin-top: 0;
+}
+.module-chat {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+.module-chat > button {
+  justify-self: start;
+}
+/* The thread scrolls on its own so the composer stays under the graph's height. */
+.chat-thread {
+  display: grid;
+  gap: 10px;
+  max-height: 460px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.chat-msg {
+  max-width: 92%;
+  padding: 8px 12px;
+  border-radius: 6px;
+}
+.chat-msg p {
+  margin: 0;
+}
+.chat-msg p + p {
+  margin-top: 4px;
+}
+.chat-msg.bot {
+  justify-self: start;
+  border: 1px solid var(--line);
+}
+.chat-msg.user {
+  justify-self: end;
+  background: var(--tint);
+}
+.chat-changes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 6px;
+  font-size: 0.85rem;
+}
+.chat-changes span {
+  padding: 0 6px;
+  border: 1px solid var(--control-line);
+  border-radius: 4px;
+}
+.chat-msg .chat-refused {
+  margin-top: 6px;
+  padding: 4px 8px;
+  background: var(--warn-bg);
+  color: var(--warn-text);
+  font-size: 0.87rem;
+}
+.chat-composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+}
 .step-empty {
   padding: 6px 10px;
   border: 1px dashed var(--line);

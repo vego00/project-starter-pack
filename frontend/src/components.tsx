@@ -677,15 +677,25 @@ const NODE_KIND: Record<string, string> = {
   human: "사람 확인",
 };
 
+export type SideView = "summary" | "chat";
+
 export function CompletedView({
   journey,
   graph,
   onRestart,
+  moduleChat,
+  side = "summary",
+  onSide,
 }: {
   journey: Journey;
   graph: ReactNode;
   onRestart: () => void;
+  moduleChat?: ReactNode;
+  side?: SideView;
+  onSide?: (side: SideView) => void;
 }) {
+  const hasChat = moduleChat !== undefined && journey.module_mode !== "closed";
+  const showChat = hasChat && side === "chat";
   const heading = useFocusedHeading();
   const design = journey.design;
   const count = journey.cards.filter((card) => card.option_name).length;
@@ -760,53 +770,81 @@ export function CompletedView({
             </>
           )}
         </div>
-        <aside className="done-side" aria-label="결과 요약">
-          {design && (
-            <>
-              <h3>가장 먼저 할 일</h3>
-              <p>{design.first_task}</p>
-              <p className="muted">완료 확인: {design.first_task_check}</p>
-              {design.unknowns.length > 0 && (
-                <>
-                  <h3>먼저 확인할 것</h3>
-                  <ul>
-                    {design.unknowns.map((unknown) => (
-                      <li key={unknown}>{unknown}</li>
-                    ))}
-                  </ul>
-                </>
-              )}
-            </>
+        <aside
+          className="done-side"
+          aria-label={showChat ? "모듈 대화" : "결과 요약"}
+        >
+          {hasChat && (
+            <div className="segment" role="group" aria-label="오른쪽 내용">
+              <button
+                className={showChat ? "" : "on"}
+                aria-pressed={!showChat}
+                onClick={() => onSide?.("summary")}
+              >
+                결과 요약
+              </button>
+              <button
+                className={showChat ? "on" : ""}
+                aria-pressed={showChat}
+                onClick={() => onSide?.("chat")}
+              >
+                {journey.module_mode === "form" ? "모듈 채우기" : "모듈 대화"}
+              </button>
+            </div>
           )}
-          <h3>내가 고른 기술</h3>
-          <ol className="summary">
-            {[...journey.cards]
-              .sort((a, b) => a.stage - b.stage)
-              .map((card) => (
-                <li key={card.card_id}>
-                  <span className="eyebrow">{card.title}</span>
-                  <strong>
-                    {card.option_name ??
-                      (card.state === "skipped" ? STATE_LABEL.skipped : null)}
-                  </strong>
-                  {card.by && (
-                    <span className="badge">{BY_LABEL[card.by]}</span>
-                  )}
-                  {card.by === "implied" && (
-                    <span className="muted">{card.rationale}</span>
-                  )}
-                </li>
-              ))}
-          </ol>
-          {journey.can_reopen && (
-            <p className="muted">
-              바꾸고 싶은 결정은 구성도의 아이콘이나 위쪽 단계에서 고칠 수
-              있어요. 다른 선택지를 고르면 설계와 빌드 묶음을 다시 만들어요.
-              그래프에서 직접 고친 내용은 새 설계에 다시 적용해요.
-            </p>
-          )}
+          {showChat ? moduleChat : <ResultSummary journey={journey} />}
         </aside>
       </div>
+    </>
+  );
+}
+
+function ResultSummary({ journey }: { journey: Journey }) {
+  const design = journey.design;
+  return (
+    <>
+      {design && (
+        <>
+          <h3>가장 먼저 할 일</h3>
+          <p>{design.first_task}</p>
+          <p className="muted">완료 확인: {design.first_task_check}</p>
+          {design.unknowns.length > 0 && (
+            <>
+              <h3>먼저 확인할 것</h3>
+              <ul>
+                {design.unknowns.map((unknown) => (
+                  <li key={unknown}>{unknown}</li>
+                ))}
+              </ul>
+            </>
+          )}
+        </>
+      )}
+      <h3>내가 고른 기술</h3>
+      <ol className="summary">
+        {[...journey.cards]
+          .sort((a, b) => a.stage - b.stage)
+          .map((card) => (
+            <li key={card.card_id}>
+              <span className="eyebrow">{card.title}</span>
+              <strong>
+                {card.option_name ??
+                  (card.state === "skipped" ? STATE_LABEL.skipped : null)}
+              </strong>
+              {card.by && <span className="badge">{BY_LABEL[card.by]}</span>}
+              {card.by === "implied" && (
+                <span className="muted">{card.rationale}</span>
+              )}
+            </li>
+          ))}
+      </ol>
+      {journey.can_reopen && (
+        <p className="muted">
+          바꾸고 싶은 결정은 구성도의 아이콘이나 위쪽 단계에서 고칠 수 있어요.
+          다른 선택지를 고르면 설계와 빌드 묶음을 다시 만들어요. 그래프에서 직접
+          고친 내용은 새 설계에 다시 적용해요.
+        </p>
+      )}
     </>
   );
 }
