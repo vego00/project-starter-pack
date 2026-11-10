@@ -116,9 +116,9 @@ def test_every_rule_part_is_marked_and_no_target_is_invented():
 
 def test_the_stack_names_the_chosen_options():
     assert plan(CHOICES["team"])["data"].stack == [
-        "PostgreSQL",
-        "pgvector (PostgreSQL 확장)",
-        "PostgreSQL 체크포인터",
+        "데이터 저장소: PostgreSQL",
+        "검색 저장소: pgvector (PostgreSQL 확장)",
+        "상태 저장: PostgreSQL 체크포인터",
     ]
 
 

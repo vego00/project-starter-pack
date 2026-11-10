@@ -91,7 +91,7 @@ def build_module_plan(
                 id=rule.id,
                 name=named or rule.name,
                 stack=[
-                    name
+                    f"{registry.card(card_id).title}: {name}"
                     for card_id in rule.cards
                     if (name := _option_name(registry, card_id, choices))
                 ],

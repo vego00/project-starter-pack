@@ -387,7 +387,38 @@ def test_the_package_has_files_for_both_kinds_of_agent(design):
         "docs/multi-agent-design.md",
         "docs/infrastructure.md",
         "docs/lessons.md",
+        "docs/gates.md",
     } == set(files)
+
+
+def test_the_build_order_lists_modules_with_their_start_conditions(design):
+    files = build_package(design, REGISTRY, IDEA)
+    build = files["BUILD.md"]
+
+    order = [build.index(f"단계: {name}") for name in ("에이전트 흐름", "서비스 API", "운영")]
+    assert order == sorted(order)
+    assert "## 만드는 순서" in build
+    assert "핵심 요구사항마다 평가 사례를 먼저 쓰고" in build
+    assert "답변 응답 시간: 목표치를 시작 전에 사용자에게 묻는다" in build
+    assert "docs/gates.md" in files["CLAUDE.md"]
+
+
+def test_every_start_condition_gets_a_line_to_record_it(design):
+    files = build_package(design, REGISTRY, IDEA)
+
+    gates = files["docs/gates.md"]
+    for line in files["BUILD.md"].splitlines():
+        if line.startswith("- ") and "(이유: " in line:
+            assert f"- [ ] {line[2 : line.index(' (이유: ')]}" in gates
+    assert "정할 값: 답변 응답 시간 목표치:" in gates
+
+
+def test_the_build_order_follows_the_decisions_the_design_was_made_from(design):
+    choices = {d.card_id: d.option_id for d in design.provenance.decisions}
+
+    build = build_package(design, REGISTRY, IDEA)["BUILD.md"]
+
+    assert ("API 키를 커밋하지 않는 .env" in build) == (choices.get("model.provider") == "gemini")
 
 
 def test_service_agents_stay_out_of_the_coding_tool_folder(design):
