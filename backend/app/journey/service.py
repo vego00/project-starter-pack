@@ -1,6 +1,7 @@
 """Runs journeys for the API: one graph, per-journey ordering, and a view for clients."""
 
 from threading import Lock
+from time import perf_counter
 from typing import Any, Literal
 from uuid import UUID, uuid4
 from weakref import WeakValueDictionary
@@ -18,8 +19,15 @@ from app.journey.design_edit import (
     apply_design_edit,
     compose_renames,
 )
-from app.journey.graph import build_graph, journey_config, journey_input
-from app.journey.modules import ModulePlan, build_module_plan
+from app.journey.graph import _jsonable, build_graph, journey_config, journey_input
+from app.journey.modules import (
+    ModuleChange,
+    ModuleNote,
+    ModulePlan,
+    ModuleTurn,
+    apply_module_changes,
+    build_module_plan,
+)
 from app.journey.nodes import resume_command
 from app.journey.package import build_package, package_zip
 from app.journey.services import JourneyDeps
@@ -30,6 +38,7 @@ from app.journey.state import (
     JourneyAction,
     JourneyState,
     KeepAction,
+    NodeEvent,
     ProjectSpec,
     ReopenAction,
     ReviseAction,
@@ -40,6 +49,8 @@ from app.registry.modules import default_module_rules
 NO_MODEL_NOTICE = (
     "모델 미연결 상태입니다. 추천은 카드의 기본값이며 내 프로젝트를 분석한 결과가 아닙니다."
 )
+MAX_MODULE_MESSAGES = 30  # Provisional cost ceiling for the build-order conversation.
+MAX_MODULE_UNDO = 20
 MOCK_RECOMMENDATION_NOTICE = (
     "선택지 설명은 AI가 쓰지만, 추천은 아직 카드의 기본값이며 내 프로젝트를 분석한 결과가 아닙니다."
 )
@@ -99,6 +110,11 @@ class JourneyView(BaseModel):
     design: DesignView | None = None
     blueprint: Blueprint
     modules: list[ModulePlan] = []
+    # "closed" until every decision is made; "form" when no model can hold the conversation.
+    module_mode: Literal["model", "form", "closed"] = "closed"
+    module_chat: list[ModuleTurn] = []
+    module_revision: int = 0
+    module_undo_count: int = 0
     # Finished journeys made before the end wait existed cannot change a decision.
     can_reopen: bool = False
 
@@ -236,14 +252,16 @@ class JourneyService:
             state = JourneyState.model_validate(self._snapshot(journey_id).values)
         if state.design.current is None:
             raise JourneyError(409, "package_unavailable", "결정을 모두 마치면 받을 수 있어요.")
-        files = build_package(state.design.current, self._registry, state.project_spec.idea)
+        files = build_package(
+            state.design.current, self._registry, state.project_spec.idea, state.module_notes
+        )
         return package_zip(files)
 
     def _design_view(self, state: JourneyState) -> DesignView | None:
         design: ServiceDesign | None = state.design.current
         if design is None:
             return None
-        files = build_package(design, self._registry, state.project_spec.idea)
+        files = build_package(design, self._registry, state.project_spec.idea, state.module_notes)
         issues = [i.message for i in design.validation or [] if i.severity == "warning"]
         return DesignView(
             status=state.design.status,
@@ -354,10 +372,107 @@ class JourneyService:
             notice=self._notice(),
             design=self._design_view(state),
             blueprint=build_blueprint(state, self._registry),
-            modules=build_module_plan(
-                self._registry,
-                self._module_rules,
-                {card_id: d.option_id for card_id, d in state.all_decisions.items()},
-            ),
+            modules=self._plan(state),
+            module_mode=self._module_mode(waiting_at_end),
+            module_chat=state.module_chat,
+            module_revision=state.module_revision,
+            module_undo_count=len(state.module_undo),
             can_reopen=waiting_at_end,
         )
+
+    def _plan(self, state: JourneyState) -> list[ModulePlan]:
+        choices = {card_id: d.option_id for card_id, d in state.all_decisions.items()}
+        return build_module_plan(self._registry, self._module_rules, choices, state.module_notes)
+
+    def _module_mode(self, waiting_at_end: bool) -> Literal["model", "form", "closed"]:
+        if not waiting_at_end:
+            return "closed"
+        return "model" if self._deps.module_writer is not None else "form"
+
+    def send_module_message(self, journey_id: UUID, revision: int, text: str) -> JourneyView:
+        """A failed reply changes nothing, so the screen can keep the text and send it again."""
+        with self._lock(journey_id):
+            state = self._module_state(journey_id, revision)
+            writer = self._deps.module_writer
+            if writer is None:
+                raise JourneyError(409, "module_chat_unavailable", "모델이 없어 대화할 수 없어요.")
+            if sum(turn.role == "user" for turn in state.module_chat) >= MAX_MODULE_MESSAGES:
+                raise JourneyError(
+                    409, "module_chat_full", "대화 횟수를 다 썼어요. 칸을 직접 고쳐 주세요."
+                )
+            plan = self._plan(state)
+            started = perf_counter()
+            reply = writer.write(plan, state.module_chat, text)
+            if reply is None:
+                raise JourneyError(
+                    503, "module_reply_failed", "답을 만들지 못했어요. 잠시 후 다시 보내 주세요."
+                )
+            notes, applied, rejected = apply_module_changes(plan, state.module_notes, reply.changes)
+            turns = [
+                ModuleTurn(role="user", text=text),
+                ModuleTurn(role="assistant", text=reply.reply, changes=applied, rejected=rejected),
+            ]
+            event = NodeEvent(
+                node="module_writer",
+                latency_ms=(perf_counter() - started) * 1000,
+                model_id=reply.model_id,
+                prompt_version=reply.prompt_version,
+                input_tokens=reply.input_tokens,
+                output_tokens=reply.output_tokens,
+            )
+            return self._save_modules(journey_id, state, notes if applied else None, turns, [event])
+
+    def edit_module(self, journey_id: UUID, revision: int, change: ModuleChange) -> JourneyView:
+        with self._lock(journey_id):
+            state = self._module_state(journey_id, revision)
+            notes, applied, rejected = apply_module_changes(
+                self._plan(state), state.module_notes, [change]
+            )
+            if not applied:
+                raise JourneyError(422, "module_edit_rejected", " / ".join(rejected))
+            return self._save_modules(journey_id, state, notes)
+
+    def undo_module(self, journey_id: UUID, revision: int) -> JourneyView:
+        with self._lock(journey_id):
+            state = self._module_state(journey_id, revision)
+            if not state.module_undo:
+                raise JourneyError(409, "module_undo_empty", "되돌릴 변경이 없어요.")
+            update = {
+                "module_notes": _jsonable(state.module_undo[-1]),
+                "module_undo": _jsonable(state.module_undo[:-1]),
+                "module_revision": state.module_revision + 1,
+            }
+            self._graph.update_state(journey_config(journey_id), update, as_node="designer")
+            return self._view(journey_id, self._snapshot(journey_id))
+
+    def _module_state(self, journey_id: UUID, revision: int) -> JourneyState:
+        snapshot = self._snapshot(journey_id)
+        prompt = _pending_prompt(snapshot)
+        if prompt is None or prompt["type"] != "done":
+            raise JourneyError(409, "modules_closed", "결정을 모두 마치면 채울 수 있어요.")
+        state = JourneyState.model_validate(snapshot.values)
+        if state.module_revision != revision:
+            raise JourneyError(
+                409, "stale_revision", "화면이 최신 상태가 아니에요. 최신 내용을 불러왔어요."
+            )
+        return state
+
+    def _save_modules(
+        self,
+        journey_id: UUID,
+        state: JourneyState,
+        notes: dict[str, ModuleNote] | None,
+        turns: list[ModuleTurn] | None = None,
+        trace: list[NodeEvent] | None = None,
+    ) -> JourneyView:
+        """Written as the designer, like design edits, so the journey keeps waiting at the end."""
+        update: dict[str, Any] = {"module_revision": state.module_revision + 1}
+        if notes is not None:
+            update["module_notes"] = notes
+            update["module_undo"] = [*state.module_undo, state.module_notes][-MAX_MODULE_UNDO:]
+        if turns:
+            update["module_chat"] = [*state.module_chat, *turns]
+        if trace:
+            update["trace"] = trace
+        self._graph.update_state(journey_config(journey_id), _jsonable(update), as_node="designer")
+        return self._view(journey_id, self._snapshot(journey_id))

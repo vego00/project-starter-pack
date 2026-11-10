@@ -12,3 +12,6 @@ frontend/dist/
 .ruff_cache/
 
 .vscode/*
+anti-slop/
+
+data/

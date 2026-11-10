@@ -10,10 +10,11 @@ import io
 import json
 import re
 import zipfile
+from collections.abc import Mapping
 from pathlib import Path
 
 from app.journey.design import ServiceDesign
-from app.journey.modules import ModulePlan, build_module_plan
+from app.journey.modules import ModuleNote, ModulePlan, build_module_plan
 from app.registry.loader import Registry
 from app.registry.modules import default_module_rules
 
@@ -65,10 +66,12 @@ GATE_RULE = (
 )
 
 
-def _modules(design: ServiceDesign, registry: Registry) -> list[ModulePlan]:
+def _modules(
+    design: ServiceDesign, registry: Registry, notes: Mapping[str, ModuleNote] | None
+) -> list[ModulePlan]:
     """From the decisions the design was made from, so the package matches that revision."""
     choices = {d.card_id: d.option_id for d in design.provenance.decisions if d.option_id}
-    plan = build_module_plan(registry, default_module_rules(), choices)
+    plan = build_module_plan(registry, default_module_rules(), choices, notes)
     return sorted(plan, key=lambda module: module.column)
 
 
@@ -82,7 +85,11 @@ def _waits_for(module: ModulePlan, names: dict[str, str]) -> str:
 
 def _criterion(criterion) -> str:
     kind = "정량" if criterion.kind == "quantitative" else "정성"
-    target = ": 목표치를 시작 전에 사용자에게 묻는다" if criterion.source == "open" else ""
+    target = ""
+    if criterion.target:
+        target = f": 목표치 {_inline(criterion.target)}"
+    elif criterion.source == "open":
+        target = ": 목표치를 시작 전에 사용자에게 묻는다"
     return f"- {kind}: {criterion.text}{target} (확인: {criterion.how})"
 
 
@@ -99,6 +106,12 @@ def _build_order(modules: list[ModulePlan]) -> list[str]:
         lines += [f"### {module.column + 1}단계: {module.name}{_waits_for(module, names)}", ""]
         if module.stack:
             lines += [f"구성: {' · '.join(module.stack)}", ""]
+        if module.goal:
+            lines += [f"목표: {_inline(module.goal.text)}", ""]
+        if module.include:
+            lines += ["이번에 만들 것", "", *_bullets([i.text for i in module.include]), ""]
+        if module.exclude:
+            lines += ["이번에 안 만들 것", "", *_bullets([i.text for i in module.exclude]), ""]
         lines += ["시작 조건", ""]
         lines += [f"- {gate.text} (이유: {gate.why})" for gate in module.gates]
         lines += ["", "완료 기준", "", *[_criterion(c) for c in module.criteria], ""]
@@ -118,8 +131,9 @@ def _gates_doc(modules: list[ModulePlan]) -> str:
         for gate in module.gates:
             lines += [f"- [ ] {gate.text}", "  - 확인한 날:", "  - 확인한 방법:"]
         for criterion in module.criteria:
-            if criterion.source == "open":
-                lines.append(f"- 정할 값: {criterion.text} 목표치:")
+            if criterion.needs_target:
+                target = _inline(criterion.target) if criterion.target else ""
+                lines.append(f"- 정할 값: {criterion.text} 목표치: {target}".rstrip())
         lines.append("")
     return "\n".join(lines)
 
@@ -396,12 +410,17 @@ def _agent_file(node, name: str) -> str:
     )
 
 
-def build_package(design: ServiceDesign, registry: Registry, idea: str) -> dict[str, str]:
+def build_package(
+    design: ServiceDesign,
+    registry: Registry,
+    idea: str,
+    notes: Mapping[str, ModuleNote] | None = None,
+) -> dict[str, str]:
     guidelines = (TEMPLATES / "CLAUDE.md").read_text("utf-8")
     project_rules = (
         f"\n## 이 프로젝트\n\n구현 지시는 `BUILD.md`를 따른다.\n\n{GATE_RULE}\n\n{DATA_RULE}\n"
     )
-    modules = _modules(design, registry)
+    modules = _modules(design, registry, notes)
     files = {
         "BUILD.md": _build_doc(design, idea, modules),
         "docs/gates.md": _gates_doc(modules),

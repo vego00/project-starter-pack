@@ -80,6 +80,10 @@ function journey(overrides: Partial<Journey> = {}): Journey {
       agent_is_draft: true,
     },
     modules: [],
+    module_mode: "closed",
+    module_chat: [],
+    module_revision: 0,
+    module_undo_count: 0,
     can_reopen: false,
     ...overrides,
   };
@@ -344,6 +348,8 @@ describe("BlueprintPanel", () => {
           how: `${name} 확인 방법`,
           source: "rule" as const,
           kind: "quantitative" as const,
+          needs_target: false,
+          target: null,
         },
       ],
       tasks: [],
@@ -365,6 +371,8 @@ describe("BlueprintPanel", () => {
                 how: "시간을 잰다",
                 source: "open" as const,
                 kind: "quantitative" as const,
+                needs_target: true,
+                target: null,
               },
             ],
           },
@@ -794,6 +802,32 @@ describe("BlueprintPanel", () => {
     expect(svg.getAttribute("viewBox")).not.toBe(before);
     await user.click(screen.getByRole("button", { name: "화면 맞춤" }));
     expect(svg.getAttribute("viewBox")).toBe(before);
+  });
+
+  it("still moves the graph by dragging after zooming out", async () => {
+    const user = userEvent.setup();
+    const { svg } = drawnGraph();
+    const canvas = svg.parentElement!;
+    Object.defineProperty(canvas, "clientWidth", { value: 800 });
+    Object.defineProperty(canvas, "clientHeight", { value: 400 });
+    await user.click(screen.getByRole("button", { name: "축소" }));
+    const before = svg.getAttribute("viewBox");
+    const pointer = (type: string, clientX: number) =>
+      fireEvent(
+        canvas,
+        new MouseEvent(type, {
+          bubbles: true,
+          clientX,
+          clientY: 50,
+          button: 0,
+        }),
+      );
+
+    pointer("pointerdown", 100);
+    pointer("pointermove", 160);
+    pointer("pointerup", 160);
+
+    expect(svg.getAttribute("viewBox")).not.toBe(before);
   });
 
   it("says the examples are loading until they arrive", async () => {

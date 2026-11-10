@@ -9,12 +9,13 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from langgraph.types import Checkpointer
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import Settings
 from app.journey.blueprint import BlueprintExample
 from app.journey.design import ServiceDesign
 from app.journey.design_edit import DesignEdit
+from app.journey.modules import ModuleChange
 from app.journey.persistence import open_checkpointer
 from app.journey.service import JourneyError, JourneyService, JourneyView
 from app.journey.services import JourneyDeps, build_deps
@@ -36,6 +37,22 @@ class ErrorResponse(BaseModel):
 class ActionRequest(BaseModel):
     revision: int
     action: JourneyAction
+
+
+class ModuleMessageRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    revision: int
+    text: str = Field(min_length=1, max_length=2000)
+
+
+class ModuleEditRequest(BaseModel):
+    revision: int
+    change: ModuleChange
+
+
+class ModuleUndoRequest(BaseModel):
+    revision: int
 
 
 def _error(status: int, code: str, message: str) -> JSONResponse:
@@ -167,6 +184,35 @@ def create_app(
     )
     def save_design(journey_id: UUID, edit: DesignEdit, journeys: Journeys):
         return _guarded(journey_id, lambda: journeys.save_design(journey_id, edit))
+
+    @app.post(
+        "/api/v1/journeys/{journey_id}/modules/messages",
+        response_model=JourneyView,
+        responses=ERROR_RESPONSES,
+    )
+    def send_module_message(journey_id: UUID, payload: ModuleMessageRequest, journeys: Journeys):
+        return _guarded(
+            journey_id,
+            lambda: journeys.send_module_message(journey_id, payload.revision, payload.text),
+        )
+
+    @app.post(
+        "/api/v1/journeys/{journey_id}/modules/edits",
+        response_model=JourneyView,
+        responses=ERROR_RESPONSES,
+    )
+    def edit_module(journey_id: UUID, payload: ModuleEditRequest, journeys: Journeys):
+        return _guarded(
+            journey_id, lambda: journeys.edit_module(journey_id, payload.revision, payload.change)
+        )
+
+    @app.post(
+        "/api/v1/journeys/{journey_id}/modules/undo",
+        response_model=JourneyView,
+        responses=ERROR_RESPONSES,
+    )
+    def undo_module(journey_id: UUID, payload: ModuleUndoRequest, journeys: Journeys):
+        return _guarded(journey_id, lambda: journeys.undo_module(journey_id, payload.revision))
 
     @app.get(
         "/api/v1/blueprint/examples",

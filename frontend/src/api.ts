@@ -187,9 +187,20 @@ const modulePlanSchema = z.object({
   exclude: z.array(moduleItemSchema),
   gates: z.array(moduleItemSchema.extend({ why: z.string() })),
   criteria: z.array(
-    moduleItemSchema.extend({ kind: z.enum(["quantitative", "qualitative"]) }),
+    moduleItemSchema.extend({
+      kind: z.enum(["quantitative", "qualitative"]),
+      needs_target: z.boolean().default(false),
+      target: z.string().nullable().default(null),
+    }),
   ),
   tasks: z.array(z.string()),
+});
+
+const moduleTurnSchema = z.object({
+  role: z.enum(["user", "assistant"]),
+  text: z.string(),
+  changes: z.array(z.string()),
+  rejected: z.array(z.string()),
 });
 
 const journeySchema = z.object({
@@ -245,6 +256,10 @@ const journeySchema = z.object({
     .optional(),
   blueprint: blueprintSchema,
   modules: z.array(modulePlanSchema),
+  module_mode: z.enum(["model", "form", "closed"]).default("closed"),
+  module_chat: z.array(moduleTurnSchema).default([]),
+  module_revision: z.number().default(0),
+  module_undo_count: z.number().default(0),
   can_reopen: z.boolean().optional().default(false),
 });
 
@@ -261,6 +276,11 @@ export type BlueprintNode = BlueprintGraph["nodes"][number];
 export type BlueprintRow = BlueprintNode["rows"][number];
 export type BlueprintStep = NonNullable<BlueprintNode["step"]>;
 export type ModulePlan = Journey["modules"][number];
+export type ModuleTurn = Journey["module_chat"][number];
+export type ModuleChange =
+  | { module: string; field: "goal"; value: string }
+  | { module: string; field: "include" | "exclude"; items: string[] }
+  | { module: string; field: "target"; criterion: string; value: string };
 export type BlueprintNote = Blueprint["notes"][number];
 export type BlueprintExample = z.infer<typeof blueprintExamplesSchema>[number];
 
@@ -386,6 +406,39 @@ export function packageUrl(id: string): string {
 
 export function summaryUrl(id: string): string {
   return `/api/v1/journeys/${id}/summary.md`;
+}
+
+function moduleRequest(
+  journey: Journey,
+  path: "messages" | "edits" | "undo",
+  body: object,
+): Promise<Journey> {
+  return request(
+    `/api/v1/journeys/${journey.journey_id}/modules/${path}`,
+    journeySchema,
+    {
+      method: "POST",
+      body: JSON.stringify({ revision: journey.module_revision, ...body }),
+    },
+  );
+}
+
+export function sendModuleMessage(
+  journey: Journey,
+  text: string,
+): Promise<Journey> {
+  return moduleRequest(journey, "messages", { text: text.trim() });
+}
+
+export function editModule(
+  journey: Journey,
+  change: ModuleChange,
+): Promise<Journey> {
+  return moduleRequest(journey, "edits", { change });
+}
+
+export function undoModule(journey: Journey): Promise<Journey> {
+  return moduleRequest(journey, "undo", {});
 }
 
 export function sendAction(journey: Journey, action: Action): Promise<Journey> {

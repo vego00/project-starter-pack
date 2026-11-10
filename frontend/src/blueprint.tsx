@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { KeyboardEvent, PointerEvent, SVGProps } from "react";
+import type { FormEvent, KeyboardEvent, PointerEvent, SVGProps } from "react";
 import { designViewUrl, getBlueprintExamples } from "./api";
 import { SERVICE_ICONS } from "./serviceIcons";
 import type {
@@ -11,11 +11,14 @@ import type {
   BlueprintRow,
   BlueprintStep,
   Journey,
+  ModuleChange,
   ModulePlan,
 } from "./api";
 
 export type Point = { x: number; y: number };
-type Layer = "agent" | "system" | "order";
+export type Layer = "agent" | "system" | "order";
+/** Returns an error message, or "" when the server saved it. */
+export type ModuleEdit = (change: ModuleChange) => Promise<string>;
 
 const WIDTH = 176;
 const HEIGHT = 96;
@@ -593,24 +596,114 @@ function ModuleDiagram({
 const MODULE_SOURCE: Record<ModulePlan["gates"][number]["source"], string> = {
   rule: "규칙",
   design: "설계 초안",
-  chat: "대화",
+  chat: "내가 정함",
   open: "정할 값",
 };
+
+/** One field of a module, edited in place. Lists are one item per line. */
+function FieldEdit({
+  label,
+  initial,
+  multiline,
+  busy,
+  save,
+}: {
+  label: string;
+  initial: string;
+  multiline?: boolean;
+  busy: boolean;
+  save: (text: string) => Promise<string>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState(initial);
+  const [error, setError] = useState("");
+  if (!open)
+    return (
+      <button
+        className="quiet module-edit"
+        disabled={busy}
+        aria-label={`${label} 고치기`}
+        onClick={() => {
+          setText(initial);
+          setError("");
+          setOpen(true);
+        }}
+      >
+        고치기
+      </button>
+    );
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    const failure = await save(text);
+    if (failure) setError(failure);
+    else setOpen(false);
+  }
+  return (
+    <form className="module-edit-form" onSubmit={(event) => void submit(event)}>
+      {multiline ? (
+        <textarea
+          aria-label={`${label} (한 줄에 하나)`}
+          rows={3}
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+        />
+      ) : (
+        <input
+          aria-label={label}
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+        />
+      )}
+      {error && (
+        <p className="alert" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="row">
+        <button className="primary" disabled={busy}>
+          저장
+        </button>
+        <button type="button" className="quiet" onClick={() => setOpen(false)}>
+          취소
+        </button>
+      </div>
+    </form>
+  );
+}
 
 function ModuleDetail({
   modules,
   open,
+  busy,
+  edit,
   onClose,
   onShowFlow,
 }: {
   modules: ModulePlan[];
   open: string;
+  busy: boolean;
+  edit?: ModuleEdit;
   onClose: () => void;
   onShowFlow: () => void;
 }) {
   const [part, id] = open.split(":");
   const module = modules.find((item) => item.id === id);
   if (!module) return null;
+  const lines = (text: string) =>
+    text
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+  const editList = (field: "include" | "exclude", label: string) =>
+    edit && (
+      <FieldEdit
+        label={`${module.name} ${label}`}
+        initial={module[field].map((item) => item.text).join("\n")}
+        multiline
+        busy={busy}
+        save={(text) => edit({ module: module.id, field, items: lines(text) })}
+      />
+    );
   const names = Object.fromEntries(modules.map((m) => [m.id, m.name]));
   const tag = (source: ModulePlan["gates"][number]["source"]) => (
     <span className={`step-source ${source}`}>{MODULE_SOURCE[source]}</span>
@@ -697,6 +790,16 @@ function ModuleDetail({
           {module.goal
             ? items([module.goal], "")
             : empty("아직 정하지 않았어요.")}
+          {edit && (
+            <FieldEdit
+              label={`${module.name} 목표`}
+              initial={module.goal?.text ?? ""}
+              busy={busy}
+              save={(value) =>
+                edit({ module: module.id, field: "goal", value })
+              }
+            />
+          )}
         </div>
         <div className="module-field">
           <p className="module-label">할 일</p>
@@ -715,10 +818,12 @@ function ModuleDetail({
         <div className="module-field">
           <p className="module-label">이번에 만들 것</p>
           {items(module.include, "아직 정하지 않았어요.")}
+          {editList("include", "이번에 만들 것")}
         </div>
         <div className="module-field">
           <p className="module-label">이번에 안 만들 것</p>
           {items(module.exclude, "아직 없어요.")}
+          {editList("exclude", "이번에 안 만들 것")}
         </div>
       </div>
       <div className="module-field">
@@ -732,9 +837,26 @@ function ModuleDetail({
                     {criterion.kind === "quantitative" ? "정량" : "정성"}
                   </span>
                   {criterion.text}
-                  {criterion.source === "open" && ": 목표치를 정해야 해요"}
+                  {criterion.target
+                    ? `: ${criterion.target}`
+                    : criterion.source === "open" && ": 목표치를 정해야 해요"}
                 </span>
                 {criterion.how && <small>확인: {criterion.how}</small>}
+                {edit && criterion.needs_target && (
+                  <FieldEdit
+                    label={`${criterion.text} 목표치`}
+                    initial={criterion.target ?? ""}
+                    busy={busy}
+                    save={(value) =>
+                      edit({
+                        module: module.id,
+                        field: "target",
+                        criterion: criterion.text,
+                        value,
+                      })
+                    }
+                  />
+                )}
               </span>
               {tag(criterion.source)}
             </li>
@@ -1346,17 +1468,32 @@ export function BlueprintPanel({
   act,
   cardOpen,
   onToggleCard,
+  onLayerChange,
+  editModule,
 }: {
   journey: Journey;
   busy: boolean;
   act: (action: Action) => void;
   cardOpen?: boolean;
   onToggleCard?: () => void;
+  onLayerChange?: (layer: Layer) => void;
+  editModule?: ModuleEdit;
 }) {
   // A finished journey opens on the architecture; a running one follows its card below.
   const [layer, setLayer] = useState<Layer>(
     journey.prompt ? "agent" : "system",
   );
+  const layerChanged = useRef(onLayerChange);
+  layerChanged.current = onLayerChange;
+  const firstLayer = useRef(true);
+  useEffect(() => {
+    // Only a tab someone opened moves the side panel, not the tab the screen started on.
+    if (firstLayer.current) {
+      firstLayer.current = false;
+      return;
+    }
+    layerChanged.current?.(layer);
+  }, [layer]);
   const [showHint] = useState(firstVisit);
   const [lastChange, setLastChange] = useState("");
   const [changed, setChanged] = useState<Set<string>>(new Set());
@@ -1629,9 +1766,11 @@ export function BlueprintPanel({
 
   function startPan(event: PointerEvent<HTMLDivElement>) {
     const canvas = event.currentTarget;
+    // Measured from the canvas: offsetX belongs to whatever was pressed, often the wider drawing.
+    const frame = canvas.getBoundingClientRect();
     const onScrollbar =
-      event.nativeEvent.offsetX > canvas.clientWidth ||
-      event.nativeEvent.offsetY > canvas.clientHeight;
+      event.clientX - frame.left > canvas.clientWidth ||
+      event.clientY - frame.top > canvas.clientHeight;
     const onNode = (event.target as Element).closest(
       '[role="button"], .bp-stack-head',
     );
@@ -1650,18 +1789,20 @@ export function BlueprintPanel({
   function movePan(event: PointerEvent<HTMLDivElement>) {
     const start = pan.current;
     if (!start) return;
+    const canvas = event.currentTarget;
     const dx = event.clientX - start.x;
     const dy = event.clientY - start.y;
-    if (zoom === null) {
-      // A fitted graph has nothing to scroll, so the view itself moves.
-      setOffset({
-        x: start.offset.x + dx / start.scale,
-        y: start.offset.y + dy / start.scale,
-      });
-      return;
-    }
-    event.currentTarget.scrollLeft = start.left - dx;
-    event.currentTarget.scrollTop = start.top - dy;
+    // Scroll where there is room to; otherwise (fitted, or zoomed out) move the view itself.
+    const scrollsX =
+      zoom !== null && canvas.scrollWidth > canvas.clientWidth + 1;
+    const scrollsY =
+      zoom !== null && canvas.scrollHeight > canvas.clientHeight + 1;
+    if (scrollsX) canvas.scrollLeft = start.left - dx;
+    if (scrollsY) canvas.scrollTop = start.top - dy;
+    setOffset({
+      x: scrollsX ? start.offset.x : start.offset.x + dx / start.scale,
+      y: scrollsY ? start.offset.y : start.offset.y + dy / start.scale,
+    });
   }
 
   function endPan() {
@@ -1953,6 +2094,8 @@ export function BlueprintPanel({
         <ModuleDetail
           modules={modules}
           open={selected}
+          busy={busy}
+          edit={editModule}
           onClose={() => setSelected(null)}
           onShowFlow={() => {
             setSelected(null);

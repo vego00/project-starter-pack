@@ -1182,3 +1182,147 @@ describe("screen changes and the main action", () => {
     expect(screen.queryByText(/DiV/)).not.toBeInTheDocument();
   });
 });
+
+describe("module conversation", () => {
+  const plan = (goal: string | null = null) => [
+    {
+      id: "agent",
+      name: "에이전트 흐름",
+      stack: [],
+      cards: [],
+      column: 0,
+      after: [],
+      goal: goal ? { text: goal, how: null, source: "chat" } : null,
+      include: [],
+      exclude: [],
+      gates: [{ text: "평가 사례", how: null, source: "rule", why: "이유" }],
+      criteria: [
+        {
+          text: "답변 응답 시간",
+          how: "시간을 잰다",
+          source: "open",
+          kind: "quantitative",
+          needs_target: true,
+          target: null,
+        },
+      ],
+      tasks: [],
+    },
+  ];
+  const finished = (overrides = {}) =>
+    journey({
+      status: "completed",
+      prompt: null,
+      cards: cards("decided", "decided"),
+      can_reopen: true,
+      modules: plan(),
+      module_mode: "model",
+      module_revision: 3,
+      ...overrides,
+    });
+
+  async function open(view: unknown, reply: Handler) {
+    const user = userEvent.setup();
+    const mock = stubFetch((url, init) =>
+      url.includes("/modules/")
+        ? reply(url, init)
+        : Response.json(view, { status: 201 }),
+    );
+    render(<App />);
+    await user.type(
+      screen.getByLabelText("프로젝트 아이디어"),
+      "강의 자료를 찾아 답하는 서비스",
+    );
+    await user.click(screen.getByRole("button", { name: "결정 시작하기" }));
+    await screen.findByRole("heading", { name: "모든 결정을 마쳤어요" });
+    return { user, mock };
+  }
+
+  it("opens the chat with the build order and fills the plan from a reply", async () => {
+    const answered = finished({
+      modules: plan("강의 자료로 답한다"),
+      module_revision: 4,
+      module_undo_count: 1,
+      module_chat: [
+        { role: "user", text: "강의 자료로 답해요", changes: [], rejected: [] },
+        {
+          role: "assistant",
+          text: "목표를 채웠어요.",
+          changes: ["에이전트 흐름 · 목표"],
+          rejected: [],
+        },
+      ],
+    });
+    const { user, mock } = await open(finished(), () =>
+      Response.json(answered),
+    );
+
+    expect(
+      screen.getByRole("complementary", { name: "결과 요약" }),
+    ).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "만드는 순서" }));
+    const side = screen.getByRole("complementary", { name: "모듈 대화" });
+    await user.type(
+      within(side).getByLabelText("모듈에 대해 말하기"),
+      "강의 자료로 답해요{Enter}",
+    );
+
+    const sent = mock.mock.calls.find(([url]) => url.includes("/modules/"))!;
+    expect(sent[0]).toContain("/modules/messages");
+    expect(bodyOf(sent)).toEqual({ revision: 3, text: "강의 자료로 답해요" });
+    expect(await within(side).findByText("목표를 채웠어요.")).toBeVisible();
+    expect(within(side).getByText("에이전트 흐름 · 목표")).toBeVisible();
+
+    await user.click(within(side).getByRole("button", { name: /되돌리기/ }));
+    expect(mock.mock.calls.at(-1)![0]).toContain("/modules/undo");
+
+    await user.click(within(side).getByRole("button", { name: "결과 요약" }));
+    expect(
+      screen.getByRole("complementary", { name: "결과 요약" }),
+    ).toBeVisible();
+  });
+
+  it("puts the sentence back when no reply could be made", async () => {
+    const { user } = await open(finished(), () =>
+      errorResponse(503, "module_reply_failed", "답을 만들지 못했어요."),
+    );
+
+    await user.click(screen.getByRole("button", { name: "만드는 순서" }));
+    const box = screen.getByLabelText("모듈에 대해 말하기");
+    await user.type(box, "목표는 이거예요{Enter}");
+
+    expect(await screen.findByText("답을 만들지 못했어요.")).toBeVisible();
+    expect(box).toHaveValue("목표는 이거예요");
+  });
+
+  it("fills a target with a form when there is no model", async () => {
+    const { user, mock } = await open(finished({ module_mode: "form" }), () =>
+      errorResponse(422, "module_edit_rejected", "정할 값으로 남겨 뒀어요."),
+    );
+
+    await user.click(screen.getByRole("button", { name: "만드는 순서" }));
+    expect(screen.queryByLabelText("모듈에 대해 말하기")).toBeNull();
+    expect(screen.getByText(/대화 대신 직접 채워요/)).toBeVisible();
+
+    await user.click(
+      screen.getByRole("button", { name: "1단계 에이전트 흐름, 정할 값 1개" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "답변 응답 시간 목표치 고치기" }),
+    );
+    await user.type(screen.getByLabelText("답변 응답 시간 목표치"), "빨리");
+    await user.click(screen.getByRole("button", { name: "저장" }));
+
+    expect(bodyOf(mock.mock.calls.at(-1)!)).toEqual({
+      revision: 3,
+      change: {
+        module: "agent",
+        field: "target",
+        criterion: "답변 응답 시간",
+        value: "빨리",
+      },
+    });
+    expect(await screen.findByText("정할 값으로 남겨 뒀어요.")).toBeVisible();
+    expect(screen.getByLabelText("답변 응답 시간 목표치")).toHaveValue("빨리");
+  });
+});
