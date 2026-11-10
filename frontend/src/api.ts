@@ -111,6 +111,30 @@ const blueprintGraphSchema = z.object({
           card_id: z.string(),
         }),
       ),
+      step: z
+        .object({
+          line: z.string(),
+          fixed: z.array(z.string()),
+          unknown: z.array(z.string()),
+          inputs: z.array(z.string()),
+          outputs: z.array(z.string()),
+          how: z.string().nullable(),
+          tools: z.array(
+            z.object({
+              name: z.string(),
+              access: z.enum(["read", "write", "external_write"]),
+              reason: z.string(),
+            }),
+          ),
+          done_when: z.string().nullable(),
+          on_failure: z.string().nullable(),
+          checks: z.array(z.string()),
+          first_task: z.string().nullable(),
+          decisions: z.array(
+            z.object({ card_id: z.string(), label: z.string() }),
+          ),
+        })
+        .nullable(),
     }),
   ),
   edges: z.array(
@@ -211,6 +235,7 @@ export type Blueprint = Journey["blueprint"];
 export type BlueprintGraph = Blueprint["agent"];
 export type BlueprintNode = BlueprintGraph["nodes"][number];
 export type BlueprintRow = BlueprintNode["rows"][number];
+export type BlueprintStep = NonNullable<BlueprintNode["step"]>;
 export type BlueprintNote = Blueprint["notes"][number];
 export type BlueprintExample = z.infer<typeof blueprintExamplesSchema>[number];
 

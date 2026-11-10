@@ -256,6 +256,21 @@ def test_an_answer_without_a_service_opens_from_the_line_below_the_graph(page: P
     expect(page.get_by_role("heading", name="문서를 의미로 검색하는")).to_be_visible()
 
 
+def test_a_flow_step_explains_itself_and_opens_its_decision(page: Page):
+    start(page)
+    skip_clarify(page)
+    choose_surface(page)
+    choose(page, "에이전트를 어떤 구조로 구성할까요?", "고정 파이프라인")
+    page.get_by_role("button", name="에이전트 흐름", exact=True).click()
+
+    page.get_by_role("button", name="에이전트 처리 단계 설명 보기").click()
+
+    expect(page.get_by_text("아직 모름")).to_be_visible()
+    shot(page, "step-detail")
+    page.get_by_role("button", name=re.compile("^Agent 구조: .* 다시 고르기$")).click()
+    expect(page.get_by_role("heading", name="에이전트를 어떤 구조로 구성할까요?")).to_be_visible()
+
+
 def test_the_graph_stays_put_while_the_card_scrolls(browser: Browser):
     context = browser.new_context(viewport={"width": 1280, "height": 700}, locale="ko-KR")
     page = context.new_page()

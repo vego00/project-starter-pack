@@ -9,17 +9,22 @@ import type {
   BlueprintNode,
   BlueprintNote,
   BlueprintRow,
+  BlueprintStep,
   Journey,
 } from "./api";
 
 export type Point = { x: number; y: number };
 type Layer = "agent" | "system";
 
-const WIDTH = 148;
-const HEIGHT = 58;
+const WIDTH = 176;
+const HEIGHT = 96;
 const GAP_X = 66;
 const GAP_Y = 34;
 const PAD = 26;
+// Room above and below the row of steps for lines that loop back or skip ahead.
+const STEP_LANE_ROOM = 34;
+const STEP_LANE_FIRST = 20;
+const STEP_LANE_NEXT = 14;
 const DRAG_START = 4;
 const MAX_LABEL = 11;
 // Below this the labels are too small to read, so a narrow panel scrolls instead.
@@ -85,7 +90,7 @@ export function layoutBlueprint(graph: BlueprintGraph): Record<string, Point> {
     row.forEach((id, index) => {
       points[id] = {
         x: PAD + at * (WIDTH + GAP_X),
-        y: PAD + (index + offset) * (HEIGHT + GAP_Y),
+        y: PAD + STEP_LANE_ROOM + (index + offset) * (HEIGHT + GAP_Y),
       };
     });
   }
@@ -228,6 +233,20 @@ const noteNode = (note: BlueprintNote): BlueprintNode => ({
   icon: null,
   group: note.group,
   rows: [],
+  step: null,
+});
+
+const decisionNode = (
+  decision: BlueprintStep["decisions"][number],
+): BlueprintNode => ({
+  id: `decision/${decision.card_id}`,
+  label: decision.label,
+  kind: "sys",
+  card_id: decision.card_id,
+  icon: null,
+  group: null,
+  rows: [],
+  step: null,
 });
 
 /** Every part of the graph that answers one decision. */
@@ -282,19 +301,245 @@ export function layoutSystem(graph: BlueprintGraph): Record<string, Point> {
   return points;
 }
 
-function wrapLabel(label: string): string[] {
+function wrapLabel(label: string, width = 12): string[] {
   const lines: string[] = [];
   for (const word of label.split(" ")) {
     const last = lines[lines.length - 1];
-    if (last !== undefined && `${last} ${word}`.length <= 12) {
+    if (last !== undefined && `${last} ${word}`.length <= width) {
       lines[lines.length - 1] = `${last} ${word}`;
     } else {
       lines.push(word);
     }
   }
   return lines.length > 2
-    ? [lines[0], `${lines.slice(1).join(" ").slice(0, 11)}…`]
+    ? [
+        lines[0],
+        `${lines
+          .slice(1)
+          .join(" ")
+          .slice(0, width - 1)}…`,
+      ]
     : lines;
+}
+
+/** What a step says on its face: a draft is named by us, a design step by what it does. */
+function stepText(node: BlueprintNode, isDraft: boolean) {
+  if (!node.step)
+    return { title: wrapLabel(node.label, 13), sub: [], code: "" };
+  return isDraft
+    ? {
+        title: wrapLabel(node.label, 13),
+        sub: wrapLabel(node.step.line, 17),
+        code: "",
+      }
+    : {
+        title: wrapLabel(node.step.line, 13),
+        sub: [],
+        code: shortLabel(node.label, 24),
+      };
+}
+
+/** Next-column lines stay curves; one that loops back or skips a step goes around the row. */
+function stepRoutes(
+  graph: BlueprintGraph,
+  point: (id: string) => Point,
+): (DrawnEdge & { d: string; labelX: number; labelY: number })[] {
+  const points = graph.nodes.map((node) => point(node.id));
+  const top = Math.min(...points.map((p) => p.y));
+  const bottom = Math.max(...points.map((p) => p.y)) + HEIGHT;
+  let over = 0;
+  let under = 0;
+  return mergeEdges(graph.edges).map((edge) => {
+    const from = point(edge.source);
+    const to = point(edge.target);
+    const back = to.x <= from.x;
+    const skips = points.some((p) => p.x > from.x + 1 && p.x < to.x - 1);
+    if (!back && !skips) {
+      const x1 = from.x + WIDTH;
+      const y1 = from.y + HEIGHT / 2;
+      const x2 = to.x;
+      const y2 = to.y + HEIGHT / 2;
+      const bend = Math.max(36, Math.abs(x2 - x1) / 2);
+      return {
+        ...edge,
+        d: `M${x1} ${y1}C${x1 + bend} ${y1} ${x2 - bend} ${y2} ${x2 - 6} ${y2}`,
+        labelX: (x1 + x2) / 2,
+        labelY: (y1 + y2) / 2 - 5,
+      };
+    }
+    const lane = back
+      ? bottom + STEP_LANE_FIRST + under++ * STEP_LANE_NEXT
+      : top - STEP_LANE_FIRST - over++ * STEP_LANE_NEXT;
+    // Apart at the ends, so a step that loops to itself still draws a line.
+    const shift = back ? 24 : 0;
+    const startX = from.x + WIDTH / 2 + shift;
+    const endX = to.x + WIDTH / 2 - shift;
+    return {
+      ...edge,
+      d: roundedPath([
+        { x: startX, y: back ? from.y + HEIGHT : from.y },
+        { x: startX, y: lane },
+        { x: endX, y: lane },
+        { x: endX, y: back ? to.y + HEIGHT + 6 : to.y - 6 },
+      ]),
+      labelX: (startX + endX) / 2,
+      labelY: lane + 4,
+    };
+  });
+}
+
+const ACCESS_LABEL: Record<BlueprintStep["tools"][number]["access"], string> = {
+  read: "읽기",
+  write: "내부 쓰기",
+  external_write: "외부 쓰기 (승인 필요)",
+};
+
+function StepRow({ label, items }: { label: string; items: string[] }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="step-row">
+      <dt>{label}</dt>
+      <dd>
+        <ul>
+          {items.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      </dd>
+    </div>
+  );
+}
+
+function CodeRow({ label, items }: { label: string; items: string[] }) {
+  return (
+    <div className="step-row">
+      <dt>{label}</dt>
+      <dd>
+        {items.length === 0 ? (
+          "없어요."
+        ) : (
+          <ul>
+            {items.map((item) => (
+              <li key={item}>
+                <code>{item}</code>
+              </li>
+            ))}
+          </ul>
+        )}
+      </dd>
+    </div>
+  );
+}
+
+const present = (value: string | null) => (value ? [value] : []);
+
+function StepDetail({
+  node,
+  isDraft,
+  canOpen,
+  open,
+  onClose,
+}: {
+  node: BlueprintNode;
+  isDraft: boolean;
+  canOpen: (target: BlueprintNode) => boolean;
+  open: (target: BlueprintNode) => void;
+  onClose: () => void;
+}) {
+  const step = node.step!;
+  return (
+    <div
+      className="step-detail"
+      role="region"
+      aria-label={`${node.label} 설명`}
+    >
+      <div className="step-head">
+        <div>
+          <p className="step-title">
+            {KIND_LABEL[node.kind]} ·{" "}
+            {isDraft ? node.label : <code>{node.label}</code>}
+          </p>
+          <p>{step.line}</p>
+        </div>
+        <button className="quiet" onClick={onClose}>
+          설명 닫기
+        </button>
+      </div>
+      {isDraft ? (
+        <div className="step-columns">
+          <dl>
+            <StepRow label="확정된 것" items={step.fixed} />
+          </dl>
+          <dl className="step-open">
+            <StepRow label="아직 모름" items={step.unknown} />
+            <StepRow
+              label="언제 정해지나"
+              items={["결정을 모두 마치면 생성되는 설계에서 정해져요."]}
+            />
+          </dl>
+        </div>
+      ) : (
+        <div className="step-columns">
+          <dl>
+            <CodeRow label="입력" items={step.inputs} />
+            <CodeRow label="출력" items={step.outputs} />
+            <StepRow label="구현 방식" items={present(step.how)} />
+            <div className="step-row">
+              <dt>도구와 권한</dt>
+              <dd>
+                {step.tools.length === 0 ? (
+                  "쓰지 않아요."
+                ) : (
+                  <ul>
+                    {step.tools.map((tool) => (
+                      <li key={tool.name}>
+                        <code>{tool.name}</code>{" "}
+                        <span
+                          className={
+                            tool.access === "external_write"
+                              ? "step-access external"
+                              : "step-access"
+                          }
+                        >
+                          {ACCESS_LABEL[tool.access]}
+                        </span>
+                        <br />
+                        {tool.reason}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </dd>
+            </div>
+          </dl>
+          <dl>
+            <StepRow label="완료 기준" items={present(step.done_when)} />
+            <StepRow label="실패하면" items={present(step.on_failure)} />
+            <StepRow label="확인 사례" items={step.checks} />
+            <StepRow label="첫 작업" items={present(step.first_task)} />
+          </dl>
+        </div>
+      )}
+      {step.decisions.length > 0 && (
+        <div className="step-decisions">
+          <span>이 칸을 만든 결정</span>
+          {step.decisions.map((decision) => {
+            const target = decisionNode(decision);
+            return (
+              <button
+                key={decision.card_id}
+                disabled={!canOpen(target)}
+                aria-label={`${decision.label} 다시 고르기`}
+                onClick={() => open(target)}
+              >
+                {decision.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function ServiceGlyph({ icon }: { icon: string | null }) {
@@ -630,6 +875,7 @@ const SAMPLE_NODE = (
     label,
     kind: "sys",
     card_id: null,
+    step: null,
     icon,
     group,
     rows: [],
@@ -862,14 +1108,22 @@ export function BlueprintPanel({
     !cardOf(node)?.editing &&
     (journey.prompt?.type === "decision" || journey.can_reopen === true);
 
-  function pick(node: BlueprintNode) {
-    setSelected(node.id);
-    setLastChange("");
+  function openCard(node: BlueprintNode) {
     if (canFocus(node)) {
       act({ action: "focus", card_id: node.card_id! });
     } else if (canChange(node)) {
       act({ action: "revise", card_id: node.card_id! });
     }
+  }
+
+  function pick(node: BlueprintNode) {
+    setLastChange("");
+    if (node.step) {
+      setSelected(selected === node.id ? null : node.id);
+      return;
+    }
+    setSelected(node.id);
+    openCard(node);
   }
 
   function onPointerDown(event: PointerEvent<SVGGElement>, handle: string) {
@@ -947,7 +1201,7 @@ export function BlueprintPanel({
     const size = isSystem ? sizeOf(node) : { width: WIDTH, height: HEIGHT };
     return { right: at.x + size.width, bottom: at.y + size.height };
   });
-  const extra = PAD + (isSystem ? BOX_PAD : 0);
+  const extra = PAD + (isSystem ? BOX_PAD : STEP_LANE_ROOM);
   const width = Math.max(0, ...extents.map((e) => e.right)) + extra;
   const height = Math.max(0, ...extents.map((e) => e.bottom)) + extra;
   function zoomAt(factor: number, clientX: number, clientY: number) {
@@ -1035,7 +1289,8 @@ export function BlueprintPanel({
   const interactions = (node: BlueprintNode, handle = node.id) => ({
     tabIndex: 0,
     role: "button",
-    "aria-label": `${KIND_LABEL[node.kind]} ${node.label}${canChange(node) ? " 다시 고르기" : ""}`,
+    "aria-label": `${KIND_LABEL[node.kind]} ${node.label}${node.step ? " 설명 보기" : canChange(node) ? " 다시 고르기" : ""}`,
+    "aria-expanded": node.step ? selected === node.id : undefined,
     onPointerDown: (event: PointerEvent<SVGGElement>) =>
       onPointerDown(event, handle),
     onPointerMove,
@@ -1053,7 +1308,7 @@ export function BlueprintPanel({
   const stateClass = (node: BlueprintNode) =>
     [
       selected === node.id && "selected",
-      (canFocus(node) || canChange(node)) && "editable",
+      (node.step || canFocus(node) || canChange(node)) && "editable",
       (cardOf(node)?.state === "current" || cardOf(node)?.editing) && "current",
       !example && changed.has(node.id) && "changed",
       cardOf(node)?.needs_review && "review",
@@ -1186,33 +1441,27 @@ export function BlueprintPanel({
             />
           )}
           {!isSystem &&
-            mergeEdges(graph.edges).map((edge) => {
-              const from = point(edge.source);
-              const to = point(edge.target);
-              const x1 = from.x + WIDTH;
-              const y1 = from.y + HEIGHT / 2;
-              const x2 = to.x;
-              const y2 = to.y + HEIGHT / 2;
-              const bend = Math.max(36, Math.abs(x2 - x1) / 2);
-              return (
-                <g key={`${edge.source}>${edge.target}`}>
-                  <path
-                    className={edge.dashed ? "bp-edge dashed" : "bp-edge"}
-                    d={`M${x1} ${y1}C${x1 + bend} ${y1} ${x2 - bend} ${y2} ${x2 - 6} ${y2}`}
-                    markerEnd="url(#blueprint-arrow)"
-                  />
-                  <EdgeLabel
-                    x={(x1 + x2) / 2}
-                    y={(y1 + y2) / 2 - 5}
-                    labels={edge.labels}
-                  />
-                </g>
-              );
-            })}
+            stepRoutes(graph, point).map((edge) => (
+              <g key={`${edge.source}>${edge.target}`}>
+                <path
+                  className={edge.dashed ? "bp-edge dashed" : "bp-edge"}
+                  d={edge.d}
+                  markerEnd="url(#blueprint-arrow)"
+                />
+                <EdgeLabel
+                  x={edge.labelX}
+                  y={edge.labelY}
+                  labels={edge.labels}
+                />
+              </g>
+            ))}
           {!isSystem &&
             graph.nodes.map((node) => {
               const at = point(node.id);
               const review = cardOf(node)?.needs_review;
+              const text = stepText(node, blueprint.agent_is_draft);
+              const firstLine = 44;
+              const afterTitle = firstLine + text.title.length * 17;
               return (
                 <g
                   key={node.id}
@@ -1226,17 +1475,48 @@ export function BlueprintPanel({
                     d={`M0 ${-HIT_PAD}H${WIDTH}V${HEIGHT + HIT_PAD}H0Z`}
                   />
                   <rect width={WIDTH} height={HEIGHT} rx={7} />
-                  <text className="bp-kind" x={WIDTH / 2} y={19}>
+                  <text className="bp-kind" x={WIDTH / 2} y={22}>
                     {review ? "다시 확인" : KIND_LABEL[node.kind]}
                   </text>
-                  <text className="bp-label" x={WIDTH / 2} y={41}>
-                    {shortLabel(node.label)}
-                  </text>
+                  {text.title.map((line, index) => (
+                    <text
+                      className="bp-label"
+                      key={line}
+                      x={WIDTH / 2}
+                      y={firstLine + index * 17}
+                    >
+                      {line}
+                    </text>
+                  ))}
+                  {text.sub.map((line, index) => (
+                    <text
+                      className="bp-kind"
+                      key={line}
+                      x={WIDTH / 2}
+                      y={afterTitle + index * 14}
+                    >
+                      {line}
+                    </text>
+                  ))}
+                  {text.code && (
+                    <text className="bp-code" x={WIDTH / 2} y={afterTitle + 2}>
+                      {text.code}
+                    </text>
+                  )}
                 </g>
               );
             })}
         </svg>
       </div>
+      {!isSystem && current?.step && (
+        <StepDetail
+          node={current}
+          isDraft={blueprint.agent_is_draft}
+          canOpen={(target) => canFocus(target) || canChange(target)}
+          open={openCard}
+          onClose={() => setSelected(null)}
+        />
+      )}
       {notes.length > 0 && (
         <div className="bp-notes" role="group" aria-label="칸이 없는 결정">
           {SERVICE_GROUPS.filter((group) =>
@@ -1272,7 +1552,7 @@ export function BlueprintPanel({
           <span>
             <strong>방금 반영:</strong> {lastChange}
           </span>
-        ) : current ? (
+        ) : current && !current.step ? (
           <>
             <strong>{current.label}</strong>
             {currentCard && (
@@ -1285,8 +1565,10 @@ export function BlueprintPanel({
         ) : (
           showHint && (
             <span className="muted">
-              아이콘을 누르면 그 결정을 고칠 수 있어요. Ctrl+휠로 확대·축소, 빈
-              곳을 끌어 화면을 옮겨요.
+              {isSystem
+                ? "아이콘을 누르면 그 결정을 고칠 수 있어요."
+                : "칸을 누르면 구현 설명이 열려요."}{" "}
+              Ctrl+휠로 확대·축소, 빈 곳을 끌어 화면을 옮겨요.
             </span>
           )
         )}

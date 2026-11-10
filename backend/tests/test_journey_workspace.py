@@ -6,8 +6,9 @@ from uuid import UUID
 
 import pytest
 from app.config import Settings
+from app.journey.blueprint import _edge_label
 from app.journey.constraints import displaced
-from app.journey.design import DesignState, ServiceDesign
+from app.journey.design import DesignState, Edge, LoopLimit, ServiceDesign
 from app.journey.design_constraints import derive_design_constraints
 from app.journey.design_edit import DesignEdit, apply_design_edit, keep_human_edits
 from app.journey.state import JourneyState
@@ -783,3 +784,89 @@ def test_every_decision_on_the_system_graph_has_somewhere_to_press(client):
         if card["state"] in ("decided", "implied") and card["layer"] != "agent"
     }
     assert decided <= reachable
+
+
+def test_the_service_box_stacks_its_parts_in_run_order(client):
+    system = example_blueprint(client, "team")["system"]
+
+    app = [node["id"] for node in system["nodes"] if node["group"] == "app"]
+
+    assert app == ["api", "queue", "worker", "runner"]
+
+
+def agent_step(view, node_id):
+    nodes = view["blueprint"]["agent"]["nodes"]
+    return next(node for node in nodes if node["id"] == node_id)["step"]
+
+
+def test_a_step_before_the_design_says_only_what_the_decisions_settle(client):
+    view = ok(client, start(client), action="focus", card_id="agent.topology")
+    view = ok(client, view, action="select", option_id="pipeline")
+
+    step = agent_step(view, "core")
+
+    assert "고정 파이프라인: 정해진 순서대로 여러 단계를 코드로 연결합니다." in step["fixed"]
+    assert "완료 기준" in step["unknown"]
+    assert step["inputs"] == [] and step["done_when"] is None
+    assert [d["card_id"] for d in step["decisions"]] == ["agent.topology"]
+
+
+def test_an_undecided_step_has_no_explanation_and_opens_its_card(client):
+    node = next(
+        node
+        for node in start(client)["blueprint"]["agent"]["nodes"]
+        if node["id"] == "blank-agent.topology"
+    )
+
+    assert node["step"] is None
+    assert node["card_id"] == "agent.topology"
+
+
+def test_a_step_after_the_design_carries_how_to_build_it(client):
+    view = decide_all(client, start(client))
+    state = JourneyState.model_validate(
+        client.app.state.journeys._snapshot(UUID(view["journey_id"])).values
+    )
+
+    for node in state.design.current.nodes:
+        step = agent_step(view, node.id)
+        assert step["line"] == node.responsibility
+        assert step["inputs"] == [f"{port.name}: {port.type}" for port in node.inputs]
+        assert step["outputs"] == [f"{port.name}: {port.type}" for port in node.outputs]
+        assert step["done_when"] == node.done_when
+        assert step["on_failure"] == node.on_failure
+        assert [tool["name"] for tool in step["tools"]] == [tool.name for tool in node.tools]
+        assert step["how"]
+
+
+def test_a_step_names_the_decisions_behind_it_and_only_those_made(client):
+    view = decide_all(client, start(client))
+    decided = {c["card_id"] for c in view["cards"] if c["state"] in ("decided", "implied")}
+
+    for node in view["blueprint"]["agent"]["nodes"]:
+        assert {d["card_id"] for d in node["step"]["decisions"]} <= decided
+
+
+def test_only_the_edge_that_loops_back_states_the_limit(client):
+    view = decide_all(client, start(client))
+    state = JourneyState.model_validate(
+        client.app.state.journeys._snapshot(UUID(view["journey_id"])).values
+    )
+    design = state.design.current.model_copy(
+        update={
+            "workflow": state.design.current.workflow.model_copy(
+                update={
+                    "loop_limits": [
+                        LoopLimit(node_ids=["a", "b"], max_iterations=2, on_exceeded="a")
+                    ]
+                }
+            )
+        }
+    )
+    order = {"a": 0, "b": 1}
+
+    back = _edge_label(design, Edge(source="b", target="a", condition="수정 요청"), order)
+    forward = _edge_label(design, Edge(source="a", target="b", condition="검토"), order)
+
+    assert back == "수정 요청 (최대 2회)"
+    assert forward == "검토"

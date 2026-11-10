@@ -8,6 +8,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from app.journey.design import Edge as DesignEdge
+from app.journey.design import Node as DesignNode
 from app.journey.design import ServiceDesign
 from app.journey.state import JourneyState
 from app.registry.loader import Registry
@@ -56,6 +58,17 @@ POSTGRES_ROLES = (
     ("data.checkpointer", "상태 저장", "postgres"),
     ("data.vector_store", "벡터 검색", "pgvector"),
 )
+CODE_STEP = "모델을 호출하지 않는 코드 단계예요."
+UNKNOWN_AGENT_STEP = [
+    "단계가 몇 개이고 각각 무슨 일을 하는지",
+    "단계별 입력과 출력",
+    "쓰는 도구와 권한",
+    "완료 기준",
+]
+DECISIONS_BY_KIND = {
+    "agent": ("agent.topology", "model.provider"),
+    "human": ("agent.hitl", "data.checkpointer"),
+}
 
 
 class BlueprintRow(BaseModel):
@@ -74,6 +87,34 @@ class BlueprintNote(BaseModel):
     card_id: str
 
 
+class StepTool(BaseModel):
+    name: str
+    access: Literal["read", "write", "external_write"]
+    reason: str
+
+
+class StepDecision(BaseModel):
+    card_id: str
+    label: str
+
+
+class BlueprintStep(BaseModel):
+    """What building a step takes. Before a design exists, only what the decisions settle."""
+
+    line: str
+    fixed: list[str] = []
+    unknown: list[str] = []
+    inputs: list[str] = []
+    outputs: list[str] = []
+    how: str | None = None
+    tools: list[StepTool] = []
+    done_when: str | None = None
+    on_failure: str | None = None
+    checks: list[str] = []
+    first_task: str | None = None
+    decisions: list[StepDecision] = []
+
+
 class BlueprintNode(BaseModel):
     id: str
     label: str
@@ -82,6 +123,7 @@ class BlueprintNode(BaseModel):
     icon: str | None = None
     group: Group | None = None
     rows: list[BlueprintRow] = []
+    step: BlueprintStep | None = None
 
 
 class BlueprintEdge(BaseModel):
@@ -126,6 +168,7 @@ class _Canvas:
         icon: str | None = None,
         group: Group | None = None,
         rows: list[BlueprintRow] | None = None,
+        step: BlueprintStep | None = None,
     ) -> str:
         self.graph.nodes.append(
             BlueprintNode(
@@ -136,6 +179,7 @@ class _Canvas:
                 icon=icon,
                 group=group,
                 rows=rows or [],
+                step=step,
             )
         )
         return node_id
@@ -159,6 +203,25 @@ class _Canvas:
 
     def option_name(self, card_id: str) -> str:
         return self.registry.card(card_id).option(self.choices[card_id]).name
+
+    def decided(self, *card_ids: str) -> list[StepDecision]:
+        return [
+            StepDecision(
+                card_id=card_id,
+                label=f"{self.registry.card(card_id).title}: {self.option_name(card_id)}",
+            )
+            for card_id in dict.fromkeys(card_ids)
+            if card_id in self.choices and card_id in self.registry.card_ids
+        ]
+
+    def setting(self, card_id: str, label: str) -> list[str]:
+        """One line stating a decision other than the step's own, once it is made."""
+        return [f"{label}: {self.option_name(card_id)}"] if card_id in self.choices else []
+
+    def settled(self, card_id: str) -> list[str]:
+        """What the chosen option commits the step to, in the card's own words."""
+        option = self.registry.card(card_id).option(self.choices[card_id])
+        return [f"{option.name}: {option.summary}", *option.pros[:1], *option.cons[:1]]
 
     def note(self, card_id: str, group: Group) -> None:
         label = f"{self.registry.card(card_id).title}: {self.option_name(card_id)}"
@@ -215,9 +278,8 @@ def _system(canvas: _Canvas) -> None:
         "surface", "사용자 화면", "sys", icon="browser", group="client"
     )
     api = canvas.node("api", "백엔드 API", "sys", icon="server", group="app")
-    runner = canvas.node(
-        "runner", "에이전트 실행", "sys", "agent.topology", icon="agent", group="app"
-    )
+    # Drawn after the execution parts below, so the service box reads top to bottom in run order.
+    runner = "runner"
     canvas.edge(users, surface)
     canvas.edge(surface, api, "요청")
 
@@ -236,6 +298,7 @@ def _system(canvas: _Canvas) -> None:
     else:
         middle = canvas.option_node("backend.execution", "execution", "작업 실행?", "app")
         canvas.chain(api, middle, runner)
+    canvas.node(runner, "에이전트 실행", "sys", "agent.topology", icon="agent", group="app")
 
     if model := canvas.option_node("model.provider", "model", "모델?", "model"):
         canvas.edge(runner, model, "모델 호출")
@@ -261,21 +324,65 @@ def _system(canvas: _Canvas) -> None:
         canvas.edge(runner, tracing, "실행 추적", dashed=True)
 
 
+def _agent_step(canvas: _Canvas, line: str) -> BlueprintStep:
+    topology = ("agent.topology",) if canvas.choice("agent.topology") else ()
+    return BlueprintStep(
+        line=line,
+        fixed=[
+            *(canvas.settled("agent.topology") if topology else []),
+            *canvas.setting("model.provider", "모델"),
+        ],
+        unknown=UNKNOWN_AGENT_STEP,
+        decisions=canvas.decided(*topology, "model.provider"),
+    )
+
+
+def _review_step(canvas: _Canvas, hitl: str) -> BlueprintStep:
+    option = canvas.registry.card("agent.hitl").option(hitl)
+    return BlueprintStep(
+        line=option.summary,
+        fixed=[
+            *canvas.settled("agent.hitl"),
+            *canvas.setting("data.checkpointer", "기다리는 동안 상태 저장"),
+        ],
+        unknown=(
+            ["무엇을 승인하는지", "거절하면 어디로 돌아가는지"]
+            if hitl == "approval"
+            else ["언제 묻는지", "답이 없으면 어떻게 하는지"]
+        ),
+        decisions=canvas.decided("agent.hitl", "data.checkpointer"),
+    )
+
+
 def _agent_draft(canvas: _Canvas) -> None:
-    start = canvas.node("input", "입력 처리", "code")
+    start = canvas.node(
+        "input",
+        "입력 처리",
+        "code",
+        step=BlueprintStep(
+            line="요청을 받아 다음 단계로 넘겨요",
+            fixed=[CODE_STEP],
+            unknown=["어떤 입력을 받는지", "입력을 어떻게 검사하는지"],
+        ),
+    )
     topology = canvas.choice("agent.topology")
     if not canvas.in_play("agent.topology"):
-        core = canvas.node("core", "에이전트", "agent")
+        step = _agent_step(canvas, "에이전트가 작업을 처리해요")
+        core = canvas.node("core", "에이전트", "agent", step=step)
     elif topology is None:
         core = canvas.node("blank-agent.topology", "에이전트 구조?", "blank", "agent.topology")
-    elif topology in ("supervisor", "hierarchical"):
-        core = canvas.node("core", "Supervisor", "agent", "agent.topology")
-        worker = canvas.node("worker", "담당 에이전트", "agent", "agent.topology")
-        canvas.edge(core, worker, "라우팅")
-    elif topology == "pipeline":
-        core = canvas.node("core", "처리 단계", "agent", "agent.topology")
     else:
-        core = canvas.node("core", "에이전트", "agent", "agent.topology")
+        step = _agent_step(canvas, canvas.registry.card("agent.topology").option(topology).summary)
+        if topology in ("supervisor", "hierarchical"):
+            core = canvas.node("core", "Supervisor", "agent", "agent.topology", step=step)
+            worker_step = _agent_step(canvas, "관리자가 맡긴 작업을 처리해요")
+            worker = canvas.node(
+                "worker", "담당 에이전트", "agent", "agent.topology", step=worker_step
+            )
+            canvas.edge(core, worker, "라우팅")
+        else:
+            label = "처리 단계" if topology == "pipeline" else "에이전트"
+            core = canvas.node("core", label, "agent", "agent.topology", step=step)
 
     review = None
     if canvas.in_play("agent.hitl"):
@@ -284,16 +391,84 @@ def _agent_draft(canvas: _Canvas) -> None:
             review = canvas.node("blank-agent.hitl", "사람 확인?", "blank", "agent.hitl")
         elif hitl != "none":
             label = "사람 승인" if hitl == "approval" else "사용자 질문"
-            review = canvas.node("review", label, "human", "agent.hitl")
-    result = canvas.node("result", "결과 전달", "code")
+            review = canvas.node(
+                "review", label, "human", "agent.hitl", step=_review_step(canvas, hitl)
+            )
+    result = canvas.node(
+        "result",
+        "결과 전달",
+        "code",
+        step=BlueprintStep(
+            line="결과를 사용자에게 보내요",
+            fixed=[CODE_STEP, *canvas.setting("product.surface", "결과를 보여 줄 곳")],
+            unknown=["결과 형식"],
+            decisions=canvas.decided("product.surface"),
+        ),
+    )
     canvas.chain(start, core, review, result)
 
 
+def _how(canvas: _Canvas, node: DesignNode) -> str:
+    if node.kind == "agent":
+        fallback = f" 대체 모델: {node.model.fallback_scope}." if node.model.fallback_scope else ""
+        model = node.model
+        return f"모델 호출 단계예요. 모델: {model.provider_scope}. 필요한 능력: {model.capability}.{fallback}"
+    if node.kind == "human":
+        stored = canvas.setting("data.checkpointer", "기다리는 동안 상태 저장")
+        return " ".join(["실행을 멈추고 사람의 입력을 기다려요.", *stored])
+    return CODE_STEP
+
+
+def _design_step(canvas: _Canvas, design: ServiceDesign, node: DesignNode) -> BlueprintStep:
+    requirements = [r for r in design.requirements if node.id in r.node_ids]
+    requirement_ids = {r.id for r in requirements}
+    task_ids = {task for r in requirements for task in r.task_ids}
+    reasoned = [
+        card_id
+        for reason in design.reasons
+        if requirement_ids & set(reason.requirement_ids)
+        for card_id in reason.card_ids
+    ]
+    return BlueprintStep(
+        line=node.responsibility,
+        inputs=[f"{port.name}: {port.type}" for port in node.inputs],
+        outputs=[f"{port.name}: {port.type}" for port in node.outputs],
+        how=_how(canvas, node),
+        tools=[
+            StepTool(name=tool.name, access=tool.access, reason=tool.reason) for tool in node.tools
+        ],
+        done_when=node.done_when,
+        on_failure=node.on_failure,
+        checks=[
+            f"{case.given}: {case.expect}"
+            for case in design.eval_cases
+            if case.id in node.eval_case_ids
+        ],
+        first_task=next((task.title for task in design.tasks if task.id in task_ids), None),
+        decisions=canvas.decided(*DECISIONS_BY_KIND.get(node.kind, ()), *reasoned),
+    )
+
+
+def _edge_label(design: ServiceDesign, edge: DesignEdge, order: dict[str, int]) -> str | None:
+    limit = next(
+        (
+            loop
+            for loop in design.workflow.loop_limits
+            if edge.source in loop.node_ids and edge.target in loop.node_ids
+        ),
+        None,
+    )
+    if limit is None or order[edge.target] > order[edge.source]:
+        return edge.condition
+    return " ".join(filter(None, [edge.condition, f"(최대 {limit.max_iterations}회)"]))
+
+
 def _agent_from_design(canvas: _Canvas, design: ServiceDesign) -> None:
+    order = {node.id: index for index, node in enumerate(design.nodes)}
     for node in design.nodes:
-        canvas.node(node.id, node.id, node.kind)
+        canvas.node(node.id, node.id, node.kind, step=_design_step(canvas, design, node))
     for edge in design.workflow.edges:
-        canvas.edge(edge.source, edge.target, edge.condition, edge.on_failure)
+        canvas.edge(edge.source, edge.target, _edge_label(design, edge, order), edge.on_failure)
 
 
 def _build(
