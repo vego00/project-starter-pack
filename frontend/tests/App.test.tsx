@@ -108,6 +108,7 @@ function journey(overrides = {}) {
     blueprint: {
       agent: { nodes: [], edges: [] },
       system: { nodes: [], edges: [] },
+      notes: [],
       agent_is_draft: true,
     },
     ...overrides,

@@ -725,3 +725,61 @@ def test_a_card_being_changed_lists_the_later_decisions_to_look_at_again(client)
 
     held = status(view, "agent.topology")["option_name"]
     assert card_of(view)["to_review"] == [f"Agent 구조: {held}"]
+
+
+def example_blueprint(client, example_id):
+    examples = client.get("/api/v1/blueprint/examples").json()
+    return next(item for item in examples if item["id"] == example_id)["blueprint"]
+
+
+def test_decisions_on_one_postgres_share_a_service_with_a_line_each(client):
+    system = example_blueprint(client, "team")["system"]
+
+    database = next(node for node in system["nodes"] if node["id"] == "database")
+
+    assert [row["card_id"] for row in database["rows"]] == [
+        "data.primary_db",
+        "data.checkpointer",
+        "data.vector_store",
+    ]
+    assert not {"checkpoint", "search"} & {node["id"] for node in system["nodes"]}
+    assert [edge for edge in system["edges"] if edge["target"] == "database"] == [
+        {"source": "runner", "target": "database", "label": None, "dashed": False}
+    ]
+
+
+def test_a_service_answering_one_decision_stays_a_plain_node(client):
+    system = example_blueprint(client, "private")["system"]
+
+    assert not any(node["rows"] for node in system["nodes"])
+    assert {"database", "search"} <= {node["id"] for node in system["nodes"]}
+
+
+@pytest.mark.parametrize(
+    ("example_id", "expected"),
+    [
+        ("basic", {"mlops.model_serving", "data.vector_store", "backend.execution"}),
+        ("private", {"data.checkpointer"}),
+        ("team", {"mlops.model_serving"}),
+    ],
+)
+def test_an_answer_that_draws_no_service_stays_reachable(client, example_id, expected):
+    notes = example_blueprint(client, example_id)["notes"]
+
+    assert {note["card_id"] for note in notes} == expected
+
+
+def test_every_decision_on_the_system_graph_has_somewhere_to_press(client):
+    view = decide_all(client, start(client))
+    blueprint = view["blueprint"]
+
+    reachable = {note["card_id"] for note in blueprint["notes"]}
+    for node in blueprint["system"]["nodes"]:
+        reachable |= {row["card_id"] for row in node["rows"]} | {node["card_id"]}
+
+    decided = {
+        card["card_id"]
+        for card in view["cards"]
+        if card["state"] in ("decided", "implied") and card["layer"] != "agent"
+    }
+    assert decided <= reachable

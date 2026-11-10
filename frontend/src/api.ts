@@ -104,6 +104,13 @@ const blueprintGraphSchema = z.object({
       card_id: z.string().nullable(),
       icon: z.string().nullable(),
       group: z.string().nullable(),
+      rows: z.array(
+        z.object({
+          role: z.string(),
+          label: z.string(),
+          card_id: z.string(),
+        }),
+      ),
     }),
   ),
   edges: z.array(
@@ -119,6 +126,13 @@ const blueprintGraphSchema = z.object({
 const blueprintSchema = z.object({
   agent: blueprintGraphSchema,
   system: blueprintGraphSchema,
+  notes: z.array(
+    z.object({
+      group: z.string(),
+      label: z.string(),
+      card_id: z.string(),
+    }),
+  ),
   agent_is_draft: z.boolean(),
 });
 
@@ -196,6 +210,8 @@ export type CardStatus = Journey["cards"][number];
 export type Blueprint = Journey["blueprint"];
 export type BlueprintGraph = Blueprint["agent"];
 export type BlueprintNode = BlueprintGraph["nodes"][number];
+export type BlueprintRow = BlueprintNode["rows"][number];
+export type BlueprintNote = Blueprint["notes"][number];
 export type BlueprintExample = z.infer<typeof blueprintExamplesSchema>[number];
 
 export type Action =

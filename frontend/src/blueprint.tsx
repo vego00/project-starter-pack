@@ -7,6 +7,8 @@ import type {
   BlueprintExample,
   BlueprintGraph,
   BlueprintNode,
+  BlueprintNote,
+  BlueprintRow,
   Journey,
 } from "./api";
 
@@ -150,12 +152,17 @@ function EdgeLabel({
   );
 }
 
-function shortLabel(label: string): string {
-  return label.length > MAX_LABEL ? `${label.slice(0, MAX_LABEL - 1)}…` : label;
+function shortLabel(label: string, max = MAX_LABEL): string {
+  return label.length > max ? `${label.slice(0, max - 1)}…` : label;
 }
 
 const SERVICE_W = 112;
 const SERVICE_H = 94;
+const STACK_W = 172;
+const STACK_HEAD = 40;
+// Keeps a line a 44px target when the graph is drawn at MIN_SCALE.
+const ROW_H = 68;
+const MAX_ROW_LABEL = 24;
 const TILE = 52;
 const GLYPH = 30;
 const BOX_PAD = 16;
@@ -163,6 +170,9 @@ const BOX_HEAD = 24;
 const CELL_GAP = 18;
 const COLUMN_GAP = 62;
 const BOX_GAP = 26;
+const LANE_GAP = 8;
+const LANE_CLEARANCE = 12;
+const LANE_CORNER = 8;
 
 const SERVICE_GROUPS: { id: string; title: string | null; column: number }[] = [
   { id: "people", title: null, column: 0 },
@@ -196,13 +206,46 @@ const GENERIC_GLYPHS: Record<string, string> = {
 
 const groupOf = (node: BlueprintNode) => node.group ?? "app";
 
+const sizeOf = (node: BlueprintNode) =>
+  node.rows.length > 0
+    ? { width: STACK_W, height: STACK_HEAD + node.rows.length * ROW_H }
+    : { width: SERVICE_W, height: SERVICE_H };
+
+/** A line of a shared service, handled like a node of its own when pressed. */
+const rowNode = (node: BlueprintNode, row: BlueprintRow): BlueprintNode => ({
+  ...node,
+  id: `${node.id}/${row.card_id}`,
+  label: `${row.role}: ${row.label}`,
+  card_id: row.card_id,
+  rows: [],
+});
+
+const noteNode = (note: BlueprintNote): BlueprintNode => ({
+  id: `note/${note.card_id}`,
+  label: note.label,
+  kind: "sys",
+  card_id: note.card_id,
+  icon: null,
+  group: note.group,
+  rows: [],
+});
+
+/** Every part of the graph that answers one decision. */
+const decisionNodes = (graph: BlueprintGraph) =>
+  graph.nodes.flatMap((node) =>
+    node.rows.length > 0 ? node.rows.map((row) => rowNode(node, row)) : [node],
+  );
+
 /** Boxes in columns, each column centred against the tallest. */
 export function layoutSystem(graph: BlueprintGraph): Record<string, Point> {
   const columns = [...new Set(SERVICE_GROUPS.map((group) => group.column))];
   const inGroup = (id: string) =>
     graph.nodes.filter((node) => groupOf(node) === id);
-  const boxHeight = (count: number) =>
-    BOX_HEAD + BOX_PAD * 2 + count * SERVICE_H + (count - 1) * CELL_GAP;
+  const boxHeight = (nodes: BlueprintNode[]) =>
+    BOX_HEAD +
+    BOX_PAD * 2 +
+    nodes.reduce((sum, node) => sum + sizeOf(node).height, 0) +
+    (nodes.length - 1) * CELL_GAP;
   const stacks = columns.map((column) =>
     SERVICE_GROUPS.filter(
       (group) => group.column === column && inGroup(group.id).length > 0,
@@ -211,27 +254,31 @@ export function layoutSystem(graph: BlueprintGraph): Record<string, Point> {
   const heightOf = (stack: typeof SERVICE_GROUPS) =>
     stack.reduce(
       (sum, group, index) =>
-        sum + boxHeight(inGroup(group.id).length) + (index ? BOX_GAP : 0),
+        sum + boxHeight(inGroup(group.id)) + (index ? BOX_GAP : 0),
       0,
     );
   const tallest = Math.max(0, ...stacks.map(heightOf));
   const points: Record<string, Point> = {};
-  stacks
-    .filter((stack) => stack.length > 0)
-    .forEach((stack, at) => {
-      const x = PAD + BOX_PAD + at * (SERVICE_W + BOX_PAD * 2 + COLUMN_GAP);
-      let y = PAD + (tallest - heightOf(stack)) / 2;
-      for (const group of stack) {
-        const nodes = inGroup(group.id);
-        nodes.forEach((node, index) => {
-          points[node.id] = {
-            x,
-            y: y + BOX_HEAD + BOX_PAD + index * (SERVICE_H + CELL_GAP),
-          };
-        });
-        y += boxHeight(nodes.length) + BOX_GAP;
+  let x = PAD + BOX_PAD;
+  for (const stack of stacks.filter((item) => item.length > 0)) {
+    const columnWidth = Math.max(
+      ...stack.flatMap((group) =>
+        inGroup(group.id).map((node) => sizeOf(node).width),
+      ),
+    );
+    let y = PAD + (tallest - heightOf(stack)) / 2;
+    for (const group of stack) {
+      const nodes = inGroup(group.id);
+      let cell = y + BOX_HEAD + BOX_PAD;
+      for (const node of nodes) {
+        const size = sizeOf(node);
+        points[node.id] = { x: x + (columnWidth - size.width) / 2, y: cell };
+        cell += size.height + CELL_GAP;
       }
-    });
+      y += boxHeight(nodes) + BOX_GAP;
+    }
+    x += columnWidth + BOX_PAD * 2 + COLUMN_GAP;
+  }
   return points;
 }
 
@@ -290,25 +337,88 @@ export function OptionIcon({ icon }: { icon: string }) {
   );
 }
 
-function serviceEdge(from: Point, to: Point) {
-  const centre = SERVICE_W / 2;
-  if (Math.abs(from.x - to.x) < centre) {
-    const down = to.y >= from.y;
-    const x = from.x + centre;
-    const y1 = down ? from.y + SERVICE_H : from.y;
-    const y2 = down ? to.y - 6 : to.y + SERVICE_H + 6;
+/** Where lines may touch a node: a tile's mark, or a shared service's heading. */
+function edgePoints(node: BlueprintNode, at: Point) {
+  const { width, height } = sizeOf(node);
+  const stacked = node.rows.length > 0;
+  const halfMark = (stacked ? width : TILE) / 2;
+  const centre = at.x + width / 2;
+  return {
+    centre,
+    left: centre - halfMark,
+    right: centre + halfMark,
+    top: at.y,
+    bottom: at.y + height,
+    middle: at.y + (stacked ? STACK_HEAD : TILE + 4) / 2,
+  };
+}
+
+type EdgeEnd = ReturnType<typeof edgePoints>;
+type Bounds = { left: number; top: number; right: number; bottom: number };
+
+function roundedPath(points: Point[]): string {
+  const toward = (from: Point, to: Point) => {
+    const length = Math.hypot(to.x - from.x, to.y - from.y);
+    const step = length ? Math.min(LANE_CORNER, length / 2) / length : 0;
+    return {
+      x: from.x + (to.x - from.x) * step,
+      y: from.y + (to.y - from.y) * step,
+    };
+  };
+  return points.reduce((path, at, index) => {
+    if (index === 0) return `M${at.x} ${at.y}`;
+    if (index === points.length - 1) return `${path}L${at.x} ${at.y}`;
+    const into = toward(at, points[index - 1]);
+    const out = toward(at, points[index + 1]);
+    return `${path}L${into.x} ${into.y}Q${at.x} ${at.y} ${out.x} ${out.y}`;
+  }, "");
+}
+
+/** A line that would cross a column goes around its boxes, so it never runs over a service. */
+function laneEdge(
+  source: EdgeEnd,
+  target: EdgeEnd,
+  from: Bounds,
+  to: Bounds,
+  between: Bounds[],
+  over: boolean,
+) {
+  const lane = over
+    ? Math.min(...between.map((box) => box.top)) - LANE_CLEARANCE
+    : Math.max(...between.map((box) => box.bottom)) + LANE_CLEARANCE;
+  const leave = from.right + LANE_GAP;
+  const arrive = to.left - LANE_GAP;
+  return {
+    d: roundedPath([
+      { x: source.right, y: source.middle },
+      { x: leave, y: source.middle },
+      { x: leave, y: lane },
+      { x: arrive, y: lane },
+      { x: arrive, y: target.middle },
+      { x: target.left - 6, y: target.middle },
+    ]),
+    labelX: (leave + arrive) / 2,
+    labelY: lane + 4,
+  };
+}
+
+function serviceEdge(source: EdgeEnd, target: EdgeEnd) {
+  if (Math.abs(source.centre - target.centre) < SERVICE_W / 2) {
+    const down = target.top >= source.top;
+    const x = source.centre;
+    const y1 = down ? source.bottom : source.top;
+    const y2 = down ? target.top - 6 : target.bottom + 6;
     return {
       d: `M${x} ${y1}L${x} ${y2}`,
       labelX: x + 30,
       labelY: (y1 + y2) / 2 + 4,
     };
   }
-  const right = to.x > from.x;
-  const side = right ? TILE / 2 : -TILE / 2;
-  const x1 = from.x + centre + side;
-  const x2 = to.x + centre - side - (right ? 6 : -6);
-  const y1 = from.y + TILE / 2 + 2;
-  const y2 = to.y + TILE / 2 + 2;
+  const right = target.centre > source.centre;
+  const x1 = right ? source.right : source.left;
+  const x2 = right ? target.left - 6 : target.right + 6;
+  const y1 = source.middle;
+  const y2 = target.middle;
   const bend = Math.max(30, Math.abs(x2 - x1) / 2) * (right ? 1 : -1);
   return {
     d: `M${x1} ${y1}C${x1 + bend} ${y1} ${x2 - bend} ${y2} ${x2} ${y2}`,
@@ -317,28 +427,113 @@ function serviceEdge(from: Point, to: Point) {
   };
 }
 
+function SharedService({
+  node,
+  at,
+  nodeClass,
+  nodeProps,
+  handleProps,
+}: {
+  node: BlueprintNode;
+  at: Point;
+  nodeClass?: (node: BlueprintNode) => string;
+  nodeProps?: (node: BlueprintNode, handle: string) => SVGProps<SVGGElement>;
+  handleProps?: (node: BlueprintNode) => SVGProps<SVGGElement>;
+}) {
+  const { width, height } = sizeOf(node);
+  const glyph = 20;
+  return (
+    <g
+      className={`bp-stack ${nodeClass?.(node) ?? ""}`}
+      transform={`translate(${at.x} ${at.y})`}
+    >
+      <rect className="bp-stack-fill" width={width} height={height} rx={6} />
+      <g className="bp-stack-head" {...handleProps?.(node)}>
+        <title>{node.label}</title>
+        <path className="bp-hit" d={`M0 0H${width}V${STACK_HEAD}H0Z`} />
+        <g
+          transform={`translate(10 ${(STACK_HEAD - glyph) / 2}) scale(${glyph / 24})`}
+        >
+          <ServiceGlyph icon={node.icon} />
+        </g>
+        <text className="bp-stack-name" x={38} y={STACK_HEAD / 2 + 4}>
+          {node.label}
+        </text>
+      </g>
+      {node.rows.map((row, index) => {
+        const line = rowNode(node, row);
+        return (
+          <g
+            key={row.card_id}
+            className={`bp-row ${nodeClass?.(line) ?? ""}`}
+            transform={`translate(0 ${STACK_HEAD + index * ROW_H})`}
+            {...nodeProps?.(line, node.id)}
+          >
+            <title>{line.label}</title>
+            <rect width={width} height={ROW_H} />
+            <text className="bp-row-role" x={12} y={ROW_H / 2 - 4}>
+              {row.role}
+            </text>
+            <text className="bp-row-value" x={12} y={ROW_H / 2 + 14}>
+              {shortLabel(row.label, MAX_ROW_LABEL)}
+            </text>
+          </g>
+        );
+      })}
+      <rect className="bp-stack-frame" width={width} height={height} rx={6} />
+    </g>
+  );
+}
+
 /** The system view: services with their marks, inside the box of what they do. */
 export function ServiceDiagram({
   graph,
   point,
   nodeClass,
   nodeProps,
+  handleProps,
 }: {
   graph: BlueprintGraph;
   point: (id: string) => Point;
   nodeClass?: (node: BlueprintNode) => string;
-  nodeProps?: (node: BlueprintNode) => SVGProps<SVGGElement>;
+  nodeProps?: (node: BlueprintNode, handle?: string) => SVGProps<SVGGElement>;
+  handleProps?: (node: BlueprintNode) => SVGProps<SVGGElement>;
 }) {
   const boxes = SERVICE_GROUPS.flatMap((group) => {
     const members = graph.nodes.filter((node) => groupOf(node) === group.id);
     if (!group.title || members.length === 0) return [];
-    const points = members.map((node) => point(node.id));
-    const left = Math.min(...points.map((p) => p.x)) - BOX_PAD;
-    const top = Math.min(...points.map((p) => p.y)) - BOX_PAD - BOX_HEAD;
-    const right = Math.max(...points.map((p) => p.x)) + SERVICE_W + BOX_PAD;
-    const bottom = Math.max(...points.map((p) => p.y)) + SERVICE_H + BOX_PAD;
+    const placed = members.map((node) => ({
+      at: point(node.id),
+      size: sizeOf(node),
+    }));
+    const left = Math.min(...placed.map((p) => p.at.x)) - BOX_PAD;
+    const top = Math.min(...placed.map((p) => p.at.y)) - BOX_PAD - BOX_HEAD;
+    const right =
+      Math.max(...placed.map((p) => p.at.x + p.size.width)) + BOX_PAD;
+    const bottom =
+      Math.max(...placed.map((p) => p.at.y + p.size.height)) + BOX_PAD;
     return [{ ...group, left, top, right, bottom }];
   });
+  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+  const pointsOf = (id: string) => edgePoints(nodeById.get(id)!, point(id));
+  const boxOf = (id: string) =>
+    boxes.find((box) => box.id === groupOf(nodeById.get(id)!));
+  // Alternating keeps two crossing lines from sharing a lane.
+  let crossings = 0;
+  const routeOf = (edge: DrawnEdge) => {
+    const source = pointsOf(edge.source);
+    const target = pointsOf(edge.target);
+    const from = boxOf(edge.source);
+    const to = boxOf(edge.target);
+    const between =
+      from && to
+        ? boxes.filter((box) => box.left >= from.right && box.right <= to.left)
+        : [];
+    if (!from || !to || between.length === 0) {
+      return serviceEdge(source, target);
+    }
+    return laneEdge(source, target, from, to, between, crossings++ % 2 === 0);
+  };
   return (
     <>
       {boxes.map((box) => (
@@ -357,7 +552,7 @@ export function ServiceDiagram({
         </g>
       ))}
       {mergeEdges(graph.edges).map((edge) => {
-        const line = serviceEdge(point(edge.source), point(edge.target));
+        const line = routeOf(edge);
         return (
           <g key={`${edge.source}>${edge.target}`}>
             <path
@@ -371,6 +566,18 @@ export function ServiceDiagram({
       })}
       {graph.nodes.map((node) => {
         const at = point(node.id);
+        if (node.rows.length > 0) {
+          return (
+            <SharedService
+              key={node.id}
+              node={node}
+              at={at}
+              nodeClass={nodeClass}
+              nodeProps={nodeProps}
+              handleProps={handleProps}
+            />
+          );
+        }
         const lines = wrapLabel(node.label);
         const tileX = (SERVICE_W - TILE) / 2;
         return (
@@ -418,7 +625,15 @@ const SAMPLE_NODE = (
   group: string,
   icon: string,
 ): BlueprintNode =>
-  ({ id, label, kind: "sys", card_id: null, icon, group }) as BlueprintNode;
+  ({
+    id,
+    label,
+    kind: "sys",
+    card_id: null,
+    icon,
+    group,
+    rows: [],
+  }) as BlueprintNode;
 const SAMPLE_EDGE = (source: string, target: string) => ({
   source,
   target,
@@ -488,12 +703,12 @@ export function changedNodes(
   before: BlueprintGraph,
   after: BlueprintGraph,
 ): Set<string> {
-  const old = new Map(before.nodes.map((node) => [node.id, node]));
+  const old = new Map(decisionNodes(before).map((node) => [node.id, node]));
   const edge = (e: BlueprintGraph["edges"][number]) =>
     `${e.source}>${e.target}>${e.label ?? ""}`;
   const oldEdges = new Set(before.edges.map(edge));
   const changed = new Set(
-    after.nodes
+    decisionNodes(after)
       .filter((node) => {
         const was = old.get(node.id);
         return !was || was.label !== node.label || was.icon !== node.icon;
@@ -616,7 +831,9 @@ export function BlueprintPanel({
 
   const known = seen.current.get(scope);
   const isFresh = (id: string) => known !== undefined && !known.has(id);
-  const nodeKey = graph.nodes.map((node) => node.id).join("\n");
+  const nodeKey = decisionNodes(graph)
+    .map((node) => node.id)
+    .join("\n");
   useEffect(() => {
     const ids = nodeKey ? nodeKey.split("\n") : [];
     seen.current.set(scope, new Set(ids));
@@ -655,16 +872,13 @@ export function BlueprintPanel({
     }
   }
 
-  function onPointerDown(
-    event: PointerEvent<SVGGElement>,
-    node: BlueprintNode,
-  ) {
+  function onPointerDown(event: PointerEvent<SVGGElement>, handle: string) {
     event.currentTarget.setPointerCapture?.(event.pointerId);
     drag.current = {
-      id: node.id,
+      id: handle,
       startX: event.clientX,
       startY: event.clientY,
-      origin: point(node.id),
+      origin: point(handle),
       scale: drawnScale(event.currentTarget.ownerSVGElement, width),
       moved: false,
     };
@@ -692,14 +906,18 @@ export function BlueprintPanel({
     if (!wasDrag) pick(node);
   }
 
-  function onKeyDown(event: KeyboardEvent, node: BlueprintNode) {
+  function onKeyDown(
+    event: KeyboardEvent,
+    node: BlueprintNode,
+    handle: string,
+  ) {
     const move = KEY_MOVES[event.key];
     if (move) {
       event.preventDefault();
-      const at = point(node.id);
+      const at = point(handle);
       setMoved((old) => ({
         ...old,
-        [`${scope}/${node.id}`]: {
+        [`${scope}/${handle}`]: {
           x: Math.max(4, at.x + move.x),
           y: Math.max(4, at.y + move.y),
         },
@@ -724,18 +942,14 @@ export function BlueprintPanel({
     }
   }
 
-  const points = graph.nodes.map((node) => point(node.id));
-  const extra = isSystem ? BOX_PAD : 0;
-  const width =
-    Math.max(0, ...points.map((p) => p.x)) +
-    (isSystem ? SERVICE_W : WIDTH) +
-    PAD +
-    extra;
-  const height =
-    Math.max(0, ...points.map((p) => p.y)) +
-    (isSystem ? SERVICE_H : HEIGHT) +
-    PAD +
-    extra;
+  const extents = graph.nodes.map((node) => {
+    const at = point(node.id);
+    const size = isSystem ? sizeOf(node) : { width: WIDTH, height: HEIGHT };
+    return { right: at.x + size.width, bottom: at.y + size.height };
+  });
+  const extra = PAD + (isSystem ? BOX_PAD : 0);
+  const width = Math.max(0, ...extents.map((e) => e.right)) + extra;
+  const height = Math.max(0, ...extents.map((e) => e.bottom)) + extra;
   function zoomAt(factor: number, clientX: number, clientY: number) {
     const svg = svgRef.current;
     const scale = zoom ?? drawnScale(svg, width);
@@ -763,7 +977,9 @@ export function BlueprintPanel({
     const onScrollbar =
       event.nativeEvent.offsetX > canvas.clientWidth ||
       event.nativeEvent.offsetY > canvas.clientHeight;
-    const onNode = (event.target as Element).closest('[role="button"]');
+    const onNode = (event.target as Element).closest(
+      '[role="button"], .bp-stack-head',
+    );
     if (event.button !== 0 || onNode || onScrollbar) return;
     canvas.setPointerCapture?.(event.pointerId);
     pan.current = {
@@ -815,15 +1031,24 @@ export function BlueprintPanel({
     canvas.scrollTop += box.top + point.y * scale - point.clientY;
   }, [zoom, width]);
 
-  const interactions = (node: BlueprintNode) => ({
+  // A shared service moves as a whole, whichever of its lines is held.
+  const interactions = (node: BlueprintNode, handle = node.id) => ({
     tabIndex: 0,
     role: "button",
     "aria-label": `${KIND_LABEL[node.kind]} ${node.label}${canChange(node) ? " 다시 고르기" : ""}`,
     onPointerDown: (event: PointerEvent<SVGGElement>) =>
-      onPointerDown(event, node),
+      onPointerDown(event, handle),
     onPointerMove,
     onPointerUp: () => onPointerUp(node),
-    onKeyDown: (event: KeyboardEvent) => onKeyDown(event, node),
+    onKeyDown: (event: KeyboardEvent) => onKeyDown(event, node, handle),
+  });
+  const headingDrag = (node: BlueprintNode) => ({
+    onPointerDown: (event: PointerEvent<SVGGElement>) =>
+      onPointerDown(event, node.id),
+    onPointerMove,
+    onPointerUp: () => {
+      drag.current = null;
+    },
   });
   const stateClass = (node: BlueprintNode) =>
     [
@@ -839,7 +1064,10 @@ export function BlueprintPanel({
   const blankCount =
     journey.blueprint.agent.nodes.filter((n) => n.kind === "blank").length +
     journey.blueprint.system.nodes.filter((n) => n.kind === "blank").length;
-  const current = graph.nodes.find((node) => node.id === selected);
+  const notes = isSystem ? blueprint.notes : [];
+  const current = [...decisionNodes(graph), ...notes.map(noteNode)].find(
+    (node) => node.id === selected,
+  );
   const currentCard = cardOf(current);
 
   return (
@@ -954,6 +1182,7 @@ export function BlueprintPanel({
               point={point}
               nodeClass={stateClass}
               nodeProps={interactions}
+              handleProps={headingDrag}
             />
           )}
           {!isSystem &&
@@ -1008,6 +1237,36 @@ export function BlueprintPanel({
             })}
         </svg>
       </div>
+      {notes.length > 0 && (
+        <div className="bp-notes" role="group" aria-label="칸이 없는 결정">
+          {SERVICE_GROUPS.filter((group) =>
+            notes.some((note) => note.group === group.id),
+          ).map((group) => (
+            <div className="bp-notes-area" key={group.id}>
+              <span>{group.title}</span>
+              {notes
+                .filter((note) => note.group === group.id)
+                .map((note) => {
+                  const target = noteNode(note);
+                  const card = example ? undefined : cardOf(target);
+                  return (
+                    <button
+                      key={note.card_id}
+                      className={`quiet bp-note${card?.editing ? " current" : ""}`}
+                      disabled={!canChange(target)}
+                      aria-current={card?.editing ? "true" : undefined}
+                      aria-label={`${note.label}${canChange(target) ? " 다시 고르기" : ""}`}
+                      onClick={() => pick(target)}
+                    >
+                      {note.label}
+                      {card?.needs_review && " · 다시 확인"}
+                    </button>
+                  );
+                })}
+            </div>
+          ))}
+        </div>
+      )}
       <div className="blueprint-detail">
         {lastChange && !example ? (
           <span>
