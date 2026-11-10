@@ -164,6 +164,12 @@ select {
   background: var(--raised);
   padding: 9px 11px;
 }
+/* Wider would cover the next column, and a dragged textarea cannot shrink below its first size. */
+textarea {
+  resize: vertical;
+  max-width: 100%;
+  max-height: 60vh;
+}
 input,
 select {
   min-height: 44px;
