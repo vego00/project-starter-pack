@@ -11,10 +11,11 @@ import type {
   BlueprintRow,
   BlueprintStep,
   Journey,
+  ModulePlan,
 } from "./api";
 
 export type Point = { x: number; y: number };
-type Layer = "agent" | "system";
+type Layer = "agent" | "system" | "order";
 
 const WIDTH = 176;
 const HEIGHT = 96;
@@ -388,6 +389,362 @@ function stepRoutes(
   });
 }
 
+const MODULE_W = 176;
+const MODULE_GATE_H = 60;
+const MODULE_H = 92;
+const MODULE_PAIR_GAP = 22;
+const MODULE_UNIT = MODULE_GATE_H + MODULE_PAIR_GAP + MODULE_H;
+const MODULE_COLUMN_GAP = 56;
+const MODULE_ROW_GAP = 48;
+const MODULE_LANE = 14;
+const EMPTY_GRAPH: BlueprintGraph = { nodes: [], edges: [] };
+const NO_OFFSET: Point = { x: 0, y: 0 };
+
+/** One column per step of the order, each module under its start conditions. */
+export function layoutModules(modules: ModulePlan[]) {
+  const columns = [...new Set(modules.map((module) => module.column))].sort(
+    (a, b) => a - b,
+  );
+  const inColumn = (column: number) =>
+    modules.filter((module) => module.column === column);
+  const heightOf = (count: number) =>
+    count * MODULE_UNIT + Math.max(0, count - 1) * MODULE_ROW_GAP;
+  const tallest = Math.max(
+    0,
+    ...columns.map((c) => heightOf(inColumn(c).length)),
+  );
+  const at: Record<string, Point> = {};
+  columns.forEach((column, index) => {
+    const members = inColumn(column);
+    const top = PAD + (tallest - heightOf(members.length)) / 2;
+    members.forEach((module, row) => {
+      at[module.id] = {
+        x: PAD + index * (MODULE_W + MODULE_COLUMN_GAP),
+        y: top + row * (MODULE_UNIT + MODULE_ROW_GAP),
+      };
+    });
+  });
+  return {
+    at,
+    width:
+      PAD * 2 +
+      columns.length * MODULE_W +
+      Math.max(0, columns.length - 1) * MODULE_COLUMN_GAP +
+      MODULE_LANE,
+    height: PAD * 2 + tallest,
+  };
+}
+
+const moduleKey = (part: "gate" | "module", id: string) => `${part}:${id}`;
+
+// Which module of the build order makes each box of the system view.
+const GROUP_MODULE: Record<string, string> = {
+  client: "client",
+  app: "api",
+  model: "agent",
+  data: "data",
+  ops: "ops",
+};
+
+function ModuleDiagram({
+  modules,
+  at,
+  open,
+  onPick,
+}: {
+  modules: ModulePlan[];
+  at: Record<string, Point>;
+  open: string | null;
+  onPick: (key: string) => void;
+}) {
+  const gateMid = (id: string) => at[id].y + MODULE_GATE_H / 2;
+  const moduleTop = (id: string) => at[id].y + MODULE_GATE_H + MODULE_PAIR_GAP;
+  const edges = modules.flatMap((module) =>
+    module.after
+      .filter((after) => at[after.module])
+      .map((after) => {
+        const from = at[after.module];
+        const to = at[module.id];
+        if (after.gate_only) {
+          // Only the other module's start conditions hold this one back.
+          const lane = from.x + MODULE_W + MODULE_LANE;
+          return {
+            key: `${after.module}>${module.id}`,
+            dashed: true,
+            d: roundedPath([
+              { x: from.x + MODULE_W, y: gateMid(after.module) },
+              { x: lane, y: gateMid(after.module) },
+              { x: lane, y: gateMid(module.id) },
+              { x: to.x + MODULE_W + 6, y: gateMid(module.id) },
+            ]),
+          };
+        }
+        const x1 = from.x + MODULE_W;
+        const y1 = moduleTop(after.module) + MODULE_H / 2;
+        const x2 = to.x;
+        const y2 = gateMid(module.id);
+        const bend = Math.max(24, (x2 - x1) / 2);
+        return {
+          key: `${after.module}>${module.id}`,
+          dashed: false,
+          d: `M${x1} ${y1}C${x1 + bend} ${y1} ${x2 - bend} ${y2} ${x2 - 6} ${y2}`,
+        };
+      }),
+  );
+  const part = (
+    key: string,
+    x: number,
+    y: number,
+    height: number,
+    className: string,
+    lines: { text: string; className: string }[],
+    label: string,
+  ) => (
+    <g
+      key={key}
+      className={`bp-order ${className}${open === key ? " selected" : ""}`}
+      transform={`translate(${x} ${y})`}
+      role="button"
+      tabIndex={0}
+      aria-label={label}
+      aria-expanded={open === key}
+      onClick={() => onPick(key)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onPick(key);
+        }
+      }}
+    >
+      <rect width={MODULE_W} height={height} rx={6} />
+      {lines.map((line, index) => (
+        <text
+          key={line.text}
+          className={line.className}
+          x={MODULE_W / 2}
+          y={height / 2 - (lines.length - 1) * 9 + index * 19 + 4}
+        >
+          {line.text}
+        </text>
+      ))}
+    </g>
+  );
+  return (
+    <>
+      {edges.map((edge) => (
+        <path
+          key={edge.key}
+          className={edge.dashed ? "bp-edge dashed" : "bp-edge"}
+          d={edge.d}
+          markerEnd="url(#blueprint-arrow)"
+        />
+      ))}
+      {modules.map((module) => {
+        const { x, y } = at[module.id];
+        const open = module.criteria.filter((c) => c.source === "open");
+        const status = open.length
+          ? `정할 값 ${open.length}개`
+          : `완료 기준 ${module.criteria.length}개`;
+        return (
+          <g key={module.id}>
+            <path
+              className="bp-edge"
+              d={`M${x + MODULE_W / 2} ${y + MODULE_GATE_H}V${moduleTop(module.id) - 6}`}
+              markerEnd="url(#blueprint-arrow)"
+            />
+            {part(
+              moduleKey("gate", module.id),
+              x,
+              y,
+              MODULE_GATE_H,
+              "gate",
+              [
+                { text: `${module.name} 시작 조건`, className: "bp-kind" },
+                {
+                  text: `확인할 것 ${module.gates.length}개`,
+                  className: "bp-label",
+                },
+              ],
+              `${module.name} 시작 조건, 확인할 것 ${module.gates.length}개`,
+            )}
+            {part(
+              moduleKey("module", module.id),
+              x,
+              moduleTop(module.id),
+              MODULE_H,
+              open.length ? "module open-value" : "module",
+              [
+                { text: `${module.column + 1}단계`, className: "bp-kind" },
+                { text: shortLabel(module.name, 14), className: "bp-label" },
+                {
+                  text: status,
+                  className: open.length ? "bp-kind warn" : "bp-kind",
+                },
+              ],
+              `${module.column + 1}단계 ${module.name}, ${status}`,
+            )}
+          </g>
+        );
+      })}
+    </>
+  );
+}
+
+const MODULE_SOURCE: Record<ModulePlan["gates"][number]["source"], string> = {
+  rule: "규칙",
+  design: "설계 초안",
+  chat: "대화",
+  open: "정할 값",
+};
+
+function ModuleDetail({
+  modules,
+  open,
+  onClose,
+  onShowFlow,
+}: {
+  modules: ModulePlan[];
+  open: string;
+  onClose: () => void;
+  onShowFlow: () => void;
+}) {
+  const [part, id] = open.split(":");
+  const module = modules.find((item) => item.id === id);
+  if (!module) return null;
+  const names = Object.fromEntries(modules.map((m) => [m.id, m.name]));
+  const tag = (source: ModulePlan["gates"][number]["source"]) => (
+    <span className={`step-source ${source}`}>{MODULE_SOURCE[source]}</span>
+  );
+  const empty = (text: string) => <p className="step-empty">{text}</p>;
+  const head = (title: string, sub: string) => (
+    <div className="step-head">
+      <div>
+        <p className="step-title">{title}</p>
+        <p>{sub}</p>
+      </div>
+      <button className="quiet" onClick={onClose}>
+        설명 닫기
+      </button>
+    </div>
+  );
+  if (part === "gate") {
+    return (
+      <div
+        className="step-detail"
+        role="region"
+        aria-label={`${module.name} 시작 조건`}
+      >
+        {head(
+          `${module.name} 시작 조건`,
+          "모두 확인하고 빌드 묶음의 docs/gates.md에 기록하면 이 모듈을 시작해요. 규칙에서 정한 조건이라 뺄 수 없어요.",
+        )}
+        <ul className="module-rows">
+          {module.gates.map((gate) => (
+            <li key={gate.text}>
+              <span className="module-box" aria-hidden />
+              <span className="module-main">
+                {gate.text}
+                <small>빼면 안 되는 이유: {gate.why}</small>
+              </span>
+              {tag(gate.source)}
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+  const waits = module.after.map((after) =>
+    after.gate_only
+      ? `${names[after.module]}의 시작 조건 확인 후`
+      : `${names[after.module]} 완료 후`,
+  );
+  const items = (list: ModulePlan["include"], blank: string) =>
+    list.length === 0 ? (
+      empty(blank)
+    ) : (
+      <ul className="module-rows">
+        {list.map((item) => (
+          <li key={item.text}>
+            <span className="module-main">{item.text}</span>
+            {tag(item.source)}
+          </li>
+        ))}
+      </ul>
+    );
+  return (
+    <div
+      className="step-detail"
+      role="region"
+      aria-label={`${module.name} 내용`}
+    >
+      {head(
+        `${module.column + 1}단계 · ${module.name}`,
+        [
+          module.stack.join(" · "),
+          waits.length ? `먼저 끝낼 것: ${waits.join(", ")}` : "",
+        ]
+          .filter(Boolean)
+          .join(" / "),
+      )}
+      {module.id === "agent" && (
+        <p>
+          <button onClick={onShowFlow}>에이전트 흐름 보기</button>
+        </p>
+      )}
+      <div className="step-columns">
+        <div className="module-field">
+          <p className="module-label">목표</p>
+          {module.goal
+            ? items([module.goal], "")
+            : empty("아직 정하지 않았어요.")}
+        </div>
+        <div className="module-field">
+          <p className="module-label">할 일</p>
+          {module.tasks.length === 0 ? (
+            empty("아직 이 모듈에 배정된 할 일이 없어요.")
+          ) : (
+            <ul className="module-rows">
+              {module.tasks.map((task) => (
+                <li key={task}>
+                  <span className="module-main">{task}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div className="module-field">
+          <p className="module-label">이번에 만들 것</p>
+          {items(module.include, "아직 정하지 않았어요.")}
+        </div>
+        <div className="module-field">
+          <p className="module-label">이번에 안 만들 것</p>
+          {items(module.exclude, "아직 없어요.")}
+        </div>
+      </div>
+      <div className="module-field">
+        <p className="module-label">완료 기준</p>
+        <ul className="module-rows">
+          {module.criteria.map((criterion) => (
+            <li key={criterion.text}>
+              <span className="module-main">
+                <span>
+                  <span className="module-kind">
+                    {criterion.kind === "quantitative" ? "정량" : "정성"}
+                  </span>
+                  {criterion.text}
+                  {criterion.source === "open" && ": 목표치를 정해야 해요"}
+                </span>
+                {criterion.how && <small>확인: {criterion.how}</small>}
+              </span>
+              {tag(criterion.source)}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
 const ACCESS_LABEL: Record<BlueprintStep["tools"][number]["access"], string> = {
   read: "읽기",
   write: "내부 쓰기",
@@ -737,12 +1094,15 @@ export function ServiceDiagram({
   nodeClass,
   nodeProps,
   handleProps,
+  stepOf,
 }: {
   graph: BlueprintGraph;
   point: (id: string) => Point;
   nodeClass?: (node: BlueprintNode) => string;
   nodeProps?: (node: BlueprintNode, handle?: string) => SVGProps<SVGGElement>;
   handleProps?: (node: BlueprintNode) => SVGProps<SVGGElement>;
+  /** The step of the build order that makes this box, shown beside its title. */
+  stepOf?: (group: string) => number | undefined;
 }) {
   const boxes = SERVICE_GROUPS.flatMap((group) => {
     const members = graph.nodes.filter((node) => groupOf(node) === group.id);
@@ -793,6 +1153,7 @@ export function ServiceDiagram({
           />
           <text className="bp-box-title" x={box.left + 10} y={box.top + 18}>
             {box.title}
+            {stepOf?.(box.id) !== undefined && ` · ${stepOf(box.id)}단계`}
           </text>
         </g>
       ))}
@@ -1053,7 +1414,11 @@ export function BlueprintPanel({
     y: number;
     left: number;
     top: number;
+    offset: Point;
+    scale: number;
   } | null>(null);
+  // How far the fitted view has been dragged, in drawing units.
+  const [offset, setOffset] = useState<Point>(NO_OFFSET);
   // The diagram point that must stay under the cursor after a zoom.
   const anchor = useRef<{
     x: number;
@@ -1069,9 +1434,17 @@ export function BlueprintPanel({
 
   const example = examples?.find((item) => item.id === exampleId) ?? null;
   const blueprint = example?.blueprint ?? journey.blueprint;
-  const graph = blueprint[layer];
+  // Examples carry no decisions of this project, so they have no build order.
+  const modules = example ? [] : journey.modules;
+  const isOrder = layer === "order" && modules.length > 0;
+  const graph = isOrder || layer === "order" ? EMPTY_GRAPH : blueprint[layer];
   const scope = `${exampleId ?? "mine"}/${layer}`;
   const isSystem = layer === "system";
+  const isAgent = layer === "agent";
+  const moduleLayout = layoutModules(modules);
+  useEffect(() => {
+    if (layer === "order" && modules.length === 0) setLayer("system");
+  }, [layer, modules.length]);
   const layout = isSystem ? layoutSystem(graph) : layoutBlueprint(graph);
   const point = (id: string) => moved[`${scope}/${id}`] ?? layout[id];
 
@@ -1084,7 +1457,10 @@ export function BlueprintPanel({
     const ids = nodeKey ? nodeKey.split("\n") : [];
     seen.current.set(scope, new Set(ids));
   }, [scope, nodeKey]);
-  useEffect(() => setZoom(null), [scope]);
+  useEffect(() => {
+    setZoom(null);
+    setOffset(NO_OFFSET);
+  }, [scope]);
 
   const cardOf = (node: BlueprintNode | undefined) =>
     node?.card_id
@@ -1202,8 +1578,33 @@ export function BlueprintPanel({
     return { right: at.x + size.width, bottom: at.y + size.height };
   });
   const extra = PAD + (isSystem ? BOX_PAD : STEP_LANE_ROOM);
-  const width = Math.max(0, ...extents.map((e) => e.right)) + extra;
-  const height = Math.max(0, ...extents.map((e) => e.bottom)) + extra;
+  // A node moved up or left takes its box and the lines routed above it along, so the drawing
+  // starts wherever the content does, not at zero.
+  const placed = graph.nodes.map((node) => point(node.id));
+  const originX = isOrder
+    ? 0
+    : Math.min(
+        0,
+        ...placed.map((p) => p.x - (isSystem ? BOX_PAD : 0) - PAD / 2),
+      );
+  const originY = isOrder
+    ? 0
+    : Math.min(
+        0,
+        ...placed.map(
+          (p) =>
+            p.y -
+            (isSystem
+              ? BOX_HEAD + BOX_PAD + LANE_CLEARANCE + LABEL_LINE
+              : STEP_LANE_ROOM),
+        ),
+      );
+  const width = isOrder
+    ? moduleLayout.width
+    : Math.max(0, ...extents.map((e) => e.right)) + extra - originX;
+  const height = isOrder
+    ? moduleLayout.height
+    : Math.max(0, ...extents.map((e) => e.bottom)) + extra - originY;
   function zoomAt(factor: number, clientX: number, clientY: number) {
     const svg = svgRef.current;
     const scale = zoom ?? drawnScale(svg, width);
@@ -1241,14 +1642,26 @@ export function BlueprintPanel({
       y: event.clientY,
       left: canvas.scrollLeft,
       top: canvas.scrollTop,
+      offset,
+      scale: drawnScale(svgRef.current, width),
     };
   }
 
   function movePan(event: PointerEvent<HTMLDivElement>) {
     const start = pan.current;
     if (!start) return;
-    event.currentTarget.scrollLeft = start.left - (event.clientX - start.x);
-    event.currentTarget.scrollTop = start.top - (event.clientY - start.y);
+    const dx = event.clientX - start.x;
+    const dy = event.clientY - start.y;
+    if (zoom === null) {
+      // A fitted graph has nothing to scroll, so the view itself moves.
+      setOffset({
+        x: start.offset.x + dx / start.scale,
+        y: start.offset.y + dy / start.scale,
+      });
+      return;
+    }
+    event.currentTarget.scrollLeft = start.left - dx;
+    event.currentTarget.scrollTop = start.top - dy;
   }
 
   function endPan() {
@@ -1343,6 +1756,15 @@ export function BlueprintPanel({
           >
             시스템 구성
           </button>
+          {modules.length > 0 && (
+            <button
+              className={layer === "order" ? "on" : ""}
+              aria-pressed={layer === "order"}
+              onClick={() => setLayer("order")}
+            >
+              만드는 순서
+            </button>
+          )}
         </div>
         <span className="muted blueprint-count">
           {blankCount > 0 ? `아직 정할 곳 ${blankCount}개` : ""}
@@ -1403,7 +1825,9 @@ export function BlueprintPanel({
             ? "결정을 마치면 실제 설계로 바뀌어요."
             : layer === "agent"
               ? "생성된 설계예요."
-              : ""}
+              : isOrder
+                ? "모듈마다 시작 조건을 먼저 확인해요. 같은 열의 모듈은 동시에 진행할 수 있어요."
+                : ""}
       </p>
       <div
         ref={canvasRef}
@@ -1417,7 +1841,7 @@ export function BlueprintPanel({
           ref={svgRef}
           width={width * (zoom ?? MAX_SCALE)}
           height={height * (zoom ?? MAX_SCALE)}
-          viewBox={`0 0 ${width} ${height}`}
+          viewBox={`${originX - offset.x} ${originY - offset.y} ${width} ${height}`}
           style={
             zoom === null
               ? {
@@ -1428,9 +1852,22 @@ export function BlueprintPanel({
               : undefined
           }
           role="group"
-          aria-label={layer === "agent" ? "에이전트 흐름" : "시스템 구성"}
+          aria-label={
+            isOrder ? "만드는 순서" : isAgent ? "에이전트 흐름" : "시스템 구성"
+          }
         >
           <ArrowMarker />
+          {isOrder && (
+            <ModuleDiagram
+              modules={modules}
+              at={moduleLayout.at}
+              open={selected}
+              onPick={(key) => {
+                setLastChange("");
+                setSelected(selected === key ? null : key);
+              }}
+            />
+          )}
           {isSystem && (
             <ServiceDiagram
               graph={graph}
@@ -1438,9 +1875,13 @@ export function BlueprintPanel({
               nodeClass={stateClass}
               nodeProps={interactions}
               handleProps={headingDrag}
+              stepOf={(group) => {
+                const made = modules.find((m) => m.id === GROUP_MODULE[group]);
+                return made ? made.column + 1 : undefined;
+              }}
             />
           )}
-          {!isSystem &&
+          {isAgent &&
             stepRoutes(graph, point).map((edge) => (
               <g key={`${edge.source}>${edge.target}`}>
                 <path
@@ -1455,7 +1896,7 @@ export function BlueprintPanel({
                 />
               </g>
             ))}
-          {!isSystem &&
+          {isAgent &&
             graph.nodes.map((node) => {
               const at = point(node.id);
               const review = cardOf(node)?.needs_review;
@@ -1508,7 +1949,18 @@ export function BlueprintPanel({
             })}
         </svg>
       </div>
-      {!isSystem && current?.step && (
+      {isOrder && selected?.includes(":") && (
+        <ModuleDetail
+          modules={modules}
+          open={selected}
+          onClose={() => setSelected(null)}
+          onShowFlow={() => {
+            setSelected(null);
+            setLayer("agent");
+          }}
+        />
+      )}
+      {isAgent && current?.step && (
         <StepDetail
           node={current}
           isDraft={blueprint.agent_is_draft}
@@ -1594,8 +2046,11 @@ export function BlueprintPanel({
           </button>
           <button
             className="quiet"
-            disabled={zoom === null}
-            onClick={() => setZoom(null)}
+            disabled={zoom === null && offset.x === 0 && offset.y === 0}
+            onClick={() => {
+              setZoom(null);
+              setOffset(NO_OFFSET);
+            }}
           >
             화면 맞춤
           </button>

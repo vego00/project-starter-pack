@@ -271,6 +271,19 @@ def test_a_flow_step_explains_itself_and_opens_its_decision(page: Page):
     expect(page.get_by_role("heading", name="에이전트를 어떤 구조로 구성할까요?")).to_be_visible()
 
 
+def test_the_build_order_shows_start_conditions_from_the_decisions(page: Page):
+    start(page)
+    skip_clarify(page)
+    choose_surface(page)
+    page.get_by_role("button", name="만드는 순서", exact=True).click()
+
+    page.get_by_role("button", name=re.compile("^웹 화면 시작 조건")).click()
+
+    expect(page.get_by_text("승인 전에는 화면 코드를 쓰지 않는다")).to_be_visible()
+    expect(page.get_by_text(re.compile("^빼면 안 되는 이유:")).first).to_be_visible()
+    shot(page, "build-order")
+
+
 def test_the_graph_stays_put_while_the_card_scrolls(browser: Browser):
     context = browser.new_context(viewport={"width": 1280, "height": 700}, locale="ko-KR")
     page = context.new_page()

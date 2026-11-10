@@ -37,7 +37,7 @@ from app.registry.loader import Registry
 
 logger = logging.getLogger(__name__)
 
-MAX_ATTEMPTS = 2  # One draft and one automatic correction, from the approved plan's starting value.
+MAX_ATTEMPTS = 2  # One draft and one automatic correction. Starting value, not measured.
 MAX_OUTAGE_RETRIES = (
     1  # A provider failure says nothing about the draft, so it spares a correction.
 )
