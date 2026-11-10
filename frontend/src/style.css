@@ -831,6 +831,7 @@ ul {
 .blueprint-canvas svg {
   display: block;
   margin: 0 auto;
+  overflow: visible; /* A dragged view stays visible past the drawing; the canvas clips it. */
 }
 .blueprint-canvas.fit svg {
   position: absolute;

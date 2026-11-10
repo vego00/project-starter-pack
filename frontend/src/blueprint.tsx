@@ -1629,9 +1629,11 @@ export function BlueprintPanel({
 
   function startPan(event: PointerEvent<HTMLDivElement>) {
     const canvas = event.currentTarget;
+    // Measured from the canvas: offsetX belongs to whatever was pressed, often the wider drawing.
+    const frame = canvas.getBoundingClientRect();
     const onScrollbar =
-      event.nativeEvent.offsetX > canvas.clientWidth ||
-      event.nativeEvent.offsetY > canvas.clientHeight;
+      event.clientX - frame.left > canvas.clientWidth ||
+      event.clientY - frame.top > canvas.clientHeight;
     const onNode = (event.target as Element).closest(
       '[role="button"], .bp-stack-head',
     );
@@ -1650,18 +1652,20 @@ export function BlueprintPanel({
   function movePan(event: PointerEvent<HTMLDivElement>) {
     const start = pan.current;
     if (!start) return;
+    const canvas = event.currentTarget;
     const dx = event.clientX - start.x;
     const dy = event.clientY - start.y;
-    if (zoom === null) {
-      // A fitted graph has nothing to scroll, so the view itself moves.
-      setOffset({
-        x: start.offset.x + dx / start.scale,
-        y: start.offset.y + dy / start.scale,
-      });
-      return;
-    }
-    event.currentTarget.scrollLeft = start.left - dx;
-    event.currentTarget.scrollTop = start.top - dy;
+    // Scroll where there is room to; otherwise (fitted, or zoomed out) move the view itself.
+    const scrollsX =
+      zoom !== null && canvas.scrollWidth > canvas.clientWidth + 1;
+    const scrollsY =
+      zoom !== null && canvas.scrollHeight > canvas.clientHeight + 1;
+    if (scrollsX) canvas.scrollLeft = start.left - dx;
+    if (scrollsY) canvas.scrollTop = start.top - dy;
+    setOffset({
+      x: scrollsX ? start.offset.x : start.offset.x + dx / start.scale,
+      y: scrollsY ? start.offset.y : start.offset.y + dy / start.scale,
+    });
   }
 
   function endPan() {
