@@ -822,10 +822,10 @@ ul {
   padding: 0 20px;
   user-select: none;
 }
-.blueprint-canvas:not(.fit) {
+.blueprint-canvas {
   cursor: grab;
 }
-.blueprint-canvas:not(.fit):active {
+.blueprint-canvas:active {
   cursor: grabbing;
 }
 .blueprint-canvas svg {
@@ -1002,6 +1002,111 @@ ul {
 }
 .step-access.external {
   color: var(--warn-text);
+  font-weight: 500;
+}
+.bp-order {
+  cursor: pointer;
+  outline: none;
+}
+.bp-order rect {
+  fill: var(--raised);
+  stroke: var(--control-line);
+  stroke-width: 1.5;
+}
+.bp-order.gate rect {
+  fill: var(--tint);
+  stroke-dasharray: 4 3;
+}
+.bp-order.open-value rect {
+  stroke: var(--warn-text);
+  stroke-width: 2;
+}
+.bp-order:hover rect {
+  stroke: var(--text);
+}
+.bp-order.selected rect {
+  stroke: currentColor;
+  stroke-width: 3;
+  stroke-dasharray: none;
+}
+.bp-order:focus-visible rect {
+  fill: var(--accent-tint);
+  stroke: var(--accent);
+  stroke-width: 3;
+  stroke-dasharray: none;
+}
+.bp-kind.warn {
+  fill: var(--warn-text);
+  font-weight: 600;
+}
+.module-field {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  margin-bottom: 10px;
+}
+.module-label {
+  color: var(--muted);
+  font-size: 0.87rem;
+}
+.module-rows {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.module-rows li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+}
+.module-rows li:first-child {
+  border-top: 0;
+}
+.module-main {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.module-main small {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.module-kind {
+  color: var(--muted);
+  font-size: 0.82rem;
+  margin-right: 6px;
+}
+.module-box {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-top: 4px;
+  border: 1.5px solid var(--control-line);
+  border-radius: 3px;
+}
+.step-empty {
+  padding: 6px 10px;
+  border: 1px dashed var(--line);
+  border-radius: 4px;
+  color: var(--muted);
+}
+.step-source {
+  flex: none;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  padding: 0 6px;
+  border: 1px solid var(--control-line);
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.step-source.open {
+  background: var(--warn-bg);
+  color: var(--warn-text);
+  border-color: transparent;
   font-weight: 500;
 }
 .step-decisions {

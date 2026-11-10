@@ -169,6 +169,29 @@ const blueprintExamplesSchema = z.array(
   }),
 );
 
+const moduleItemSchema = z.object({
+  text: z.string(),
+  how: z.string().nullable(),
+  source: z.enum(["rule", "design", "chat", "open"]),
+});
+
+const modulePlanSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  stack: z.array(z.string()),
+  cards: z.array(z.string()),
+  column: z.number(),
+  after: z.array(z.object({ module: z.string(), gate_only: z.boolean() })),
+  goal: moduleItemSchema.nullable(),
+  include: z.array(moduleItemSchema),
+  exclude: z.array(moduleItemSchema),
+  gates: z.array(moduleItemSchema.extend({ why: z.string() })),
+  criteria: z.array(
+    moduleItemSchema.extend({ kind: z.enum(["quantitative", "qualitative"]) }),
+  ),
+  tasks: z.array(z.string()),
+});
+
 const journeySchema = z.object({
   journey_id: z.string().uuid(),
   revision: z.number(),
@@ -221,6 +244,7 @@ const journeySchema = z.object({
     .nullable()
     .optional(),
   blueprint: blueprintSchema,
+  modules: z.array(modulePlanSchema),
   can_reopen: z.boolean().optional().default(false),
 });
 
@@ -236,6 +260,7 @@ export type BlueprintGraph = Blueprint["agent"];
 export type BlueprintNode = BlueprintGraph["nodes"][number];
 export type BlueprintRow = BlueprintNode["rows"][number];
 export type BlueprintStep = NonNullable<BlueprintNode["step"]>;
+export type ModulePlan = Journey["modules"][number];
 export type BlueprintNote = Blueprint["notes"][number];
 export type BlueprintExample = z.infer<typeof blueprintExamplesSchema>[number];
 

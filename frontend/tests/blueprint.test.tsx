@@ -7,6 +7,7 @@ import {
   BlueprintPanel,
   layoutBlueprint,
   changedNodes,
+  layoutModules,
   layoutSystem,
   mergeEdges,
   ServiceDiagram,
@@ -78,6 +79,7 @@ function journey(overrides: Partial<Journey> = {}): Journey {
       notes: [],
       agent_is_draft: true,
     },
+    modules: [],
     can_reopen: false,
     ...overrides,
   };
@@ -311,6 +313,175 @@ describe("BlueprintPanel", () => {
 
     fireEvent.wheel(canvas, { deltaY: -100, ctrlKey: true });
     expect(screen.getByText("125%")).toBeVisible();
+  });
+
+  describe("the build order", () => {
+    const rule = (text: string) => ({
+      text,
+      how: null,
+      source: "rule" as const,
+      why: `${text} 이유`,
+    });
+    const module = (
+      id: string,
+      name: string,
+      column: number,
+      after: { module: string; gate_only: boolean }[] = [],
+    ) => ({
+      id,
+      name,
+      stack: [`${name} 구성`],
+      cards: [],
+      column,
+      after,
+      goal: null,
+      include: [],
+      exclude: [],
+      gates: [rule(`${name} 시작 조건 하나`)],
+      criteria: [
+        {
+          text: `${name} 기준`,
+          how: `${name} 확인 방법`,
+          source: "rule" as const,
+          kind: "quantitative" as const,
+        },
+      ],
+      tasks: [],
+    });
+    const ordered = () =>
+      journey({
+        modules: [
+          module("agent", "에이전트 흐름", 0),
+          module("api", "서비스 API", 1, [
+            { module: "agent", gate_only: false },
+          ]),
+          {
+            ...module("client", "웹 화면", 1, [
+              { module: "api", gate_only: true },
+            ]),
+            criteria: [
+              {
+                text: "응답 시간",
+                how: "시간을 잰다",
+                source: "open" as const,
+                kind: "quantitative" as const,
+              },
+            ],
+          },
+        ],
+      });
+
+    async function openOrder() {
+      const user = userEvent.setup();
+      render(<BlueprintPanel journey={ordered()} busy={false} act={vi.fn()} />);
+      await user.click(screen.getByRole("button", { name: "만드는 순서" }));
+      return user;
+    }
+
+    it("puts a module that waits only for a contract beside it", () => {
+      const { at } = layoutModules(ordered().modules);
+
+      expect(at.api.x).toBe(at.client.x);
+      expect(at.agent.x).toBeLessThan(at.api.x);
+      expect(at.api.y).not.toBe(at.client.y);
+    });
+
+    it("hides the tab when there is no build order", () => {
+      render(<BlueprintPanel journey={journey()} busy={false} act={vi.fn()} />);
+
+      expect(
+        screen.queryByRole("button", { name: "만드는 순서" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("opens a module's criteria and what it waits for", async () => {
+      const user = await openOrder();
+
+      await user.click(
+        screen.getByRole("button", { name: "2단계 웹 화면, 정할 값 1개" }),
+      );
+
+      expect(screen.getByText(/응답 시간: 목표치를 정해야 해요/)).toBeVisible();
+      expect(screen.getByText("확인: 시간을 잰다")).toBeVisible();
+      expect(
+        screen.getByText(/먼저 끝낼 것: 서비스 API의 시작 조건 확인 후/),
+      ).toBeVisible();
+      expect(
+        screen.getByText("아직 이 모듈에 배정된 할 일이 없어요."),
+      ).toBeVisible();
+    });
+
+    it("opens the start conditions with why they cannot be dropped", async () => {
+      const user = await openOrder();
+
+      await user.click(
+        screen.getByRole("button", {
+          name: "서비스 API 시작 조건, 확인할 것 1개",
+        }),
+      );
+
+      expect(screen.getByText("서비스 API 시작 조건 하나")).toBeVisible();
+      expect(
+        screen.getByText("빼면 안 되는 이유: 서비스 API 시작 조건 하나 이유"),
+      ).toBeVisible();
+
+      await user.click(screen.getByRole("button", { name: "설명 닫기" }));
+      expect(
+        screen.queryByText("서비스 API 시작 조건 하나"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("goes from the agent module to the agent flow", async () => {
+      const user = await openOrder();
+
+      await user.click(
+        screen.getByRole("button", {
+          name: "1단계 에이전트 흐름, 완료 기준 1개",
+        }),
+      );
+      await user.click(
+        screen.getByRole("button", { name: "에이전트 흐름 보기" }),
+      );
+
+      expect(
+        screen.getByRole("group", { name: "에이전트 흐름" }),
+      ).toBeVisible();
+    });
+
+    it("marks each system box with its step of the build order", async () => {
+      const user = userEvent.setup();
+      const withSystem = ordered();
+      withSystem.blueprint = {
+        ...withSystem.blueprint,
+        system: {
+          nodes: [
+            node("model", "sys", null, "agent", "model"),
+            node("api", "sys", null, "server", "app"),
+          ],
+          edges: [],
+        },
+      };
+      render(
+        <BlueprintPanel journey={withSystem} busy={false} act={vi.fn()} />,
+      );
+
+      await user.click(screen.getByRole("button", { name: "시스템 구성" }));
+
+      expect(screen.getByText("모델 · 1단계")).toBeInTheDocument();
+      expect(screen.getByText("서비스 · 2단계")).toBeInTheDocument();
+    });
+
+    it("opens a part from the keyboard", async () => {
+      const user = await openOrder();
+      const gate = screen.getByRole("button", {
+        name: "에이전트 흐름 시작 조건, 확인할 것 1개",
+      });
+
+      gate.focus();
+      await user.keyboard("{Enter}");
+
+      expect(gate).toHaveAttribute("aria-expanded", "true");
+    });
   });
 
   describe("explaining a step of the agent flow", () => {
@@ -579,6 +750,50 @@ describe("BlueprintPanel", () => {
     fireEvent.keyDown(moved, { key: "ArrowRight" });
 
     expect(moved.getAttribute("transform")).toContain(`translate(${x + 16} `);
+  });
+
+  it("keeps a node moved to the top inside the drawing", () => {
+    const { svg } = drawnGraph();
+    const moved = screen.getByRole("button", { name: "코드 input 이름" });
+
+    for (let step = 0; step < 20; step += 1) {
+      fireEvent.keyDown(moved, { key: "ArrowUp" });
+    }
+
+    const top = Number(svg.getAttribute("viewBox")!.split(" ")[1]);
+    const nodeY = Number(
+      moved.getAttribute("transform")!.match(/ ([-\d.]+)\)/)![1],
+    );
+    expect(top).toBeLessThan(0);
+    expect(top).toBeLessThanOrEqual(nodeY - 34);
+  });
+
+  it("moves the fitted graph when empty space is dragged", async () => {
+    const user = userEvent.setup();
+    const { svg } = drawnGraph();
+    const canvas = svg.parentElement!;
+    // jsdom lays nothing out; without a size every press reads as one on the scrollbar.
+    Object.defineProperty(canvas, "clientWidth", { value: 800 });
+    Object.defineProperty(canvas, "clientHeight", { value: 400 });
+    const before = svg.getAttribute("viewBox");
+    const pointer = (type: string, clientX: number) =>
+      fireEvent(
+        canvas,
+        new MouseEvent(type, {
+          bubbles: true,
+          clientX,
+          clientY: 50,
+          button: 0,
+        }),
+      );
+
+    pointer("pointerdown", 100);
+    pointer("pointermove", 160);
+    pointer("pointerup", 160);
+
+    expect(svg.getAttribute("viewBox")).not.toBe(before);
+    await user.click(screen.getByRole("button", { name: "화면 맞춤" }));
+    expect(svg.getAttribute("viewBox")).toBe(before);
   });
 
   it("says the examples are loading until they arrive", async () => {

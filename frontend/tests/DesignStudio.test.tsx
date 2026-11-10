@@ -183,6 +183,7 @@ describe("DesignStudio for a journey", () => {
             notes: [],
             agent_is_draft: false,
           },
+          modules: [],
         }),
       );
     });

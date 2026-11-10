@@ -111,6 +111,7 @@ function journey(overrides = {}) {
       notes: [],
       agent_is_draft: true,
     },
+    modules: [],
     ...overrides,
   };
 }
