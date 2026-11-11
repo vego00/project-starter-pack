@@ -29,7 +29,7 @@ GATE_WRITES = {
     "editing_card",
 }
 NODE_WRITES: dict[str, set[str]] = {
-    "gcb_drafter": {"gcb_draft"},
+    "gcb_drafter": {"gcb_draft", "start_fields", "start_chat"},
     "gcb_gate": {"gcb_answer", "clarifications", "clarify_rounds", "gate_outcome", "gate_error"},
     "intake": {"project_spec"},
     "clarify_gate": {"clarify_passed"},

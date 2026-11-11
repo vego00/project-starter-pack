@@ -1,8 +1,9 @@
 """Ports for the model-backed parts, with mock and real implementations."""
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import Any, Protocol
 
 from pydantic import BaseModel
 
@@ -22,11 +23,17 @@ from app.journey.prompts import (
     MODULE_VERSION,
     QA_SYSTEM,
     QA_VERSION,
+    START_GCB_SYSTEM,
+    START_SYSTEM,
+    START_VERSION,
     advisor_user,
     gcb_user,
     module_user,
     qa_user,
+    start_gcb_user,
+    start_user,
 )
+from app.journey.start import StartChange, StartTurn, StartValue
 from app.journey.state import (
     MAX_GCB_CHARS,
     MAX_LLM_CALLS_PER_JOURNEY,
@@ -314,6 +321,97 @@ class LLMModuleWriter:
         )
 
 
+class StartOutput(BaseModel):
+    changes: list[StartChange] = []
+
+
+class GcbPick(BaseModel):
+    field: str
+    value: str
+    why: str
+
+
+class StartGcbOutput(BaseModel):
+    picks: list[GcbPick] = []
+
+
+class ModelUse(BaseModel):
+    model_id: str | None = None
+    prompt_version: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+
+
+class StartReply(ModelUse):
+    changes: list[StartChange] = []
+
+
+class GcbRecommendation(ModelUse):
+    picks: list[GcbPick] = []
+
+
+class StartWriter(Protocol):
+    def write(
+        self,
+        current: Mapping[str, StartValue],
+        chat: list[StartTurn],
+        message: str,
+        focus: str | None,
+    ) -> StartReply | None: ...
+
+    def recommend_gcb(
+        self, current: Mapping[str, StartValue], chat: list[StartTurn], blank: list[str]
+    ) -> GcbRecommendation | None: ...
+
+
+def _use(result: Any) -> dict[str, Any]:
+    return {
+        "model_id": result.model_id,
+        "prompt_version": START_VERSION,
+        "input_tokens": result.input_tokens,
+        "output_tokens": result.output_tokens,
+    }
+
+
+class LLMStartWriter:
+    """None on failure: the caller keeps the fields as they were, so the user can send again."""
+
+    def __init__(self, llm: StructuredLLM):
+        self._llm = llm
+
+    def write(
+        self,
+        current: Mapping[str, StartValue],
+        chat: list[StartTurn],
+        message: str,
+        focus: str | None,
+    ) -> StartReply | None:
+        try:
+            result = self._llm.generate(
+                system=START_SYSTEM,
+                user=start_user(current, chat, message, focus),
+                schema=StartOutput,
+            )
+        except Exception as exc:  # noqa: BLE001 - model boundary; the prompt holds user text
+            logger.error("start fill failed type=%s", type(exc).__name__)
+            return None
+        return StartReply(changes=result.output.changes, **_use(result))
+
+    def recommend_gcb(
+        self, current: Mapping[str, StartValue], chat: list[StartTurn], blank: list[str]
+    ) -> GcbRecommendation | None:
+        try:
+            result = self._llm.generate(
+                system=START_GCB_SYSTEM,
+                user=start_gcb_user(current, chat, blank),
+                schema=StartGcbOutput,
+            )
+        except Exception as exc:  # noqa: BLE001 - model boundary; the prompt holds user text
+            logger.error("start recommendation failed type=%s", type(exc).__name__)
+            return None
+        return GcbRecommendation(picks=result.output.picks, **_use(result))
+
+
 @dataclass(frozen=True)
 class JourneyDeps:
     decider: Decider = field(default_factory=MockDecider)
@@ -325,6 +423,8 @@ class JourneyDeps:
     designer: Designer | None = None
     # None means no model: the build order is filled in with forms instead of a conversation.
     module_writer: ModuleWriter | None = None
+    # None means no model: the start screen is filled with picks and defaults instead of chat.
+    start_writer: StartWriter | None = None
     card_selection: bool = True
 
     @property
@@ -386,5 +486,6 @@ def build_deps(settings: Settings, registry: Registry) -> JourneyDeps:
         responder=LLMResponder(llm, registry),
         designer=LLMDesigner(design_llm, registry),
         module_writer=LLMModuleWriter(llm),
+        start_writer=LLMStartWriter(llm),
         card_selection=settings.card_selection,
     )

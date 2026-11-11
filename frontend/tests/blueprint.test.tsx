@@ -84,6 +84,7 @@ function journey(overrides: Partial<Journey> = {}): Journey {
     module_chat: [],
     module_revision: 0,
     module_undo_count: 0,
+    start: null,
     can_reopen: false,
     ...overrides,
   };

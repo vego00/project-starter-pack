@@ -20,6 +20,13 @@ from app.journey.design_constraints import BLOCKING_CARDS, derive_design_constra
 from app.journey.design_edit import keep_human_edits
 from app.journey.design_generator import MAX_ATTEMPTS, MAX_OUTAGE_RETRIES, generate_design
 from app.journey.services import JourneyDeps, llm_calls_used
+from app.journey.start import (
+    GCB_NAMES,
+    StartTurn,
+    apply_start_changes,
+    reply_text,
+    start_from_draft,
+)
 from app.journey.state import (
     CLARIFY_QUESTIONS,
     DONE_ACTION,
@@ -39,6 +46,7 @@ from app.journey.state import (
     Decision,
     DeferAction,
     FocusAction,
+    GcbDraft,
     JourneyState,
     KeepAction,
     OptionView,
@@ -178,10 +186,41 @@ def _recommendation_reason(card: DecisionCard, option_id: str, decider: str) -> 
 
 def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
     def gcb_drafter(state: JourneyState) -> dict[str, Any]:
-        draft = deps.drafter.draft(state)
+        idea = state.project_spec.idea
+        if deps.start_writer is None:
+            draft = deps.drafter.draft(state)
+            return {
+                "gcb_draft": draft,
+                "start_fields": start_from_draft(draft),
+                "start_chat": [StartTurn(role="user", text=idea)],
+                "_trace": draft.model_dump(
+                    include={"model_id", "prompt_version", "input_tokens", "output_tokens"}
+                ),
+            }
+        # The idea is the first message: one call fills the goal and the signals together.
+        reply = deps.start_writer.write({}, [], idea, None)
+        if reply is None:
+            answer = StartTurn(
+                role="assistant",
+                text="문장을 정리하지 못했어요. 다시 보내거나 칸을 눌러 직접 채워 주세요.",
+            )
+            return {
+                "gcb_draft": GcbDraft(source="unavailable"),
+                "start_chat": [StartTurn(role="user", text=idea), answer],
+            }
+        fields, applied, rejected = apply_start_changes({}, reply.changes, "said")
+        answer = StartTurn(
+            role="assistant",
+            text=reply_text(applied, fields, None),
+            changes=applied,
+            rejected=rejected,
+        )
+        texts = {name: str(fields[name].value) for name in GCB_NAMES if name in fields}
         return {
-            "gcb_draft": draft,
-            "_trace": draft.model_dump(
+            "gcb_draft": GcbDraft(**texts, source="llm", model_id=reply.model_id),
+            "start_fields": fields,
+            "start_chat": [StartTurn(role="user", text=idea), answer],
+            "_trace": reply.model_dump(
                 include={"model_id", "prompt_version", "input_tokens", "output_tokens"}
             ),
         }
@@ -189,8 +228,8 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
     def gcb_gate(state: JourneyState) -> dict[str, Any]:
         draft = state.gcb_draft
         spec = state.project_spec
-        # Everything both clarifying rounds could ask, so one screen is enough.
-        asked = spec.missing_signals()[: MAX_QUESTIONS_PER_ROUND * MAX_CLARIFY_ROUNDS]
+        # The start screen fills every signal (ADR-023), so all of them are accepted here.
+        asked = spec.missing_signals()
         raw = _wait_for_user(
             {
                 "type": "gcb",

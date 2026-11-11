@@ -60,12 +60,26 @@ def shot(page: Page, name: str) -> None:
 
 def start(page: Page) -> None:
     page.get_by_label("프로젝트 아이디어").fill(IDEA)
+    page.get_by_role("button", name="보내기", exact=True).click()
+    expect(page.get_by_role("log", name="시작 대화")).to_be_visible()
+
+
+def begin(page: Page) -> None:
+    """The mock stack has no model: blanks take defaults, then the journey starts."""
+    page.get_by_role("button", name="빈칸은 알아서 채워 주세요").click()
     page.get_by_role("button", name="결정 시작하기").click()
 
 
 def confirm_brief(page: Page) -> None:
-    expect(page.get_by_role("heading", name="추천에 쓸 내용을 확인해 주세요")).to_be_visible()
-    page.get_by_role("button", name="이 내용으로 결정 시작").click()
+    begin(page)
+
+
+def fill_field(page: Page, label: str, text: str) -> None:
+    page.get_by_role("button", name=f"{label} 고치기").click()
+    page.get_by_label(f"{label} 직접 적기").fill(text)
+    page.get_by_role("button", name="저장").click()
+    expect(page.get_by_role("button", name=f"{label} 고치기 닫기")).to_be_visible()
+    page.get_by_role("button", name=f"{label} 고치기 닫기").click()
 
 
 def skip_clarify(page: Page) -> None:
@@ -92,13 +106,18 @@ def test_all_cards_to_completion_with_reload_and_restart(page: Page):
     shot(page, "1-start")
     start(page)
     shot(page, "1b-gcb")
-    expect(page.get_by_role("heading", name="추천에 쓸 내용을 확인해 주세요")).to_be_visible()
-    page.get_by_label("끝났을 때 어떤 상태면 되나요?").fill(GOAL)
-    page.get_by_label("어디까지 배포할 계획인가요?").select_option("small_group")
-    page.get_by_label("실제로 사용할 사람은 몇 명 정도인가요?").fill("20")
-    page.get_by_label("함께 개발하는 인원은 몇 명인가요?").fill("4")
+    expect(page.get_by_role("button", name="결정 시작하기")).to_be_disabled()
+    fill_field(page, "끝났을 때 어떤 상태면 되나요?", GOAL)
+    page.get_by_role("button", name="배포 범위 고치기").click()
+    page.get_by_role("button", name="소수 사용자").click()
+    expect(page.get_by_text("직접 고름").first).to_be_visible()
+    page.get_by_role("button", name="배포 범위 고치기 닫기").click()
+    fill_field(page, "사용자 수", "20")
+    fill_field(page, "개발 인원", "4")
+    page.get_by_role("button", name="빈칸은 알아서 채워 주세요").click()
+    expect(page.get_by_text("기본값").first).to_be_visible()
     shot(page, "2-brief")
-    page.get_by_role("button", name="이 내용으로 결정 시작").click()
+    page.get_by_role("button", name="결정 시작하기").click()
 
     expect(page.get_by_text("내 프로젝트를 분석한 결과가 아닙니다")).to_be_visible()
     shot(page, "3-card")

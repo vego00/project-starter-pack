@@ -19,6 +19,7 @@ from app.journey.modules import ModuleChange
 from app.journey.persistence import open_checkpointer
 from app.journey.service import JourneyError, JourneyService, JourneyView
 from app.journey.services import JourneyDeps, build_deps
+from app.journey.start import StartChange
 from app.journey.state import JourneyAction, ProjectSpec
 from app.registry.loader import Registry, load_registry
 
@@ -52,6 +53,23 @@ class ModuleEditRequest(BaseModel):
 
 
 class ModuleUndoRequest(BaseModel):
+    revision: int
+
+
+class StartMessageRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    revision: int
+    text: str = Field(min_length=1, max_length=2000)
+    focus: str | None = Field(default=None, max_length=40)
+
+
+class StartEditRequest(BaseModel):
+    revision: int
+    change: StartChange
+
+
+class StartFillRequest(BaseModel):
     revision: int
 
 
@@ -213,6 +231,37 @@ def create_app(
     )
     def undo_module(journey_id: UUID, payload: ModuleUndoRequest, journeys: Journeys):
         return _guarded(journey_id, lambda: journeys.undo_module(journey_id, payload.revision))
+
+    @app.post(
+        "/api/v1/journeys/{journey_id}/start/messages",
+        response_model=JourneyView,
+        responses=ERROR_RESPONSES,
+    )
+    def send_start_message(journey_id: UUID, payload: StartMessageRequest, journeys: Journeys):
+        return _guarded(
+            journey_id,
+            lambda: journeys.send_start_message(
+                journey_id, payload.revision, payload.text, payload.focus
+            ),
+        )
+
+    @app.post(
+        "/api/v1/journeys/{journey_id}/start/edits",
+        response_model=JourneyView,
+        responses=ERROR_RESPONSES,
+    )
+    def edit_start(journey_id: UUID, payload: StartEditRequest, journeys: Journeys):
+        return _guarded(
+            journey_id, lambda: journeys.edit_start(journey_id, payload.revision, payload.change)
+        )
+
+    @app.post(
+        "/api/v1/journeys/{journey_id}/start/fill",
+        response_model=JourneyView,
+        responses=ERROR_RESPONSES,
+    )
+    def fill_start(journey_id: UUID, payload: StartFillRequest, journeys: Journeys):
+        return _guarded(journey_id, lambda: journeys.fill_start(journey_id, payload.revision))
 
     @app.get(
         "/api/v1/blueprint/examples",

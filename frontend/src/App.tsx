@@ -2,9 +2,12 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   ApiError,
   editModule,
+  editStart,
+  fillStart,
   getJourney,
   sendAction,
   sendModuleMessage,
+  sendStartMessage,
   startJourney,
   undoModule,
 } from "./api";
@@ -14,13 +17,12 @@ import {
   ClarifyForm,
   CompletedView,
   DecisionView,
-  GcbForm,
   IssuesView,
   ProgressRail,
-  StartForm,
 } from "./components";
 import type { SideView } from "./components";
 import { ModuleChat } from "./moduleChat";
+import { StartChat } from "./startChat";
 import { ThemeToggle } from "./theme";
 
 const LAST_JOURNEY_KEY = "starter-pack:last-journey:v1";
@@ -155,7 +157,7 @@ export default function App() {
   }
 
   /** Errors go back to the chat or the field that sent them, not to the page. */
-  async function changeModules(
+  async function changeInPlace(
     work: (current: Journey) => Promise<Journey>,
   ): Promise<string> {
     if (!journey) return "";
@@ -189,6 +191,22 @@ export default function App() {
   }
 
   const prompt = journey?.prompt ?? null;
+  const startChat = (current: Journey | null) => (
+    <StartChat
+      journey={current}
+      busy={busy}
+      preview={<SamplePreview />}
+      onIdea={start}
+      onSend={(text, focus) =>
+        changeInPlace((j) => sendStartMessage(j, text, focus))
+      }
+      onEdit={(change) => changeInPlace((j) => editStart(j, change))}
+      onFill={() => changeInPlace(fillStart)}
+      onBegin={() => {
+        if (current?.start) act(current.start.submit as Action);
+      }}
+    />
+  );
   const briefing = prompt?.type === "gcb" || prompt?.type === "clarify";
   const finished = !prompt && journey?.status === "completed";
   const inWorkspace = journey !== null && !briefing && !finished;
@@ -283,13 +301,11 @@ export default function App() {
       {restoring ? (
         <p className="panel muted">저장된 여정을 불러오는 중이에요…</p>
       ) : !journey ? (
-        <main>
-          <StartForm busy={busy} onStart={start} preview={<SamplePreview />} />
-        </main>
+        <main className="start-page">{startChat(null)}</main>
       ) : briefing ? (
-        <main className="brief-page">
+        <main className={prompt.type === "gcb" ? "start-page" : "brief-page"}>
           {prompt.type === "gcb" ? (
-            <GcbForm prompt={prompt} busy={busy} act={act} />
+            startChat(journey)
           ) : (
             <ClarifyForm prompt={prompt} busy={busy} act={act} />
           )}
@@ -308,9 +324,9 @@ export default function App() {
                   journey={journey}
                   busy={busy}
                   onSend={(text) =>
-                    changeModules((current) => sendModuleMessage(current, text))
+                    changeInPlace((current) => sendModuleMessage(current, text))
                   }
-                  onUndo={() => changeModules(undoModule)}
+                  onUndo={() => changeInPlace(undoModule)}
                 />
               }
               graph={
@@ -325,7 +341,7 @@ export default function App() {
                     journey.module_mode === "closed"
                       ? undefined
                       : (change) =>
-                          changeModules((current) =>
+                          changeInPlace((current) =>
                             editModule(current, change),
                           )
                   }

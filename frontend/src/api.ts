@@ -196,6 +196,35 @@ const modulePlanSchema = z.object({
   tasks: z.array(z.string()),
 });
 
+const startFieldSchema = z.object({
+  name: z.string(),
+  label: z.string(),
+  kind: z.enum(["text", "choice", "multi"]),
+  choices: z.array(z.object({ value: z.string(), label: z.string() })),
+  free_text: z.boolean(),
+  rule_read: z.boolean(),
+  value: z.union([z.string(), z.array(z.string())]).nullable(),
+  display: z.string().nullable(),
+  source: z.enum(["said", "picked", "default", "recommended"]).nullable(),
+  why: z.string().nullable(),
+});
+
+const startSchema = z.object({
+  mode: z.enum(["model", "form"]),
+  fields: z.array(startFieldSchema),
+  chat: z.array(
+    z.object({
+      role: z.enum(["user", "assistant"]),
+      text: z.string(),
+      changes: z.array(z.string()),
+      rejected: z.array(z.string()),
+    }),
+  ),
+  revision: z.number(),
+  missing: z.array(z.string()),
+  submit: z.record(z.string(), z.unknown()),
+});
+
 const moduleTurnSchema = z.object({
   role: z.enum(["user", "assistant"]),
   text: z.string(),
@@ -260,6 +289,7 @@ const journeySchema = z.object({
   module_chat: z.array(moduleTurnSchema).default([]),
   module_revision: z.number().default(0),
   module_undo_count: z.number().default(0),
+  start: startSchema.nullable().default(null),
   can_reopen: z.boolean().optional().default(false),
 });
 
@@ -277,6 +307,9 @@ export type BlueprintRow = BlueprintNode["rows"][number];
 export type BlueprintStep = NonNullable<BlueprintNode["step"]>;
 export type ModulePlan = Journey["modules"][number];
 export type ModuleTurn = Journey["module_chat"][number];
+export type StartView = NonNullable<Journey["start"]>;
+export type StartField = StartView["fields"][number];
+export type StartChange = { field: string; value?: string; values?: string[] };
 export type ModuleChange =
   | { module: string; field: "goal"; value: string }
   | { module: string; field: "include" | "exclude"; items: string[] }
@@ -406,6 +439,40 @@ export function packageUrl(id: string): string {
 
 export function summaryUrl(id: string): string {
   return `/api/v1/journeys/${id}/summary.md`;
+}
+
+function startRequest(
+  journey: Journey,
+  path: "messages" | "edits" | "fill",
+  body: object,
+): Promise<Journey> {
+  return request(
+    `/api/v1/journeys/${journey.journey_id}/start/${path}`,
+    journeySchema,
+    {
+      method: "POST",
+      body: JSON.stringify({ revision: journey.start?.revision ?? 0, ...body }),
+    },
+  );
+}
+
+export function sendStartMessage(
+  journey: Journey,
+  text: string,
+  focus: string | null,
+): Promise<Journey> {
+  return startRequest(journey, "messages", { text: text.trim(), focus });
+}
+
+export function editStart(
+  journey: Journey,
+  change: StartChange,
+): Promise<Journey> {
+  return startRequest(journey, "edits", { change });
+}
+
+export function fillStart(journey: Journey): Promise<Journey> {
+  return startRequest(journey, "fill", {});
 }
 
 function moduleRequest(

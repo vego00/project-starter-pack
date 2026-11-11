@@ -10,9 +10,11 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from app.journey.constraints import Conflict
 from app.journey.design import DesignState
 from app.journey.modules import ModuleNote, ModuleTurn
+from app.journey.start import StartTurn, StartValue
 from app.registry.schema import CardOption
 
 CardId = str
+RangeText = Annotated[str, Field(min_length=1, max_length=40)]
 DeploymentTarget = Literal["local_demo", "small_group", "public_service"]
 MAX_CLARIFY_ROUNDS = 2
 MAX_QUESTIONS_PER_ROUND = 3
@@ -41,11 +43,12 @@ class ProjectSpec(BaseModel):
     goal: str | None = Field(default=None, min_length=1, max_length=MAX_GCB_CHARS)
     context: str | None = Field(default=None, min_length=1, max_length=MAX_GCB_CHARS)
     boundary: str | None = Field(default=None, min_length=1, max_length=MAX_GCB_CHARS)
-    team_size: int | None = Field(default=None, ge=1)
-    duration_weeks: int | None = Field(default=None, ge=1)
+    # A range picked on the start screen ("10~100명") stays text; nothing invents a number for it.
+    team_size: Annotated[int, Field(ge=1)] | RangeText | None = None
+    duration_weeks: Annotated[int, Field(ge=1)] | RangeText | None = None
     budget: str | None = Field(default=None, min_length=1, max_length=200)
-    expected_users: int | None = Field(default=None, ge=0)
-    weekly_hours: int | None = Field(default=None, ge=1)
+    expected_users: Annotated[int, Field(ge=0)] | RangeText | None = None
+    weekly_hours: Annotated[int, Field(ge=1)] | RangeText | None = None
     data_traits: list[Annotated[str, Field(max_length=200)]] | None = Field(
         default=None, max_length=20
     )
@@ -223,6 +226,10 @@ class JourneyState(BaseModel):
     module_chat: list[ModuleTurn] = []
     module_undo: list[dict[str, ModuleNote]] = []
     module_revision: int = 0
+    # The start screen's conversation and fields (ADR-023), kept until the journey starts.
+    start_fields: dict[str, StartValue] = {}
+    start_chat: list[StartTurn] = []
+    start_revision: int = 0
     trace: Annotated[list[NodeEvent], operator.add] = []
 
     @property

@@ -1,0 +1,215 @@
+"""Start screen (ADR-023): chat fills what was said, picks and defaults fill the rest."""
+
+import pytest
+from app.config import Settings
+from app.journey.services import GcbPick, GcbRecommendation, JourneyDeps, StartReply
+from app.journey.start import (
+    NOTHING,
+    StartChange,
+    StartValue,
+    apply_start_changes,
+    fill_defaults,
+    missing,
+    to_spec,
+)
+from app.main import create_app
+from fastapi.testclient import TestClient
+from langgraph.checkpoint.memory import InMemorySaver
+
+JOURNEYS = "/api/v1/journeys"
+IDEA = "부트캠프 수강생이 강의 자료에서 출처와 함께 답을 찾는 챗봇"
+
+
+def change(field, value="", values=()):
+    return StartChange(field=field, value=value, values=list(values))
+
+
+def test_only_listed_choices_and_short_free_text_are_kept():
+    fields, applied, rejected = apply_start_changes(
+        {},
+        [
+            change("deployment_target", "small_group"),
+            change("has_gpu", "maybe"),
+            change("expected_users", "30명"),
+            change("data_traits", values=["문서 검색 필요", "문서 검색 필요"]),
+            change("data_traits_extra", "x"),
+            change("goal", "  수강생이   답을 찾는 상태 "),
+        ],
+        "said",
+    )
+
+    assert fields["deployment_target"].value == "small_group"
+    assert fields["expected_users"].value == "30명"
+    assert fields["data_traits"].value == ["문서 검색 필요"]
+    assert fields["goal"].value == "수강생이 답을 찾는 상태"
+    assert "has_gpu" not in fields
+    assert applied == ["배포 범위", "사용자 수", "다루는 데이터", "목표"]
+    assert len(rejected) == 2
+
+
+def test_a_focused_field_is_the_only_one_that_moves():
+    fields, applied, _ = apply_start_changes(
+        {}, [change("has_gpu", "yes"), change("budget", "무료로만")], "said", focus="has_gpu"
+    )
+
+    assert set(fields) == {"has_gpu"} and applied == ["GPU 장비"]
+
+
+def test_defaults_fill_only_blank_signals_and_name_their_reason():
+    said = {"has_gpu": StartValue(value="yes", source="said")}
+
+    fields, labels = fill_defaults(said)
+
+    assert fields["has_gpu"].value == "yes"
+    assert fields["deployment_target"].value == "small_group"
+    assert fields["deployment_target"].source == "default"
+    assert fields["data_traits"].value == ["특별한 것 없음"]
+    assert all(fields[name].why for name in fields if name != "has_gpu")
+    assert "GPU 장비" not in labels
+    assert missing(fields) == ["goal", "context", "boundary"]
+
+
+def test_the_start_action_turns_picks_into_project_signals():
+    fields, _ = fill_defaults(
+        {
+            "goal": StartValue(value="답을 찾는 상태", source="said"),
+            "boundary": StartValue(value=NOTHING, source="recommended", why="x"),
+            "team_size": StartValue(value="2", source="picked"),
+        }
+    )
+
+    action = to_spec(fields)
+
+    assert action["goal"] == "답을 찾는 상태" and action["boundary"] == ""
+    assert action["answers"]["has_gpu"] is False
+    assert action["answers"]["team_size"] == 2
+    assert action["answers"]["expected_users"] == "10명 이하"
+    assert action["answers"]["deployment_target"] == "small_group"
+
+
+class ScriptedStart:
+    def __init__(self, *replies, picks=None):
+        self.replies = list(replies)
+        self.picks = picks
+        self.seen = []
+
+    def write(self, current, chat, message, focus):
+        self.seen.append((message, focus, len(chat)))
+        return self.replies.pop(0)
+
+    def recommend_gcb(self, current, chat, blank):
+        return self.picks
+
+
+def client_with(writer=None):
+    deps = JourneyDeps(start_writer=writer)
+    app = create_app(Settings(_env_file=None), checkpointer=InMemorySaver(), deps=deps)
+    return TestClient(app, raise_server_exceptions=False)
+
+
+def post(client, view, path, **body):
+    return client.post(
+        f"{JOURNEYS}/{view['journey_id']}/start/{path}",
+        json={"revision": view["start"]["revision"], **body},
+    )
+
+
+def value_of(view, name):
+    return next(f for f in view["start"]["fields"] if f["name"] == name)
+
+
+FIRST = StartReply(
+    changes=[
+        change("goal", "수강생이 출처와 함께 답을 찾는 상태"),
+        change("deployment_target", "small_group"),
+        change("expected_users", "30명"),
+    ],
+    model_id="m",
+)
+
+
+def test_the_idea_fills_fields_and_the_chat_goes_on_until_the_journey_starts():
+    writer = ScriptedStart(
+        FIRST,
+        StartReply(changes=[change("has_gpu", "no"), change("budget", "무료로만")]),
+        picks=GcbRecommendation(
+            picks=[GcbPick(field="boundary", value="답마다 출처를 표시한다", why="목표에서")]
+        ),
+    )
+    with client_with(writer) as client:
+        view = client.post(JOURNEYS, json={"idea": IDEA}).json()
+        start = view["start"]
+        assert start["mode"] == "model"
+        assert [t["role"] for t in start["chat"]] == ["user", "assistant"]
+        assert start["chat"][1]["changes"] == [
+            "목표",
+            "배포 범위",
+            "사용자 수",
+        ]
+        assert value_of(view, "deployment_target")["display"] == "소수 사용자"
+        assert value_of(view, "deployment_target")["source"] == "said"
+        assert value_of(view, "has_gpu")["rule_read"] is True
+
+        # In focus only GPU may change, though the model also sent a budget.
+        view = post(client, view, "messages", text="GPU는 없어요", focus="has_gpu").json()
+        assert writer.seen[-1] == ("GPU는 없어요", "has_gpu", 2)
+        assert value_of(view, "has_gpu")["value"] == "no"
+        assert value_of(view, "budget")["value"] is None
+        assert view["start"]["chat"][-1]["text"].startswith("GPU 장비를 고쳤어요.")
+
+        view = post(client, view, "edits", change={"field": "team_size", "value": "2~3명"}).json()
+        assert value_of(view, "team_size")["source"] == "picked"
+
+        view = post(client, view, "fill").json()
+        assert value_of(view, "boundary")["source"] == "recommended"
+        assert value_of(view, "boundary")["why"] == "목표에서"
+        assert value_of(view, "context")["value"] == NOTHING
+        assert value_of(view, "budget")["source"] == "default"
+        assert view["start"]["missing"] == []
+
+        submit = view["start"]["submit"]
+        started = client.post(
+            f"{JOURNEYS}/{view['journey_id']}/decisions",
+            json={"revision": view["revision"], "action": submit},
+        ).json()
+        assert started["start"] is None
+        assert started["prompt"]["type"] == "decision"
+        assert post(client, view, "fill").json()["error"]["code"] == "start_closed"
+
+
+def test_a_failed_reply_changes_nothing():
+    with client_with(ScriptedStart(FIRST, None)) as client:
+        view = client.post(JOURNEYS, json={"idea": IDEA}).json()
+        response = post(client, view, "messages", text="GPU는 없어요")
+
+        assert response.status_code == 503
+        again = client.get(f"{JOURNEYS}/{view['journey_id']}").json()
+        assert again["start"]["revision"] == view["start"]["revision"]
+        assert len(again["start"]["chat"]) == 2
+
+
+def test_without_a_model_the_fields_are_picked_and_blanks_become_defaults():
+    with client_with() as client:
+        view = client.post(JOURNEYS, json={"idea": IDEA}).json()
+        assert view["start"]["mode"] == "form"
+        assert [t["role"] for t in view["start"]["chat"]] == ["user"]
+        assert post(client, view, "messages", text="안녕").status_code == 409
+
+        bad = post(client, view, "edits", change={"field": "has_gpu", "value": "maybe"})
+        assert bad.status_code == 422
+
+        view = post(client, view, "fill").json()
+        assert value_of(view, "goal")["value"] == NOTHING
+        assert view["start"]["missing"] == []
+        stale = client.post(
+            f"{JOURNEYS}/{view['journey_id']}/start/fill",
+            json={"revision": view["start"]["revision"] - 1},
+        )
+        assert stale.json()["error"]["code"] == "stale_revision"
+
+
+@pytest.mark.parametrize("focus", ["nope", "x" * 41])
+def test_focus_must_name_a_field(focus):
+    with client_with(ScriptedStart(FIRST)) as client:
+        view = client.post(JOURNEYS, json={"idea": IDEA}).json()
+        assert post(client, view, "messages", text="안녕", focus=focus).status_code == 422

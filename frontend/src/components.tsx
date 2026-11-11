@@ -56,7 +56,7 @@ const STATE_LABEL = {
   skipped: "해당 없음",
 };
 
-const EXAMPLES = [
+export const EXAMPLES = [
   "부트캠프 강의 자료를 찾아 질문에 답하고 출처를 알려주는 멀티 에이전트 서비스를 만들고 싶어요.",
   "회의록에서 담당자별 할 일을 뽑아 팀 메신저로 보내기 전에 사람이 확인하는 에이전트를 만들고 싶어요.",
 ];
@@ -74,102 +74,6 @@ function useFocusedHeading(screenKey?: string | number) {
   }, [screenKey]);
   return heading;
 }
-
-export function StartForm({
-  busy,
-  onStart,
-  preview,
-}: {
-  busy: boolean;
-  onStart: (idea: string) => void;
-  preview?: ReactNode;
-}) {
-  const [idea, setIdea] = useState("");
-  const length = Array.from(idea.trim()).length;
-  const valid = length >= MIN_IDEA && length <= MAX_IDEA;
-
-  function submit(event: FormEvent) {
-    event.preventDefault();
-    if (valid && !busy) onStart(idea);
-  }
-
-  return (
-    <div className="start">
-      <form className="start-form" onSubmit={submit}>
-        <h2>만들고 싶은 서비스를 적으면, 설계와 빌드 묶음까지 함께 정해요</h2>
-        <p className="muted">
-          모델, 저장소, 배포처럼 나중에 되돌리기 어려운 결정을 하나씩 비교하며
-          직접 골라요.
-        </p>
-        <label htmlFor="idea">프로젝트 아이디어</label>
-        <textarea
-          id="idea"
-          rows={5}
-          value={idea}
-          onChange={(event) => setIdea(event.target.value)}
-          placeholder="누가 어떤 문제를 겪고, 무엇을 만들고 싶은지 적어 주세요."
-        />
-        <div className="row between">
-          <span className="muted">
-            {length.toLocaleString()} / {MAX_IDEA.toLocaleString()}자 (최소{" "}
-            {MIN_IDEA}자)
-          </span>
-          <button className="primary" disabled={!valid || busy}>
-            {busy ? "시작하는 중…" : "결정 시작하기"}
-          </button>
-        </div>
-        <p className="muted examples-label">이런 걸 만들 수 있어요</p>
-        <div className="examples">
-          {EXAMPLES.map((example) => (
-            <button
-              type="button"
-              key={example}
-              onClick={() => setIdea(example)}
-            >
-              {example}
-            </button>
-          ))}
-        </div>
-        <p className="muted privacy">
-          개인정보나 회사 기밀은 적지 마세요. 입력한 내용은 저장되고, 모델이
-          연결된 경우 외부 모델 API로 전송돼요.
-        </p>
-      </form>
-      <section className="start-preview" aria-label="끝나면 받는 것">
-        <h2>끝나면 이런 구성도를 받아요</h2>
-        <p className="muted">
-          고른 서비스로 그려지고, 결정을 바꾸면 함께 바뀌어요.
-        </p>
-        {preview}
-        <p>
-          <strong>빌드 묶음:</strong> 결정과 설계를 담은 파일을 내려받아 Claude
-          Code나 Codex에 그대로 맡길 수 있어요.
-        </p>
-      </section>
-    </div>
-  );
-}
-
-const MAX_GCB = 1000;
-const GCB_FIELDS = [
-  {
-    name: "goal",
-    label: "끝났을 때 어떤 상태면 되나요?",
-    placeholder: "예: 수강생이 강의 내용을 출처와 함께 바로 찾을 수 있는 상태",
-  },
-  {
-    name: "context",
-    label: "판단에 필요한 상황은 무엇인가요?",
-    placeholder:
-      "예: 부트캠프 수강생이 복습할 때 쓴다. 자료가 여러 곳에 흩어져 있다.",
-  },
-  {
-    name: "boundary",
-    label: "결과가 꼭 지켜야 할 기준은 무엇인가요?",
-    placeholder:
-      "예: 답변마다 출처를 표시한다. 개인정보를 외부로 보내지 않는다.",
-  },
-] as const;
 
 function ClarifyField({ field, id }: { field: string; id: string }) {
   if (field === "deployment_target")
@@ -223,82 +127,6 @@ function collectAnswers(
     if (raw) answers[field] = toAnswer(field, raw);
   }
   return answers;
-}
-
-export function GcbForm({
-  prompt,
-  busy,
-  act,
-}: {
-  prompt: GcbPrompt;
-  busy: boolean;
-  act: Act;
-}) {
-  const heading = useFocusedHeading();
-  const questions = prompt.questions ?? [];
-
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const value = (name: string) => String(form.get(name) ?? "").trim();
-    act({
-      action: "gcb",
-      goal: value("goal"),
-      context: value("context"),
-      boundary: value("boundary"),
-      ...(questions.length > 0 && {
-        answers: collectAnswers(form, questions),
-      }),
-    });
-  }
-
-  return (
-    <form className="brief" onSubmit={submit}>
-      <h2 ref={heading} tabIndex={-1}>
-        추천에 쓸 내용을 확인해 주세요
-      </h2>
-      <p className="muted">
-        {prompt.source === "llm"
-          ? "AI가 아이디어를 읽고 채운 초안이에요. 틀린 곳만 고치고, 모르면 비워도 돼요."
-          : prompt.source === "unavailable"
-            ? "AI 초안을 만들지 못했어요. 직접 적거나 비워 두어도 돼요."
-            : "뒤에 나오는 추천이 이 내용을 기준으로 해요. 모르면 비워도 돼요."}
-      </p>
-      {prompt.error && (
-        <p className="alert" role="alert">
-          {prompt.error}
-        </p>
-      )}
-      <div className="brief-grid">
-        <div>
-          {GCB_FIELDS.map((field) => (
-            <div className="field" key={field.name}>
-              <label htmlFor={`gcb-${field.name}`}>{field.label}</label>
-              <textarea
-                id={`gcb-${field.name}`}
-                name={field.name}
-                rows={3}
-                maxLength={MAX_GCB}
-                defaultValue={prompt.draft[field.name]}
-                placeholder={field.placeholder}
-              />
-            </div>
-          ))}
-        </div>
-        <div>
-          {questions.map(({ field, question }) => (
-            <div className="field" key={field}>
-              <label htmlFor={`clarify-${field}`}>{question}</label>
-              <ClarifyField field={field} id={`clarify-${field}`} />
-            </div>
-          ))}
-          <button className="primary brief-submit" disabled={busy}>
-            이 내용으로 결정 시작
-          </button>
-        </div>
-      </div>
-    </form>
-  );
 }
 
 export function ClarifyForm({
