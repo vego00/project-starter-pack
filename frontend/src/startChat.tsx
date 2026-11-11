@@ -389,6 +389,32 @@ export function StartChat({
               {error}
             </p>
           )}
+          {start && (
+            <div className="start-actions">
+              <p className="muted" role="status">
+                {blanks > 0
+                  ? `빈칸 ${blanks}개가 남았어요. 모두 채우면 결정을 시작할 수 있어요.`
+                  : "모두 채웠어요. 결정을 시작하면 카드를 하나씩 정해요."}
+              </p>
+              <div className="row">
+                <button
+                  type="button"
+                  disabled={busy || blanks === 0}
+                  onClick={() => void fill()}
+                >
+                  빈칸은 알아서 채워 주세요
+                </button>
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={busy || blanks > 0}
+                  onClick={onBegin}
+                >
+                  결정 시작하기
+                </button>
+              </div>
+            </div>
+          )}
           {!isForm && (
             <form
               className="start-composer"
@@ -458,32 +484,6 @@ export function StartChat({
                 모델이 연결된 경우 외부 모델 API로 전송돼요.
               </p>
             </>
-          )}
-          {start && (
-            <div className="start-actions">
-              <div className="row">
-                <button
-                  type="button"
-                  disabled={busy || blanks === 0}
-                  onClick={() => void fill()}
-                >
-                  빈칸은 알아서 채워 주세요
-                </button>
-                <button
-                  type="button"
-                  className="primary"
-                  disabled={busy || blanks > 0}
-                  onClick={onBegin}
-                >
-                  결정 시작하기
-                </button>
-              </div>
-              <p className="muted" role="status">
-                {blanks > 0
-                  ? `빈칸 ${blanks}개가 남았어요. 모두 채우면 결정을 시작할 수 있어요.`
-                  : "모두 채웠어요. 결정을 시작하면 카드를 하나씩 정해요."}
-              </p>
-            </div>
           )}
         </section>
         {start && left && (
