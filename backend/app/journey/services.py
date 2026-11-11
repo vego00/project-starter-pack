@@ -11,7 +11,7 @@ from app.journey.deciders.base import Decider
 from app.journey.deciders.jev import JevDecider
 from app.journey.deciders.mock import MockDecider
 from app.journey.design_generator import Designer, LLMDesigner
-from app.journey.llm import GeminiLLM, StructuredLLM
+from app.journey.llm import EXAONE_MODEL, ExaoneLLM, GeminiLLM, StructuredLLM
 from app.journey.modules import ModuleChange, ModulePlan, ModuleTurn
 from app.journey.prompts import (
     ADVISOR_SYSTEM,
@@ -46,6 +46,11 @@ MAX_ANSWER_CHARS = 1500
 # Provisional: a whole design is far larger than a card explanation. Recalibrate from real calls.
 DESIGN_TIMEOUT_MS = 120_000
 DESIGN_MAX_OUTPUT_TOKENS = 16_000
+EXAONE_DESIGN_MAX_TOKENS = 32_000  # Reasoning tokens count toward this cap.
+# K-EXAONE always reasons: a card explanation took 25-62 s (2026-11-11). The design timeout keeps
+# a first attempt inside the screen's 300 s wait.
+EXAONE_TIMEOUT_MS = 90_000
+EXAONE_DESIGN_TIMEOUT_MS = 280_000
 QA_UNAVAILABLE = (
     "지금은 답변을 만들지 못했어요. 선택지의 장단점을 참고하거나 잠시 후 다시 질문해 주세요."
 )
@@ -346,18 +351,33 @@ def build_deps(settings: Settings, registry: Registry) -> JourneyDeps:
     retriever: Retriever = EmptyRetriever()
     if settings.evidence_scope == "owner":
         retriever = CuratedRetriever(load_catalog(registry))
-    if settings.provider != "gemini":
+    if settings.provider == "mock":
         return JourneyDeps(
             decider=decider, retriever=retriever, card_selection=settings.card_selection
         )
-    api_key = settings.gemini_api_key.get_secret_value()
-    llm = GeminiLLM(api_key, settings.gemini_model)
-    design_llm = GeminiLLM(
-        api_key,
-        settings.gemini_design_model or settings.gemini_model,
-        timeout_ms=DESIGN_TIMEOUT_MS,
-        max_output_tokens=DESIGN_MAX_OUTPUT_TOKENS,
-    )
+    llm: StructuredLLM
+    design_llm: StructuredLLM
+    if settings.provider == "exaone":
+        exaone_key = settings.exaone_api_key.get_secret_value()
+        exaone_model = settings.exaone_model or EXAONE_MODEL
+        llm = ExaoneLLM(exaone_key, exaone_model, timeout_ms=EXAONE_TIMEOUT_MS)
+        # Provisional: the design is the hardest call, so it reasons longer with room to spare.
+        design_llm = ExaoneLLM(
+            exaone_key,
+            exaone_model,
+            timeout_ms=EXAONE_DESIGN_TIMEOUT_MS,
+            max_output_tokens=EXAONE_DESIGN_MAX_TOKENS,
+            reasoning_effort="high",
+        )
+    else:
+        api_key = settings.gemini_api_key.get_secret_value()
+        llm = GeminiLLM(api_key, settings.gemini_model)
+        design_llm = GeminiLLM(
+            api_key,
+            settings.gemini_design_model or settings.gemini_model,
+            timeout_ms=DESIGN_TIMEOUT_MS,
+            max_output_tokens=DESIGN_MAX_OUTPUT_TOKENS,
+        )
     return JourneyDeps(
         decider=decider,
         retriever=retriever,

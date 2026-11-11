@@ -44,7 +44,7 @@ conflicts:
   - id: api-provider-with-self-serving
     severity: warning
     when:
-      - {card: model.provider, in: [gemini, openai, upstage, openrouter]}
+      - {card: model.provider, in: [gemini, openai, upstage, exaone, openrouter]}
       - {card: mlops.model_serving, in: [ollama, vllm]}
     message: API로 모델을 쓰는데 모델 서버도 직접 운영하는 선택이에요. 둘 다 필요한지 확인하고, 아니면 서빙을 '외부 API만'으로 바꾸세요.
 artifacts:

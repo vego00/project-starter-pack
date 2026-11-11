@@ -31,6 +31,7 @@ OPTION_ICONS = {
     ("model.provider", "gemini"): "googlegemini",
     ("model.provider", "openai"): "openai",
     ("model.provider", "upstage"): "agent",
+    ("model.provider", "exaone"): "agent",
     ("model.provider", "openrouter"): "agent",
     ("model.provider", "ollama"): "ollama",
     ("mlops.model_serving", "ollama"): "ollama",

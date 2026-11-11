@@ -29,7 +29,7 @@ modules:
         why: 평가 사례가 없으면 에이전트가 끝났는지 판단할 수 없다
       - text: 모델 API 키를 커밋하지 않는 .env에 넣고 비용 상한을 설정한다
         why: 새어 나간 키와 상한 없이 나간 비용은 되돌릴 수 없다
-        when: [{card: model.provider, in: [gemini, openai, upstage, openrouter]}]
+        when: [{card: model.provider, in: [gemini, openai, upstage, exaone, openrouter]}]
       - text: 모델 파일의 용량과 장비 요구 사항을 확인하고 직접 내려받는다
         why: 장비가 모델을 감당하지 못하면 서빙 방식부터 다시 골라야 한다
         when: [{card: mlops.model_serving, in: [ollama, vllm]}]

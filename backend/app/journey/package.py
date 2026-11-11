@@ -35,7 +35,7 @@ INFRA_CARDS = (
     "ops.tracing",
     "product.surface",
 )
-EXTERNAL_KEY_PROVIDERS = {"gemini", "openai", "upstage", "openrouter"}
+EXTERNAL_KEY_PROVIDERS = {"gemini", "openai", "upstage", "exaone", "openrouter"}
 # Pattern rules narrow the risk; they do not stop every destructive or outbound command.
 SETTINGS = {
     "permissions": {

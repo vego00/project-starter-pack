@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 import httpx  # noqa: E402
 from app.config import Settings  # noqa: E402
 from app.journey.deciders.base import DeciderQuestion  # noqa: E402
-from app.journey.llm import GeminiLLM  # noqa: E402
+from app.journey.llm import EXAONE_MODEL, ExaoneLLM, GeminiLLM  # noqa: E402
 from app.journey.services import build_deps  # noqa: E402
 from app.journey.state import JourneyState, ProjectSpec  # noqa: E402
 from app.registry.loader import load_registry  # noqa: E402
@@ -59,6 +59,18 @@ def main() -> int:
         results.append(check("gemini", gemini))
     else:
         print("gemini: SKIPPED (APP_GEMINI_API_KEY or APP_GEMINI_MODEL is empty)")
+    if settings.exaone_api_key:
+        exaone_llm = ExaoneLLM(
+            settings.exaone_api_key.get_secret_value(), settings.exaone_model or EXAONE_MODEL
+        )
+
+        def exaone():
+            result = exaone_llm.generate(system="짧게 답하세요.", user="1+1은?", schema=Ping)
+            return f"model={result.model_id} in={result.input_tokens} out={result.output_tokens}"
+
+        results.append(check("exaone", exaone))
+    else:
+        print("exaone: SKIPPED (APP_EXAONE_API_KEY is empty)")
     if (
         settings.decider == "jev"
         or settings.jev_route == "opencode"

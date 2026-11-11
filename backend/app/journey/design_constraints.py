@@ -22,7 +22,7 @@ TOPOLOGY = {
 HUMAN_CHECKS = {"none": [], "question": ["question"], "approval": ["approval"]}
 # True / False say whether a run can resume after a restart. None means the user must check.
 RESUMABLE = {"memory": False, "postgres": True, "other": None}
-EXTERNAL_PROVIDERS = {"gemini", "openai", "upstage", "openrouter"}
+EXTERNAL_PROVIDERS = {"gemini", "openai", "upstage", "exaone", "openrouter"}
 
 CONSTRAINING_CARDS = {
     "agent.topology",

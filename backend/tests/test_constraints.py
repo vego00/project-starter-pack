@@ -248,3 +248,14 @@ def test_controller_keeps_registry_order_and_serves_deferred_last():
     assert next_card(["a", "b"], ["b", "a"]) == "b"
     assert next_card(["b"], ["a", "b"]) == "b"
     assert next_card([], ["a"]) is None
+
+
+@pytest.mark.parametrize("provider", ["gemini", "openai", "upstage", "exaone", "openrouter"])
+def test_every_api_provider_warns_when_a_model_server_is_also_run(registry, provider):
+    result = evaluate(registry, {"model.provider": provider, "mlops.model_serving": "vllm"})
+    assert rule_ids(result.conflicts) == {"api-provider-with-self-serving"}
+
+
+def test_every_provider_but_a_local_one_counts_as_an_api_provider(registry):
+    options = {option.id for option in registry.card("model.provider").options}
+    assert options - {"ollama"} == {"gemini", "openai", "upstage", "exaone", "openrouter"}

@@ -9,7 +9,7 @@ import pytest
 from app.config import Settings
 from app.journey.deciders.base import DeciderQuestion, judge
 from app.journey.deciders.jev import NONE_FITS, ROUTES, JevDecider
-from app.journey.llm import GeminiLLM, LLMResult
+from app.journey.llm import EXAONE_MAX_TOKENS, EXAONE_URL, ExaoneLLM, GeminiLLM, LLMResult
 from app.journey.services import (
     AdvisorOutput,
     GcbOutput,
@@ -551,3 +551,128 @@ def test_only_the_design_draft_uses_the_design_model(design_model, used):
 
     assert deps.designer._llm._model == used
     assert deps.advisor._llm._model == "m"
+
+
+# K-EXAONE adapter
+def exaone_reply(content, usage=True):
+    """Shape from docs.exaone.ai (K-EXAONE 2.5 page, 2026-11-11); not yet observed live."""
+    body = {
+        "model": "k-exaone_v2.5",
+        "choices": [{"message": {"role": "assistant", "content": content, "tool_calls": None}}],
+    }
+    if usage:
+        body["usage"] = {"prompt_tokens": 40, "completion_tokens": 12, "reasoning_tokens": 7}
+    return body
+
+
+def exaone(handler, **kwargs):
+    client = httpx.Client(base_url=EXAONE_URL, transport=httpx.MockTransport(handler))
+    return ExaoneLLM("secret-x", client=client, **kwargs)
+
+
+def test_exaone_puts_the_schema_in_the_prompt_and_reads_the_answer():
+    seen = {}
+
+    def handler(request):
+        seen["url"] = str(request.url)
+        seen["auth"] = request.headers["authorization"]
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json=exaone_reply('{"answer": "근거"}'))
+
+    result = exaone(handler).generate(system="S", user="U", schema=QAOutput)
+
+    assert seen["url"] == "https://api.exaone.ai/v1/chat/completions"
+    assert seen["auth"] == "Bearer secret-x"
+    body = seen["body"]
+    assert body["model"] == "k-exaone_v2.5" and body["reasoning_effort"] == "low"
+    assert body["max_tokens"] == EXAONE_MAX_TOKENS
+    system, user = body["messages"]
+    assert system["role"] == "system" and system["content"].startswith("S\n\n")
+    assert json.dumps(QAOutput.model_json_schema(), ensure_ascii=False) in system["content"]
+    assert user == {"role": "user", "content": "U"}
+    assert result == LLMResult(
+        output=QAOutput(answer="근거"), model_id="k-exaone_v2.5", input_tokens=40, output_tokens=12
+    )
+
+
+def test_exaone_reads_json_inside_a_code_fence():
+    reply = exaone_reply('```json\n{"answer": "근거"}\n```', usage=False)
+    result = exaone(lambda _: httpx.Response(200, json=reply)).generate(
+        system="S", user="U", schema=QAOutput
+    )
+
+    assert result.output.answer == "근거" and result.input_tokens is None
+
+
+@pytest.mark.parametrize("content", ["근거입니다", '{"other": 1}', None])
+def test_exaone_rejects_an_answer_outside_the_schema(content):
+    llm = exaone(lambda _: httpx.Response(200, json=exaone_reply(content)))
+
+    with pytest.raises(ValidationError):
+        llm.generate(system="S", user="U", schema=QAOutput)
+
+
+def test_exaone_retries_once_when_busy_then_raises(monkeypatch):
+    calls, waits = [], []
+    monkeypatch.setattr("app.journey.llm.time.sleep", waits.append)
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(503)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        exaone(handler).generate(system="S", user="U", schema=QAOutput)
+    assert len(calls) == 2 and waits == [1.0]
+
+
+@pytest.mark.parametrize(
+    ("headers", "wait"),
+    [({"retry-after-ms": "630", "retry-after": "1"}, 0.63), ({"retry-after": "60"}, 5.0)],
+)
+def test_exaone_waits_as_told_after_a_rate_limit(monkeypatch, headers, wait):
+    waits = []
+    monkeypatch.setattr("app.journey.llm.time.sleep", waits.append)
+    replies = iter(
+        [
+            httpx.Response(429, headers=headers),
+            httpx.Response(200, json=exaone_reply('{"answer": "근거"}')),
+        ]
+    )
+
+    result = exaone(lambda _: next(replies)).generate(system="S", user="U", schema=QAOutput)
+
+    assert result.output.answer == "근거" and waits == [wait]
+
+
+def test_exaone_does_not_retry_a_rejected_request():
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(400, json={"error": {"code": "context_length"}})
+
+    with pytest.raises(httpx.HTTPStatusError):
+        exaone(handler).generate(system="S", user="U", schema=QAOutput)
+    assert len(calls) == 1
+
+
+def test_exaone_needs_a_key_at_startup():
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, provider="exaone")
+
+
+def test_exaone_settings_run_every_model_part_and_keep_jev():
+    settings = Settings(_env_file=None, provider="exaone", exaone_api_key="secret-x")
+
+    deps = build_deps(settings, REGISTRY)
+
+    assert "secret-x" not in repr(settings)
+    for part in (deps.advisor, deps.responder, deps.drafter, deps.designer, deps.module_writer):
+        assert isinstance(part._llm, ExaoneLLM)
+    assert deps.advisor._llm._model == "k-exaone_v2.5"
+    assert deps.advisor._llm._effort == "low"
+    assert deps.designer._llm._effort == "high"
+    assert deps.designer._llm._max_output_tokens > deps.advisor._llm._max_output_tokens
+    assert deps.advisor._llm._client.timeout.read == 90
+    assert deps.designer._llm._client.timeout.read == 280
+    assert deps.decider.name == "mock"
