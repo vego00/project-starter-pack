@@ -203,6 +203,10 @@ const startFieldSchema = z.object({
   choices: z.array(z.object({ value: z.string(), label: z.string() })),
   free_text: z.boolean(),
   rule_read: z.boolean(),
+  default: z
+    .union([z.string(), z.array(z.string())])
+    .nullable()
+    .default(null),
   value: z.union([z.string(), z.array(z.string())]).nullable(),
   display: z.string().nullable(),
   source: z.enum(["said", "picked", "default", "recommended"]).nullable(),
@@ -218,6 +222,8 @@ const startSchema = z.object({
       text: z.string(),
       changes: z.array(z.string()),
       rejected: z.array(z.string()),
+      asks: z.string().nullable().default(null),
+      picked: z.boolean().default(false),
     }),
   ),
   revision: z.number(),
@@ -443,7 +449,7 @@ export function summaryUrl(id: string): string {
 
 function startRequest(
   journey: Journey,
-  path: "messages" | "edits" | "fill",
+  path: "messages" | "edits" | "answers" | "fill",
   body: object,
 ): Promise<Journey> {
   return request(
@@ -469,6 +475,14 @@ export function editStart(
   change: StartChange,
 ): Promise<Journey> {
   return startRequest(journey, "edits", { change });
+}
+
+/** A choice tapped under the bot's question; it also adds the answer to the chat. */
+export function answerStart(
+  journey: Journey,
+  change: StartChange,
+): Promise<Journey> {
+  return startRequest(journey, "answers", { change });
 }
 
 export function fillStart(journey: Journey): Promise<Journey> {

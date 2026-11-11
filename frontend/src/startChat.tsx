@@ -51,15 +51,113 @@ function PanelToggle({
   );
 }
 
+/** The choices of the field the bot just asked about, so it can be answered by tapping. */
+function AnswerChoices({
+  field,
+  busy,
+  answer,
+}: {
+  field: StartField;
+  busy: boolean;
+  answer: Edit;
+}) {
+  const [picked, setPicked] = useState<string[]>([]);
+  const [error, setError] = useState("");
+  const multi = field.kind === "multi";
+  const defaults =
+    field.default === null
+      ? []
+      : Array.isArray(field.default)
+        ? field.default
+        : [field.default];
+
+  async function send(change: StartChange) {
+    setError(await answer(change));
+  }
+
+  function tap(value: string) {
+    if (!multi) void send({ field: field.name, value });
+    else
+      setPicked(
+        picked.includes(value)
+          ? picked.filter((item) => item !== value)
+          : [...picked, value],
+      );
+  }
+
+  return (
+    <div
+      className="chat-answers"
+      role="group"
+      aria-label={`${field.label} 고르기${multi ? ", 여러 개 고를 수 있어요" : ""}`}
+    >
+      <div className="start-choices">
+        {field.choices.map((choice) => {
+          const on = picked.includes(choice.value);
+          return (
+            <button
+              type="button"
+              key={choice.value}
+              className={on ? "on" : ""}
+              aria-pressed={multi ? on : undefined}
+              disabled={busy}
+              onClick={() => tap(choice.value)}
+            >
+              {on && (
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <path d="M5 12l5 5 9-10" />
+                </svg>
+              )}
+              {choice.label}
+              {defaults.includes(choice.value) && (
+                <span className="start-source default">기본값</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+      {multi && (
+        <div className="chat-answers-confirm">
+          <button
+            type="button"
+            disabled={busy || picked.length === 0}
+            onClick={() => void send({ field: field.name, values: picked })}
+          >
+            {picked.length > 0
+              ? `고른 ${picked.length}개로 정하기`
+              : "골라서 정하기"}
+          </button>
+        </div>
+      )}
+      {error && (
+        <p className="alert" role="alert">
+          {error}
+        </p>
+      )}
+      <p className="chat-answers-hint">
+        누르면 {field.label} 칸에 바로 들어가요. 다르게 답하려면 아래 입력창에
+        적어 주세요.
+      </p>
+    </div>
+  );
+}
+
 function FieldRow({
   field,
   focused,
+  asked,
   busy,
   onFocus,
   edit,
 }: {
   field: StartField;
   focused: boolean;
+  asked: boolean;
   busy: boolean;
   onFocus: () => void;
   edit: Edit;
@@ -99,10 +197,11 @@ function FieldRow({
 
   return (
     <div
-      className={`start-field${field.rule_read ? " rule" : ""}${focused ? " focused" : ""}`}
+      className={`start-field${field.rule_read ? " rule" : ""}${focused ? " focused" : ""}${asked && !focused ? " asked" : ""}`}
     >
       <div className="start-field-head">
         <span className="start-field-label">{field.label}</span>
+        {asked && !focused && <span className="start-asked">지금 묻는 칸</span>}
         {field.source && (
           <span className={`start-source ${field.source}`}>
             {SOURCE[field.source]}
@@ -187,18 +286,22 @@ export function StartChat({
   journey,
   busy,
   preview,
+  recent,
   onIdea,
   onSend,
   onEdit,
+  onAnswer,
   onFill,
   onBegin,
 }: {
   journey: Journey | null;
   busy: boolean;
   preview?: ReactNode;
+  recent?: ReactNode;
   onIdea: (idea: string) => void;
   onSend: Send;
   onEdit: Edit;
+  onAnswer: Edit;
   onFill: () => Promise<string>;
   onBegin: () => void;
 }) {
@@ -247,6 +350,14 @@ export function StartChat({
   const info = fields.filter((field) => field.kind !== "text");
   const focusField = fields.find((field) => field.name === focus);
   const blanks = start?.missing.length ?? 0;
+  // The last reply's question, while its field is still blank and nothing is on the way.
+  const lastTurn = start?.chat[start.chat.length - 1];
+  const asked =
+    !isForm && !pending && lastTurn?.role === "assistant" && lastTurn.asks
+      ? fields.find(
+          (field) => field.name === lastTurn.asks && field.value === null,
+        )
+      : undefined;
 
   async function send(event?: FormEvent) {
     event?.preventDefault();
@@ -294,6 +405,7 @@ export function StartChat({
         key={field.name}
         field={field}
         focused={focus === field.name}
+        asked={asked?.name === field.name}
         busy={busy}
         onFocus={() => focusOn(field.name, side)}
         edit={onEdit}
@@ -349,6 +461,9 @@ export function StartChat({
                   className={`chat-msg ${turn.role === "user" ? "user" : "bot"}`}
                 >
                   <p>{turn.text}</p>
+                  {turn.picked && (
+                    <span className="chat-picked">눌러서 고름</span>
+                  )}
                   {turn.changes.length > 0 && (
                     <div className="chat-changes">
                       <strong>채운 곳</strong>
@@ -362,6 +477,14 @@ export function StartChat({
                       {reason}
                     </p>
                   ))}
+                  {turn === lastTurn && asked && asked.choices.length > 0 && (
+                    <AnswerChoices
+                      key={start.revision}
+                      field={asked}
+                      busy={busy}
+                      answer={onAnswer}
+                    />
+                  )}
                 </div>
               ))}
               {isForm && start.chat.length === 1 && (
@@ -467,18 +590,23 @@ export function StartChat({
           )}
           {!start && (
             <>
-              <p className="muted examples-label">이런 걸 만들 수 있어요</p>
-              <div className="examples">
-                {EXAMPLES.map((example) => (
-                  <button
-                    type="button"
-                    key={example}
-                    onClick={() => setText(example)}
-                  >
-                    {example}
-                  </button>
-                ))}
-              </div>
+              {/* Someone coming back sees their projects; examples are for a first visit. */}
+              {recent ?? (
+                <>
+                  <p className="muted examples-label">이런 걸 만들 수 있어요</p>
+                  <div className="examples">
+                    {EXAMPLES.map((example) => (
+                      <button
+                        type="button"
+                        key={example}
+                        onClick={() => setText(example)}
+                      >
+                        {example}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
               <p className="muted privacy">
                 개인정보나 회사 기밀은 적지 마세요. 입력한 내용은 저장되고,
                 모델이 연결된 경우 외부 모델 API로 전송돼요.

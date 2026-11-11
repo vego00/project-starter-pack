@@ -24,6 +24,7 @@ from app.journey.start import (
     GCB_NAMES,
     StartTurn,
     apply_start_changes,
+    asked_field,
     reply_text,
     start_from_draft,
 )
@@ -214,6 +215,7 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
             text=reply_text(applied, fields, None),
             changes=applied,
             rejected=rejected,
+            asks=asked_field(fields),
         )
         texts = {name: str(fields[name].value) for name in GCB_NAMES if name in fields}
         return {

@@ -24,7 +24,7 @@ const LAYER_NAMES: Record<string, string> = {
   ops: "검증과 운영",
 };
 // ADR-021. Stages without a card yet are named once, so the whole path can still be seen.
-const STAGE_NAMES = [
+export const STAGE_NAMES = [
   "제약 확인",
   "데이터 이해",
   "주제 확정",

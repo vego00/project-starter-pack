@@ -256,6 +256,16 @@ def create_app(
         )
 
     @app.post(
+        "/api/v1/journeys/{journey_id}/start/answers",
+        response_model=JourneyView,
+        responses=ERROR_RESPONSES,
+    )
+    def answer_start(journey_id: UUID, payload: StartEditRequest, journeys: Journeys):
+        return _guarded(
+            journey_id, lambda: journeys.answer_start(journey_id, payload.revision, payload.change)
+        )
+
+    @app.post(
         "/api/v1/journeys/{journey_id}/start/fill",
         response_model=JourneyView,
         responses=ERROR_RESPONSES,

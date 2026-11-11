@@ -28,6 +28,10 @@ class StartTurn(BaseModel):
     text: str
     changes: list[str] = []
     rejected: list[str] = []
+    # The field the reply's question asks about, so the screen can offer its choices.
+    asks: str | None = None
+    # A user turn made by tapping one of those choices rather than typing.
+    picked: bool = False
 
 
 class StartChange(BaseModel):
@@ -163,9 +167,9 @@ GCB_NAMES = tuple(field.name for field in START_FIELDS if field.is_gcb)
 ASK_ORDER = ("goal", "deployment_target", "has_gpu", "data_traits")
 QUESTIONS = {
     "goal": "프로젝트가 끝났을 때 누가 무엇을 할 수 있게 되면 좋을까요?",
-    "deployment_target": "어디까지 배포할 계획인가요? 로컬 데모, 소수 사용자, 공개 서비스 중에서요.",
+    "deployment_target": "어디까지 배포할 계획인가요?",
     "has_gpu": "모델을 직접 실행할 GPU 장비가 있나요?",
-    "data_traits": "다루는 데이터에 개인정보가 들어 있나요? 문서를 찾아 답하는 서비스인가요?",
+    "data_traits": "다루는 데이터에 개인정보나 찾아 답할 문서가 있나요? 해당하는 것을 모두 골라 주세요.",
 }
 
 
@@ -256,6 +260,21 @@ def next_question(current: Mapping[str, StartValue]) -> str | None:
     return QUESTIONS[blank[0]] if blank else None
 
 
+def asked_field(current: Mapping[str, StartValue]) -> str | None:
+    """The field the question in a reply asks about; None when the reply asks nothing."""
+    if not missing(current):
+        return None
+    blank = [name for name in ASK_ORDER if name not in current]
+    return blank[0] if blank else None
+
+
+def _next_line(current: Mapping[str, StartValue]) -> str:
+    if not missing(current):
+        return "모두 채웠어요. 결정을 시작할 수 있어요."
+    question = next_question(current)
+    return question or "남은 칸은 '빈칸은 알아서 채워 주세요'로 채울 수 있어요."
+
+
 def reply_text(applied: list[str], current: Mapping[str, StartValue], focus: str | None) -> str:
     """Written by code, not the model: it only says what was filled and asks one question."""
     if applied and focus:
@@ -265,11 +284,13 @@ def reply_text(applied: list[str], current: Mapping[str, StartValue], focus: str
         head = f"{len(applied)}칸을 채웠어요."
     else:
         head = "이 문장에서는 채울 칸을 찾지 못했어요. 칸을 눌러 고르거나 다르게 말해 주세요."
-    if not missing(current):
-        return f"{head} 모두 채웠어요. 결정을 시작할 수 있어요."
-    question = next_question(current)
-    tail = question or "남은 칸은 '빈칸은 알아서 채워 주세요'로 채울 수 있어요."
-    return f"{head} {tail}"
+    return f"{head} {_next_line(current)}"
+
+
+def answer_text(name: str, current: Mapping[str, StartValue]) -> str:
+    """The reply to a tapped choice: which field was set, then the next question."""
+    label = FIELDS[name].name_in_text
+    return f"{label}{_object_particle(label)} 정했어요. {_next_line(current)}"
 
 
 def start_from_draft(draft: Any) -> dict[str, StartValue]:

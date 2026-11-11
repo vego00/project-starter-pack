@@ -41,7 +41,9 @@ from app.journey.start import (
     StartSource,
     StartTurn,
     StartValue,
+    answer_text,
     apply_start_changes,
+    asked_field,
     display,
     fill_defaults,
     missing,
@@ -128,6 +130,8 @@ class StartFieldView(BaseModel):
     free_text: bool
     # Card rules read this field as a fact, so the screen sets it apart.
     rule_read: bool
+    # What "빈칸은 알아서 채워 주세요" would put here; the choices mark it.
+    default: str | list[str] | None
     value: str | list[str] | None
     display: str | None
     source: StartSource | None
@@ -506,7 +510,8 @@ class JourneyService:
                 raise JourneyError(409, "start_chat_unavailable", "모델이 없어 대화할 수 없어요.")
             if focus is not None and focus not in START_FIELD_MAP:
                 raise JourneyError(422, "invalid_input", "입력 내용을 확인해 주세요.")
-            if sum(turn.role == "user" for turn in state.start_chat) >= MAX_START_MESSAGES:
+            typed = sum(turn.role == "user" and not turn.picked for turn in state.start_chat)
+            if typed >= MAX_START_MESSAGES:
                 raise JourneyError(
                     409, "start_chat_full", "대화 횟수를 다 썼어요. 칸을 눌러 직접 골라 주세요."
                 )
@@ -526,6 +531,7 @@ class JourneyService:
                     text=reply_text(applied, fields, focus),
                     changes=applied,
                     rejected=rejected,
+                    asks=asked_field(fields),
                 ),
             ]
             return self._save_start(
@@ -539,6 +545,28 @@ class JourneyService:
             if not applied:
                 raise JourneyError(422, "start_edit_rejected", " / ".join(rejected))
             return self._save_start(journey_id, state, fields)
+
+    def answer_start(self, journey_id: UUID, revision: int, change: StartChange) -> JourneyView:
+        """A choice tapped under the bot's question: saved as a pick, kept in the chat as a turn,
+        and answered by code, so no model is called."""
+        with self._lock(journey_id):
+            state = self._start_state(journey_id, revision)
+            fields, applied, rejected = apply_start_changes(state.start_fields, [change], "picked")
+            if not applied:
+                raise JourneyError(422, "start_edit_rejected", " / ".join(rejected))
+            field = START_FIELD_MAP[change.field]
+            turns = [
+                StartTurn(
+                    role="user", text=display(field, fields[change.field].value), picked=True
+                ),
+                StartTurn(
+                    role="assistant",
+                    text=answer_text(change.field, fields),
+                    changes=applied,
+                    asks=asked_field(fields),
+                ),
+            ]
+            return self._save_start(journey_id, state, fields, turns)
 
     def fill_start(self, journey_id: UUID, revision: int) -> JourneyView:
         """Signals take the fixed defaults; blank goal fields are recommended once, else "따로 없음"."""
@@ -631,6 +659,9 @@ class JourneyService:
                     choices=[StartChoiceView(value=c.value, label=c.label) for c in field.choices],
                     free_text=field.free_text,
                     rule_read=field.rule_read,
+                    default=list(field.default)
+                    if isinstance(field.default, tuple)
+                    else field.default,
                     value=held.value if held else None,
                     display=display(field, held.value) if held else None,
                     source=held.source if held else None,

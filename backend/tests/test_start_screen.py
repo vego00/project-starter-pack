@@ -211,6 +211,31 @@ def test_the_idea_fills_fields_and_the_chat_goes_on_until_the_journey_starts():
         assert post(client, view, "fill").json()["error"]["code"] == "start_closed"
 
 
+def test_a_tapped_answer_stays_in_the_chat_and_the_next_question_offers_its_choices():
+    # Only one scripted reply: a tapped answer must not call the model.
+    with client_with(ScriptedStart(FIRST)) as client:
+        view = client.post(JOURNEYS, json={"idea": IDEA}).json()
+        # FIRST filled the goal and the deployment target, so the reply asks about the GPU.
+        assert view["start"]["chat"][-1]["asks"] == "has_gpu"
+        assert value_of(view, "has_gpu")["default"] == "no"
+        assert value_of(view, "data_traits")["default"] == ["특별한 것 없음"]
+
+        view = post(client, view, "answers", change={"field": "has_gpu", "value": "yes"}).json()
+        said, reply = view["start"]["chat"][-2:]
+        assert (said["role"], said["text"], said["picked"]) == ("user", "있어요", True)
+        assert reply["text"].startswith("GPU 장비를 정했어요.")
+        assert reply["changes"] == ["GPU 장비"]
+        assert reply["asks"] == "data_traits"
+        assert value_of(view, "has_gpu")["source"] == "picked"
+
+        values = ["문서 검색 필요", "개인정보 포함"]
+        view = post(client, view, "answers", change={"field": "data_traits", "values": values})
+        assert view.json()["start"]["chat"][-2]["text"] == "문서 검색 필요, 개인정보 포함"
+
+        bad = post(client, view.json(), "answers", change={"field": "has_gpu", "value": "maybe"})
+        assert bad.status_code == 422
+
+
 def test_a_failed_reply_changes_nothing():
     with client_with(ScriptedStart(FIRST, None)) as client:
         view = client.post(JOURNEYS, json={"idea": IDEA}).json()
