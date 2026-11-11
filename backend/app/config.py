@@ -11,12 +11,14 @@ class Settings(BaseSettings):
     )
 
     # Fail at startup for unsupported values instead of silently falling back to mock.
-    provider: Literal["mock", "gemini"] = "mock"
+    provider: Literal["mock", "gemini", "exaone"] = "mock"
     decider: Literal["mock", "jev"] = "mock"
     gemini_api_key: SecretStr | None = None
     gemini_model: str | None = None
     # Empty uses gemini_model. The design draft is the hardest call, so it can use another model.
     gemini_design_model: str | None = None
+    exaone_api_key: SecretStr | None = None
+    exaone_model: str | None = None  # Empty uses k-exaone_v2.5.
     jev_route: Literal["opencode", "vercel", "typesafe"] = "opencode"
     jev_model: str | None = None  # Empty uses the route's default model.
     ai_gateway_api_key: SecretStr | None = None
@@ -33,6 +35,8 @@ class Settings(BaseSettings):
         "gemini_api_key",
         "gemini_model",
         "gemini_design_model",
+        "exaone_api_key",
+        "exaone_model",
         "jev_model",
         "ai_gateway_api_key",
         "opencode_api_key",
@@ -48,6 +52,8 @@ class Settings(BaseSettings):
     def _model_settings_are_complete(self):
         if self.provider == "gemini" and not (self.gemini_api_key and self.gemini_model):
             raise ValueError("provider=gemini needs APP_GEMINI_API_KEY and APP_GEMINI_MODEL")
+        if self.provider == "exaone" and not self.exaone_api_key:
+            raise ValueError("provider=exaone needs APP_EXAONE_API_KEY")
         if self.decider == "jev" and self.jev_route == "vercel" and not self.ai_gateway_api_key:
             raise ValueError("jev_route=vercel needs APP_AI_GATEWAY_API_KEY")
         if self.decider == "jev" and self.jev_route == "typesafe" and not self.typesafe_api_key:

@@ -28,6 +28,14 @@ options:
     learning_difficulty: low
     ops_burden: low
     cost_nature: 호출량 기반
+  - id: exaone
+    name: K-EXAONE
+    summary: LG AI연구원의 K-EXAONE 모델을 API로 호출합니다.
+    pros: [GPU 없이 시작할 수 있습니다, 한국어를 잘 이해하는 모델로 소개됩니다]
+    cons: [입력 데이터가 외부로 전송됩니다, 무료 기간과 호출 제한을 먼저 확인해야 합니다]
+    learning_difficulty: low
+    ops_burden: low
+    cost_nature: 지금은 무료 (기간 미정)
   - id: openrouter
     name: OpenRouter 경유
     summary: 하나의 API로 여러 회사의 모델을 호출합니다.
@@ -48,6 +56,7 @@ signals:
   gemini: [GPU 없음, 데이터 외부 전송 허용]
   openai: [GPU 없음, 데이터 외부 전송 허용]
   upstage: [GPU 없음, 데이터 외부 전송 허용]
+  exaone: [GPU 없음, 데이터 외부 전송 허용, 한국어 중심]
   openrouter: [여러 모델 비교 필요]
   ollama: [GPU 보유, 데이터 외부 전송 불가]
 implies:

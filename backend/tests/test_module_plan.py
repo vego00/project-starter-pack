@@ -132,3 +132,9 @@ def test_the_journey_view_carries_the_module_plan():
     ids = [module["id"] for module in view["modules"]]
     assert {"agent", "api", "client", "ops"} <= set(ids)
     assert all(module["gates"] for module in view["modules"])
+
+
+def test_an_api_model_needs_its_key_kept_out_of_the_repository():
+    modules = plan({**CHOICES["team"], "model.provider": "exaone"})
+
+    assert any("API 키" in text for text in gate_texts(modules["agent"]))
