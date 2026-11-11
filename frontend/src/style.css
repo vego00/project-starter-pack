@@ -1168,6 +1168,48 @@ button.danger {
   outline-offset: 2px;
   background: var(--accent-tint);
 }
+/* Reading the first idea (WS-001, 2026-11-11): the chat shows what the model is doing and
+   how long it has taken, so the wait does not look like a frozen screen. */
+.app:has(.start-chat.reading) .working {
+  display: none;
+}
+.chat-reading {
+  display: grid;
+  gap: 6px;
+}
+.chat-reading [role="status"] {
+  display: grid;
+  gap: 6px;
+}
+.chat-msg .chat-reading-title {
+  font-weight: 700;
+}
+.chat-msg .chat-reading-why,
+.chat-msg .chat-reading-time,
+.chat-msg .chat-took {
+  margin-top: 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+.chat-reading-time {
+  font-variant-numeric: tabular-nums;
+}
+.chat-msg .chat-reading-long {
+  margin-top: 0;
+  padding: 4px 8px;
+  background: var(--warn-bg);
+  color: var(--warn-text);
+  font-size: 0.87rem;
+}
+.chat-msg .chat-took {
+  margin-top: 6px;
+}
+.start-field.fresh {
+  background: var(--tint);
+}
+.start-fresh {
+  font-size: 0.86rem;
+}
 .start-asked {
   color: var(--accent);
   font-size: 0.86rem;

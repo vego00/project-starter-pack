@@ -1,7 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent, ReactNode } from "react";
 import type { Journey, StartChange, StartField } from "./api";
 import { EXAMPLES, MAX_IDEA, MIN_IDEA } from "./components";
+
+// After this many seconds of reading, say what a reload would lose.
+const LONG_WAIT = 40;
 
 /** Each returns an error message, or "" when the server took it. */
 type Send = (text: string, focus: string | null) => Promise<string>;
@@ -151,6 +154,7 @@ function FieldRow({
   field,
   focused,
   asked,
+  fresh,
   busy,
   onFocus,
   edit,
@@ -158,6 +162,7 @@ function FieldRow({
   field: StartField;
   focused: boolean;
   asked: boolean;
+  fresh: boolean;
   busy: boolean;
   onFocus: () => void;
   edit: Edit;
@@ -197,10 +202,11 @@ function FieldRow({
 
   return (
     <div
-      className={`start-field${field.rule_read ? " rule" : ""}${focused ? " focused" : ""}${asked && !focused ? " asked" : ""}`}
+      className={`start-field${field.rule_read ? " rule" : ""}${focused ? " focused" : ""}${asked && !focused ? " asked" : ""}${fresh ? " fresh" : ""}`}
     >
       <div className="start-field-head">
         <span className="start-field-label">{field.label}</span>
+        {fresh && <span className="start-fresh">방금 채움</span>}
         {asked && !focused && <span className="start-asked">지금 묻는 칸</span>}
         {field.source && (
           <span className={`start-source ${field.source}`}>
@@ -312,17 +318,53 @@ export function StartChat({
   const [focus, setFocus] = useState<string | null>(null);
   const [left, setLeft] = useState(start !== null);
   const [right, setRight] = useState(start !== null);
+  // The first idea on its way: the screen turns into the chat before the model answers.
+  const [sent, setSent] = useState<{ idea: string; at: number } | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const [took, setTook] = useState<number | null>(null);
+  const [fresh, setFresh] = useState<string[]>([]);
   const thread = useRef<HTMLDivElement>(null);
   const opened = useRef(start !== null);
   const box = useRef<HTMLTextAreaElement>(null);
+  const composer = useRef<HTMLFormElement>(null);
+  const boxTop = useRef<number | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
+  const reading = sent !== null && start === null;
   const started = start !== null;
+  const shown = started || reading;
   const formOnly = start?.mode === "form";
+  const waited = sent ? Math.max(0, Math.floor((now - sent.at) / 1000)) : 0;
 
   useEffect(() => {
     // The conversation goes on in the box; without a model the screen starts at its heading.
     if (started) (formOnly ? heading : box).current?.focus();
   }, [started, formOnly]);
+
+  useEffect(() => {
+    if (!reading) return;
+    const tick = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(tick);
+  }, [reading]);
+
+  useEffect(() => {
+    // A failed start goes back to the start screen with the idea still in the box.
+    if (reading && !busy) setSent(null);
+  }, [reading, busy]);
+
+  useLayoutEffect(() => {
+    // The box slides from the middle to the bottom instead of jumping there.
+    const form = composer.current;
+    const from = boxTop.current;
+    boxTop.current = null;
+    if (!reading || !form || from === null) return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    const shift = from - form.getBoundingClientRect().top;
+    if (shift !== 0 && form.animate)
+      form.animate(
+        [{ transform: `translateY(${shift}px)` }, { transform: "none" }],
+        { duration: 250, easing: "ease-out" },
+      );
+  }, [reading]);
 
   useEffect(() => {
     // The panels open once, when the first sentence has filled them.
@@ -332,8 +374,21 @@ export function StartChat({
       setRight(true);
       // The first sentence is now the first message; a failed start keeps it in the box.
       setText("");
+      if (sent) {
+        setTook(Math.max(1, Math.round((Date.now() - sent.at) / 1000)));
+        setFresh(
+          start.fields.filter((f) => f.value !== null).map((f) => f.name),
+        );
+        setSent(null);
+      }
     }
-  }, [start]);
+  }, [start, sent]);
+
+  useEffect(() => {
+    if (fresh.length === 0) return;
+    const fade = window.setTimeout(() => setFresh([]), 6000);
+    return () => window.clearTimeout(fade);
+  }, [fresh]);
 
   useEffect(() => {
     const box = thread.current;
@@ -364,6 +419,11 @@ export function StartChat({
     const message = text.trim();
     if (!canSend || busy) return;
     if (!start) {
+      boxTop.current = composer.current?.getBoundingClientRect().top ?? null;
+      setSent({ idea: message, at: Date.now() });
+      setNow(Date.now());
+      setLeft(true);
+      setRight(true);
       onIdea(message);
       return;
     }
@@ -406,6 +466,7 @@ export function StartChat({
         field={field}
         focused={focus === field.name}
         asked={asked?.name === field.name}
+        fresh={fresh.includes(field.name)}
         busy={busy}
         onFocus={() => focusOn(field.name, side)}
         edit={onEdit}
@@ -413,8 +474,10 @@ export function StartChat({
     ));
 
   return (
-    <div className={`start-chat${start ? " started" : ""}`}>
-      {start && (
+    <div
+      className={`start-chat${shown ? " started" : ""}${reading ? " reading" : ""}`}
+    >
+      {shown && (
         <div className="start-bar">
           <PanelToggle
             side="left"
@@ -432,7 +495,41 @@ export function StartChat({
       )}
       <div className="start-body">
         <section className="start-center" aria-label="대화">
-          {!start && (
+          {reading && (
+            <div
+              className="chat-thread"
+              role="log"
+              aria-label="시작 대화"
+              aria-busy="true"
+            >
+              <div className="chat-msg user">
+                <p>{sent?.idea}</p>
+              </div>
+              <div className="chat-msg bot chat-reading">
+                <div role="status">
+                  <p className="chat-reading-title">보낸 문장을 읽고 있어요</p>
+                  <p>
+                    문장에서 프로젝트 목표와, 추천에 쓸 정보 중 알 수 있는 칸을
+                    찾아 양옆에 채워요.
+                  </p>
+                  <p className="chat-reading-why">
+                    모델이 답을 쓰기 전에 생각하는 단계가 있어서 1분 가까이
+                    걸리기도 해요.
+                  </p>
+                  {waited >= LONG_WAIT && (
+                    <p className="chat-reading-long">
+                      아직 읽고 있어요. 이 화면을 닫거나 새로고침하면 처음부터
+                      다시 보내야 해요.
+                    </p>
+                  )}
+                </div>
+                <p className="chat-reading-time" aria-hidden="true">
+                  {waited}초 지났어요
+                </p>
+              </div>
+            </div>
+          )}
+          {!shown && (
             <div className="start-intro">
               <h2>어떤 서비스를 만들고 싶은지 말로 적어 주세요</h2>
               <p className="muted">
@@ -477,6 +574,11 @@ export function StartChat({
                       {reason}
                     </p>
                   ))}
+                  {took !== null &&
+                    index === 1 &&
+                    turn.role === "assistant" && (
+                      <p className="chat-took">{took}초 걸렸어요</p>
+                    )}
                   {turn === lastTurn && asked && asked.choices.length > 0 && (
                     <AnswerChoices
                       key={start.revision}
@@ -540,6 +642,7 @@ export function StartChat({
           )}
           {!isForm && (
             <form
+              ref={composer}
               className="start-composer"
               onSubmit={(event) => void send(event)}
             >
@@ -557,38 +660,42 @@ export function StartChat({
                 </div>
               )}
               <label htmlFor="idea" className="sr-only">
-                {start ? "더 알려 주기" : "프로젝트 아이디어"}
+                {shown ? "더 알려 주기" : "프로젝트 아이디어"}
               </label>
               <textarea
                 ref={box}
                 id="idea"
                 rows={3}
                 maxLength={MAX_IDEA}
-                value={text}
+                // While the idea is read, the box stays empty; a failure brings the idea back.
+                value={reading ? "" : text}
+                disabled={reading}
                 onChange={(event) => setText(event.target.value)}
                 onKeyDown={onKey}
                 placeholder={
-                  focusField
-                    ? `${focusField.label}에 대해 말해 주세요. 이 칸에만 반영해요.`
-                    : start
-                      ? "더 알려 주실 것이 있으면 적어 주세요. 예: GPU는 없어요."
-                      : "누가 어떤 문제를 겪고, 무엇을 만들고 싶은지 적어 주세요."
+                  reading
+                    ? "문장을 다 읽으면 이어서 적을 수 있어요."
+                    : focusField
+                      ? `${focusField.label}에 대해 말해 주세요. 이 칸에만 반영해요.`
+                      : start
+                        ? "더 알려 주실 것이 있으면 적어 주세요. 예: GPU는 없어요."
+                        : "누가 어떤 문제를 겪고, 무엇을 만들고 싶은지 적어 주세요."
                 }
               />
               <div className="start-composer-foot">
-                {!start && (
+                {!shown && (
                   <span className="muted">
                     {length.toLocaleString()} / {MAX_IDEA.toLocaleString()}자
                     (최소 {MIN_IDEA}자)
                   </span>
                 )}
                 <button className="primary" disabled={!canSend || busy}>
-                  {busy && !start ? "시작하는 중…" : "보내기"}
+                  보내기
                 </button>
               </div>
             </form>
           )}
-          {!start && (
+          {!shown && (
             <>
               {/* Someone coming back sees their projects; examples are for a first visit. */}
               {recent ?? (
@@ -614,6 +721,26 @@ export function StartChat({
             </>
           )}
         </section>
+        {reading && left && (
+          <aside
+            id="start-panel-left"
+            className="start-panel left"
+            aria-label="프로젝트 목표"
+          >
+            <h2>프로젝트 목표</h2>
+            <p className="muted">문장을 다 읽으면 여기에 채워져요.</p>
+          </aside>
+        )}
+        {reading && right && (
+          <aside
+            id="start-panel-right"
+            className="start-panel right"
+            aria-label="추천에 쓰는 정보"
+          >
+            <h2>추천에 쓰는 정보</h2>
+            <p className="muted">문장을 다 읽으면 여기에 채워져요.</p>
+          </aside>
+        )}
         {start && left && (
           <aside
             id="start-panel-left"
@@ -640,7 +767,7 @@ export function StartChat({
           </aside>
         )}
       </div>
-      {!start && preview && (
+      {!shown && preview && (
         <section className="start-preview" aria-label="끝나면 받는 것">
           <h2>끝나면 이런 구성도를 받아요</h2>
           <p className="muted">

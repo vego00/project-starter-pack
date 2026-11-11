@@ -2,6 +2,7 @@
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  act,
   cleanup,
   render,
   screen,
@@ -763,6 +764,86 @@ describe("start screen", () => {
     });
     expect(await screen.findByText("문장을 정리하지 못했어요.")).toBeVisible();
     expect(box).toHaveValue("GPU는 없어요");
+  });
+
+  describe("while the first idea is read", () => {
+    function slowStart() {
+      let answer: (response: Response) => void = () => {};
+      stubFetch(
+        () =>
+          new Promise<Response>((resolve) => {
+            answer = resolve;
+          }),
+      );
+      return (response: Response) => answer(response);
+    }
+
+    async function sendIdea(user: ReturnType<typeof userEvent.setup>) {
+      render(<App />);
+      await user.type(
+        screen.getByLabelText("프로젝트 아이디어"),
+        "강의 자료를 찾아 답하는 서비스",
+      );
+      await user.click(screen.getByRole("button", { name: "보내기" }));
+    }
+
+    it("turns into the chat at once and says what it is doing", async () => {
+      const user = userEvent.setup();
+      const reply = slowStart();
+      await sendIdea(user);
+
+      const log = screen.getByRole("log", { name: "시작 대화" });
+      expect(
+        within(log).getByText("강의 자료를 찾아 답하는 서비스"),
+      ).toBeVisible();
+      expect(within(log).getByText("보낸 문장을 읽고 있어요")).toBeVisible();
+      expect(within(log).getByText(/초 지났어요/)).toBeVisible();
+      expect(screen.getByLabelText("더 알려 주기")).toBeDisabled();
+      expect(
+        screen.getAllByText("문장을 다 읽으면 여기에 채워져요."),
+      ).toHaveLength(2);
+
+      reply(Response.json(atStart(), { status: 201 }));
+      expect(await screen.findByText(/초 걸렸어요/)).toBeVisible();
+      expect(screen.getAllByText("방금 채움").length).toBeGreaterThan(0);
+      expect(screen.queryByText("보낸 문장을 읽고 있어요")).toBeNull();
+    });
+
+    it("goes back to the start screen with the idea kept when it fails", async () => {
+      const user = userEvent.setup();
+      const reply = slowStart();
+      await sendIdea(user);
+
+      reply(
+        errorResponse(503, "start_reply_failed", "잠시 후 다시 보내 주세요."),
+      );
+      expect(
+        await screen.findByText("잠시 후 다시 보내 주세요."),
+      ).toBeVisible();
+      expect(screen.getByLabelText("프로젝트 아이디어")).toHaveValue(
+        "강의 자료를 찾아 답하는 서비스",
+      );
+      expect(screen.queryByRole("log", { name: "시작 대화" })).toBeNull();
+    });
+
+    it("says what a reload would lose once it takes long", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        const user = userEvent.setup({
+          advanceTimers: vi.advanceTimersByTime,
+        });
+        slowStart();
+        await sendIdea(user);
+        expect(screen.queryByText(/새로고침하면/)).toBeNull();
+
+        await act(async () => {
+          vi.advanceTimersByTime(41_000);
+        });
+        expect(screen.getByText(/새로고침하면 처음부터/)).toBeVisible();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   it("answers the asked question by tapping one of its choices", async () => {
