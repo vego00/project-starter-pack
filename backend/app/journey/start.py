@@ -14,6 +14,7 @@ StartSource = Literal["said", "picked", "default", "recommended"]
 NOTHING = "따로 없음"  # A GCB field filled without content; it reaches the spec as unset.
 MAX_TEXT = 1000
 MAX_FREE = 40
+MAX_QUOTE = 80
 
 
 class StartValue(BaseModel):
@@ -30,11 +31,15 @@ class StartTurn(BaseModel):
 
 
 class StartChange(BaseModel):
-    """One field a model wants to set. A multi-choice field sends its whole list in `values`."""
+    """One field a model wants to set. A multi-choice field sends its whole list in `values`.
+
+    `evidence` is the user's own words the value was read from; a model's change without it, or
+    with words the user never wrote, is dropped."""
 
     field: str
     value: str = ""
     values: list[str] = []
+    evidence: str = ""
 
 
 @dataclass(frozen=True)
@@ -197,8 +202,12 @@ def apply_start_changes(
     changes: list[StartChange],
     source: StartSource,
     focus: str | None = None,
+    message: str = "",
 ) -> tuple[dict[str, StartValue], list[str], list[str]]:
-    """The validator for what a model or a person sets. While a field is in focus, only it moves."""
+    """The validator for what a model or a person sets. While a field is in focus, only it moves.
+
+    What a model read from `message` must quote it, so an inferred value always shows its source."""
+    said_in = _tidy(message).casefold()
     updated = dict(current)
     applied: list[str] = []
     rejected: list[str] = []
@@ -213,7 +222,14 @@ def apply_start_changes(
         if value is None:
             rejected.append(f"{field.name_in_text}: 고를 수 있는 값이 아니라 그대로 뒀어요.")
             continue
-        updated[field.name] = StartValue(value=value, source=source)
+        why = None
+        if source == "said":
+            quote = _tidy(change.evidence)[:MAX_QUOTE]
+            if not quote or quote.casefold() not in said_in:
+                rejected.append(f"{field.name_in_text}: 문장에서 근거를 찾지 못해 채우지 않았어요.")
+                continue
+            why = f"‘{quote}’에서 읽었어요."
+        updated[field.name] = StartValue(value=value, source=source, why=why)
         applied.append(field.name_in_text)
     return updated, list(dict.fromkeys(applied)), rejected
 

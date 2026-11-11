@@ -17,25 +17,27 @@ from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import InMemorySaver
 
 JOURNEYS = "/api/v1/journeys"
-IDEA = "부트캠프 수강생이 강의 자료에서 출처와 함께 답을 찾는 챗봇"
+IDEA = "부트캠프 수강생 30명이 강의 자료에서 출처와 함께 답을 찾는 챗봇"
+SAID = "우리 반 30명이 쓰고 문서에서 답을 찾아요. 수강생이 답을 찾는 상태면 돼요"
 
 
-def change(field, value="", values=()):
-    return StartChange(field=field, value=value, values=list(values))
+def change(field, value="", values=(), evidence=""):
+    return StartChange(field=field, value=value, values=list(values), evidence=evidence)
 
 
 def test_only_listed_choices_and_short_free_text_are_kept():
     fields, applied, rejected = apply_start_changes(
         {},
         [
-            change("deployment_target", "small_group"),
-            change("has_gpu", "maybe"),
-            change("expected_users", "30명"),
-            change("data_traits", values=["문서 검색 필요", "문서 검색 필요"]),
-            change("data_traits_extra", "x"),
-            change("goal", "  수강생이   답을 찾는 상태 "),
+            change("deployment_target", "small_group", evidence="우리 반"),
+            change("has_gpu", "maybe", evidence="우리 반"),
+            change("expected_users", "30명", evidence="30명"),
+            change("data_traits", values=["문서 검색 필요"] * 2, evidence="문서에서 답을 찾아요"),
+            change("data_traits_extra", "x", evidence="우리 반"),
+            change("goal", "  수강생이   답을 찾는 상태 ", evidence="수강생이 답을 찾는 상태"),
         ],
         "said",
+        message=SAID,
     )
 
     assert fields["deployment_target"].value == "small_group"
@@ -47,9 +49,39 @@ def test_only_listed_choices_and_short_free_text_are_kept():
     assert len(rejected) == 2
 
 
+def test_a_value_read_from_the_message_shows_its_words_and_unquoted_ones_are_dropped():
+    fields, applied, rejected = apply_start_changes(
+        {},
+        [
+            change("deployment_target", "small_group", evidence="  우리   반 "),
+            change("context", "팀이 쓴다", evidence="팀원에게 공유"),
+            change("boundary", "출처를 표시한다"),
+        ],
+        "said",
+        message=SAID,
+    )
+
+    assert fields["deployment_target"].why == "‘우리 반’에서 읽었어요."
+    assert applied == ["배포 범위"]
+    assert rejected == [
+        "상황: 문장에서 근거를 찾지 못해 채우지 않았어요.",
+        "기준: 문장에서 근거를 찾지 못해 채우지 않았어요.",
+    ]
+
+
+def test_a_person_picking_a_value_needs_no_quote():
+    fields, applied, _ = apply_start_changes({}, [change("has_gpu", "no")], "picked")
+
+    assert fields["has_gpu"].why is None and applied == ["GPU 장비"]
+
+
 def test_a_focused_field_is_the_only_one_that_moves():
     fields, applied, _ = apply_start_changes(
-        {}, [change("has_gpu", "yes"), change("budget", "무료로만")], "said", focus="has_gpu"
+        {},
+        [change("has_gpu", "yes", evidence="GPU는 있어요"), change("budget", "무료로만")],
+        "said",
+        focus="has_gpu",
+        message="GPU는 있어요",
     )
 
     assert set(fields) == {"has_gpu"} and applied == ["GPU 장비"]
@@ -120,9 +152,9 @@ def value_of(view, name):
 
 FIRST = StartReply(
     changes=[
-        change("goal", "수강생이 출처와 함께 답을 찾는 상태"),
-        change("deployment_target", "small_group"),
-        change("expected_users", "30명"),
+        change("goal", "수강생이 출처와 함께 답을 찾는 상태", evidence="출처와 함께 답을 찾는"),
+        change("deployment_target", "small_group", evidence="부트캠프 수강생"),
+        change("expected_users", "30명", evidence="30명"),
     ],
     model_id="m",
 )
@@ -131,7 +163,9 @@ FIRST = StartReply(
 def test_the_idea_fills_fields_and_the_chat_goes_on_until_the_journey_starts():
     writer = ScriptedStart(
         FIRST,
-        StartReply(changes=[change("has_gpu", "no"), change("budget", "무료로만")]),
+        StartReply(
+            changes=[change("has_gpu", "no", evidence="GPU는 없어요"), change("budget", "무료로만")]
+        ),
         picks=GcbRecommendation(
             picks=[GcbPick(field="boundary", value="답마다 출처를 표시한다", why="목표에서")]
         ),

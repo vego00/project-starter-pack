@@ -517,7 +517,7 @@ class JourneyService:
                     503, "start_reply_failed", "문장을 정리하지 못했어요. 잠시 후 다시 보내 주세요."
                 )
             fields, applied, rejected = apply_start_changes(
-                state.start_fields, reply.changes, "said", focus
+                state.start_fields, reply.changes, "said", focus, text
             )
             turns = [
                 StartTurn(role="user", text=text),

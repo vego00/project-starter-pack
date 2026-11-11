@@ -208,7 +208,7 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
                 "gcb_draft": GcbDraft(source="unavailable"),
                 "start_chat": [StartTurn(role="user", text=idea), answer],
             }
-        fields, applied, rejected = apply_start_changes({}, reply.changes, "said")
+        fields, applied, rejected = apply_start_changes({}, reply.changes, "said", message=idea)
         answer = StartTurn(
             role="assistant",
             text=reply_text(applied, fields, None),
