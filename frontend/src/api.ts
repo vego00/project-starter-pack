@@ -211,6 +211,8 @@ const startFieldSchema = z.object({
   display: z.string().nullable(),
   source: z.enum(["said", "picked", "default", "recommended"]).nullable(),
   why: z.string().nullable(),
+  // The first card that asks this info when it is left blank (ADR-024).
+  asked_in: z.string().nullable().default(null),
 });
 
 const startSchema = z.object({

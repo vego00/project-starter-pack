@@ -150,6 +150,17 @@ function AnswerChoices({
   );
 }
 
+/** Info fields grouped by the card that asks them, in the order the cards first appear. */
+function byCard(fields: StartField[]): [string | null, StartField[]][] {
+  const groups = new Map<string | null, StartField[]>();
+  for (const field of fields) {
+    const list = groups.get(field.asked_in) ?? [];
+    list.push(field);
+    groups.set(field.asked_in, list);
+  }
+  return [...groups.entries()];
+}
+
 function FieldRow({
   field,
   focused,
@@ -618,8 +629,11 @@ export function StartChat({
             <div className="start-actions">
               <p className="muted" role="status">
                 {blanks > 0
-                  ? `빈칸 ${blanks}개가 남았어요. 모두 채우면 결정을 시작할 수 있어요.`
-                  : "모두 채웠어요. 결정을 시작하면 카드를 하나씩 정해요."}
+                  ? `필수 칸 ${blanks}개가 비어 있어요.`
+                  : "목표를 모두 채웠어요. 결정을 시작하면 카드를 하나씩 정해요."}
+              </p>
+              <p className="muted">
+                오른쪽 정보는 비워 둬도 결정을 시작할 수 있어요.
               </p>
               <div className="row">
                 <button
@@ -627,7 +641,7 @@ export function StartChat({
                   disabled={busy || blanks === 0}
                   onClick={() => void fill()}
                 >
-                  빈칸은 알아서 채워 주세요
+                  목표 빈칸은 알아서 채워 주세요
                 </button>
                 <button
                   type="button"
@@ -747,7 +761,14 @@ export function StartChat({
             className="start-panel left"
             aria-label="프로젝트 목표"
           >
-            <h2>프로젝트 목표</h2>
+            <div className="start-panel-head">
+              <h2>프로젝트 목표</h2>
+              <span className="start-need required">
+                필수 ·{" "}
+                {goal.length - goal.filter((f) => f.value === null).length} /{" "}
+                {goal.length}칸
+              </span>
+            </div>
             <p className="muted">설계 초안이 이 내용을 기준으로 해요.</p>
             {rows(goal, "left")}
           </aside>
@@ -758,12 +779,29 @@ export function StartChat({
             className="start-panel right"
             aria-label="추천에 쓰는 정보"
           >
-            <h2>추천에 쓰는 정보</h2>
+            <div className="start-panel-head">
+              <h2>추천에 쓰는 정보</h2>
+              <span className="start-need">선택</span>
+            </div>
             <p className="muted">
-              앞의 세 줄은 카드 규칙이 직접 읽어요. 모두 채워야 결정을 시작할 수
-              있어요.
+              적어 두면 카드에서 다시 묻지 않아요. 비워 둔 칸은 그 카드에서
+              물어요.
             </p>
-            {rows(info, "right")}
+            {byCard(info).map(([card, list]) =>
+              card ? (
+                <div
+                  key={card}
+                  className="start-group"
+                  role="group"
+                  aria-label={`${card} 카드`}
+                >
+                  <p className="start-group-label">{card} 카드</p>
+                  {rows(list, "right")}
+                </div>
+              ) : (
+                rows(list, "right")
+              ),
+            )}
           </aside>
         )}
       </div>

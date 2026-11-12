@@ -19,6 +19,7 @@
   --on-primary: #ffffff;
   --tint: #f3f3f3;
   --tint-pressed: #e6e6e6;
+  --panel: #f5f5f5;
   --accent: #b3261e;
   --accent-tint: #fbedeb;
   --box-fill: transparent;
@@ -43,6 +44,7 @@
   --on-primary: #0b0d10;
   --tint: #1c2a3a;
   --tint-pressed: #26384d;
+  --panel: #14181e;
   --accent: #5ba3f0;
   --accent-tint: #1c2a3a;
   --box-fill: #14181e;
@@ -1053,10 +1055,38 @@ button.danger {
 .start-panel.right {
   right: 0;
   border-left: 1px solid var(--line);
+  /* Optional info sits on a quieter tone than the required goal (ADR-024). */
+  background: var(--panel);
 }
 .start-panel h2 {
   font-size: 1.07rem;
   margin: 0 0 2px;
+}
+.start-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.start-need {
+  font-size: 0.86rem;
+  font-weight: 500;
+  padding: 1px 8px;
+  border: 1px solid var(--control-line);
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.start-need.required {
+  font-weight: 600;
+  border-color: var(--text);
+}
+.start-group {
+  margin-top: 14px;
+}
+.start-group-label {
+  margin: 0 0 4px;
+  font-size: 0.86rem;
+  color: var(--muted);
 }
 .start-panel > .muted {
   font-size: 0.93rem;

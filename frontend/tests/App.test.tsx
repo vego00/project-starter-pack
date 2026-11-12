@@ -651,6 +651,7 @@ describe("start screen", () => {
       }),
       field("has_gpu", "choice", {
         rule_read: true,
+        asked_in: "모델 제공자",
         choices: [
           { value: "yes", label: "있어요" },
           { value: "no", label: "없어요" },
@@ -658,6 +659,7 @@ describe("start screen", () => {
       }),
       field("data_traits", "multi", {
         rule_read: true,
+        asked_in: "데이터 저장소",
         choices: [
           { value: "문서 검색 필요", label: "문서 검색 필요" },
           { value: "개인정보 포함", label: "개인정보 포함" },
@@ -668,6 +670,7 @@ describe("start screen", () => {
       }),
       field("budget", "choice", {
         free_text: true,
+        asked_in: "모델 제공자",
         value: "무료로만",
         display: "무료로만",
         source: "default",
@@ -684,7 +687,7 @@ describe("start screen", () => {
       },
     ],
     revision: 4,
-    missing: ["has_gpu"],
+    missing: ["context"],
     submit: { action: "gcb", goal: "답을 찾는 상태", answers: {} },
     ...overrides,
   });
@@ -739,8 +742,38 @@ describe("start screen", () => {
     expect(
       screen.getByRole("button", { name: "결정 시작하기" }),
     ).toBeDisabled();
-    expect(screen.getByText(/빈칸 1개가 남았어요/)).toBeVisible();
+    expect(screen.getByText(/필수 칸 1개가 비어 있어요/)).toBeVisible();
     expect(screen.queryByRole("region", { name: "설계 그래프" })).toBeNull();
+  });
+
+  it("marks the goal as required and groups the optional info by card", async () => {
+    await open(atStart(), () => Response.json(atStart()));
+
+    const left = screen.getByRole("complementary", { name: "프로젝트 목표" });
+    expect(within(left).getByText("필수 · 1 / 1칸")).toBeVisible();
+    const right = screen.getByRole("complementary", {
+      name: "추천에 쓰는 정보",
+    });
+    expect(within(right).getByText("선택")).toBeVisible();
+    const groups = within(right).getAllByRole("group");
+    expect(groups.map((group) => group.getAttribute("aria-label"))).toEqual([
+      "모델 제공자 카드",
+      "데이터 저장소 카드",
+    ]);
+    expect(within(groups[0]).getByText("has_gpu 이름")).toBeVisible();
+    expect(within(groups[0]).getByText("budget 이름")).toBeVisible();
+    expect(
+      screen.getByText("오른쪽 정보는 비워 둬도 결정을 시작할 수 있어요."),
+    ).toBeVisible();
+  });
+
+  it("starts with the goal filled though info is blank", async () => {
+    await open(atStart({ missing: [] }), () => Response.json(atStart()));
+
+    expect(screen.getByRole("button", { name: "결정 시작하기" })).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "목표 빈칸은 알아서 채워 주세요" }),
+    ).toBeDisabled();
   });
 
   it("sends a message about the field in focus and keeps it when it fails", async () => {
@@ -986,7 +1019,7 @@ describe("start screen", () => {
     );
 
     await user.click(
-      screen.getByRole("button", { name: "빈칸은 알아서 채워 주세요" }),
+      screen.getByRole("button", { name: "목표 빈칸은 알아서 채워 주세요" }),
     );
     expect(mock.mock.calls.at(-1)![0]).toContain("/start/fill");
     const begin = screen.getByRole("button", { name: "결정 시작하기" });
