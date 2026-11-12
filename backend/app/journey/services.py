@@ -5,7 +5,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from pydantic import BaseModel
+import httpx
+from pydantic import BaseModel, ValidationError
 
 from app.config import Settings
 from app.journey.deciders.base import Decider
@@ -346,6 +347,33 @@ class StartReply(ModelUse):
     changes: list[StartChange] = []
 
 
+class StartFailure(BaseModel):
+    """Why a call gave nothing, said to the user so they know whether sending again can help."""
+
+    reason: str
+
+
+def describe_failure(exc: Exception) -> str:
+    """Names the failure from its type and status only; the message may hold user text."""
+    if isinstance(exc, httpx.TimeoutException) or "timeout" in type(exc).__name__.lower():
+        return "모델이 제한 시간 안에 답하지 않았어요. 잠시 후 다시 보내 주세요."
+    if isinstance(exc, ValidationError | ValueError):
+        return "모델의 답이 정해진 형식(JSON)이 아니었어요. 다시 보내 주세요."
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    status = status or getattr(exc, "code", None)
+    if status == 429:
+        return "모델 호출 한도에 걸렸어요(HTTP 429). 잠시 후 다시 보내 주세요."
+    if status in (401, 403):
+        return f"모델 API 키가 거부됐어요(HTTP {status}). 키 설정을 확인해 주세요."
+    if isinstance(status, int) and status >= 500:
+        return f"모델 서버에 오류가 났어요(HTTP {status}). 잠시 후 다시 보내 주세요."
+    if isinstance(status, int):
+        return f"모델이 요청을 받지 않았어요(HTTP {status})."
+    if isinstance(exc, httpx.TransportError):
+        return "모델 서버에 연결하지 못했어요. 네트워크를 확인해 주세요."
+    return f"모델 호출이 실패했어요({type(exc).__name__})."
+
+
 class GcbRecommendation(ModelUse):
     picks: list[GcbPick] = []
 
@@ -357,7 +385,7 @@ class StartWriter(Protocol):
         chat: list[StartTurn],
         message: str,
         focus: str | None,
-    ) -> StartReply | None: ...
+    ) -> StartReply | StartFailure: ...
 
     def recommend_gcb(
         self, current: Mapping[str, StartValue], chat: list[StartTurn], blank: list[str]
@@ -374,7 +402,7 @@ def _use(result: Any) -> dict[str, Any]:
 
 
 class LLMStartWriter:
-    """None on failure: the caller keeps the fields as they were, so the user can send again."""
+    """A failure is returned with its cause; the caller keeps the fields so the user can resend."""
 
     def __init__(self, llm: StructuredLLM):
         self._llm = llm
@@ -385,7 +413,7 @@ class LLMStartWriter:
         chat: list[StartTurn],
         message: str,
         focus: str | None,
-    ) -> StartReply | None:
+    ) -> StartReply | StartFailure:
         try:
             result = self._llm.generate(
                 system=START_SYSTEM,
@@ -394,7 +422,7 @@ class LLMStartWriter:
             )
         except Exception as exc:  # noqa: BLE001 - model boundary; the prompt holds user text
             logger.error("start fill failed type=%s", type(exc).__name__)
-            return None
+            return StartFailure(reason=describe_failure(exc))
         return StartReply(changes=result.output.changes, **_use(result))
 
     def recommend_gcb(

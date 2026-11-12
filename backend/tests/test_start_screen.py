@@ -1,8 +1,16 @@
 """Start screen (ADR-023): chat fills what was said, picks and defaults fill the rest."""
 
+import httpx
 import pytest
 from app.config import Settings
-from app.journey.services import GcbPick, GcbRecommendation, JourneyDeps, StartReply
+from app.journey.services import (
+    GcbPick,
+    GcbRecommendation,
+    JourneyDeps,
+    StartFailure,
+    StartReply,
+    describe_failure,
+)
 from app.journey.start import (
     NOTHING,
     StartChange,
@@ -236,15 +244,57 @@ def test_a_tapped_answer_stays_in_the_chat_and_the_next_question_offers_its_choi
         assert bad.status_code == 422
 
 
-def test_a_failed_reply_changes_nothing():
-    with client_with(ScriptedStart(FIRST, None)) as client:
+def test_a_failed_reply_changes_nothing_and_says_why():
+    timeout = StartFailure(
+        reason="모델이 제한 시간 안에 답하지 않았어요. 잠시 후 다시 보내 주세요."
+    )
+    with client_with(ScriptedStart(FIRST, timeout)) as client:
         view = client.post(JOURNEYS, json={"idea": IDEA}).json()
         response = post(client, view, "messages", text="GPU는 없어요")
 
         assert response.status_code == 503
+        assert response.json()["error"]["message"] == timeout.reason
         again = client.get(f"{JOURNEYS}/{view['journey_id']}").json()
         assert again["start"]["revision"] == view["start"]["revision"]
         assert len(again["start"]["chat"]) == 2
+
+
+def test_a_failed_first_reading_says_why_in_the_chat():
+    failure = StartFailure(reason="모델 호출 한도에 걸렸어요(HTTP 429). 잠시 후 다시 보내 주세요.")
+    with client_with(ScriptedStart(failure)) as client:
+        view = client.post(JOURNEYS, json={"idea": IDEA}).json()
+
+        answer = view["start"]["chat"][1]["text"]
+        assert answer.startswith(failure.reason) and "직접 채워도" in answer
+
+
+def json_error():
+    try:
+        StartReply.model_validate_json("not json")
+    except Exception as exc:  # noqa: BLE001 - only the exception object is needed
+        return exc
+
+
+def _status_error(status):
+    request = httpx.Request("POST", "https://model.example/v1")
+    return httpx.HTTPStatusError("x", request=request, response=httpx.Response(status))
+
+
+@pytest.mark.parametrize(
+    ("exc", "says"),
+    [
+        (httpx.ReadTimeout("x"), "제한 시간"),
+        (json_error(), "형식(JSON)"),
+        (_status_error(429), "HTTP 429"),
+        (_status_error(401), "키가 거부"),
+        (_status_error(503), "서버에 오류"),
+        (_status_error(400), "HTTP 400"),
+        (httpx.ConnectError("x"), "연결하지 못했어요"),
+        (RuntimeError("x"), "RuntimeError"),
+    ],
+)
+def test_each_failure_is_named(exc, says):
+    assert says in describe_failure(exc)
 
 
 def test_without_a_model_the_fields_are_picked_and_blanks_become_defaults():

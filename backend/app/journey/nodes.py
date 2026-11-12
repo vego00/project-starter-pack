@@ -19,7 +19,7 @@ from app.journey.deciders.base import DeciderQuestion, judge, judge_many
 from app.journey.design_constraints import BLOCKING_CARDS, derive_design_constraints
 from app.journey.design_edit import keep_human_edits
 from app.journey.design_generator import MAX_ATTEMPTS, MAX_OUTAGE_RETRIES, generate_design
-from app.journey.services import JourneyDeps, llm_calls_used
+from app.journey.services import JourneyDeps, StartFailure, llm_calls_used
 from app.journey.start import (
     GCB_NAMES,
     StartTurn,
@@ -200,10 +200,10 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
             }
         # The idea is the first message: one call fills the goal and the signals together.
         reply = deps.start_writer.write({}, [], idea, None)
-        if reply is None:
+        if isinstance(reply, StartFailure):
             answer = StartTurn(
                 role="assistant",
-                text="문장을 정리하지 못했어요. 다시 보내거나 칸을 눌러 직접 채워 주세요.",
+                text=f"{reply.reason} 칸을 눌러 직접 채워도 돼요.",
             )
             return {
                 "gcb_draft": GcbDraft(source="unavailable"),

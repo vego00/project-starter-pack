@@ -30,7 +30,7 @@ from app.journey.modules import (
 )
 from app.journey.nodes import resume_command
 from app.journey.package import build_package, package_zip
-from app.journey.services import JourneyDeps
+from app.journey.services import JourneyDeps, StartFailure
 from app.journey.start import FIELDS as START_FIELD_MAP
 from app.journey.start import (
     GCB_NAMES,
@@ -517,10 +517,8 @@ class JourneyService:
                 )
             started = perf_counter()
             reply = writer.write(state.start_fields, state.start_chat, text, focus)
-            if reply is None:
-                raise JourneyError(
-                    503, "start_reply_failed", "문장을 정리하지 못했어요. 잠시 후 다시 보내 주세요."
-                )
+            if isinstance(reply, StartFailure):
+                raise JourneyError(503, "start_reply_failed", reply.reason)
             fields, applied, rejected = apply_start_changes(
                 state.start_fields, reply.changes, "said", focus, text
             )
