@@ -4,6 +4,7 @@ layer: data
 order: 20
 title: 검색 저장소
 question: 문서를 의미로 검색하는 벡터 저장소를 무엇으로 할까요?
+uses: [data_traits]
 options:
   - id: pgvector
     name: pgvector (PostgreSQL 확장)

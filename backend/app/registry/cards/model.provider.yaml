@@ -3,6 +3,7 @@ version: 1
 layer: model
 title: 모델 제공자
 question: 어떤 경로로 LLM을 사용할까요?
+uses: [has_gpu, budget]
 options:
   - id: gemini
     name: Gemini

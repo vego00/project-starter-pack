@@ -3,6 +3,7 @@ version: 1
 layer: mlops
 title: 모델 서빙
 question: 모델을 어떻게 서빙할까요?
+uses: [has_gpu]
 options:
   - id: external_api
     name: 외부 API만
