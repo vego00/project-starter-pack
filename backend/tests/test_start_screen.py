@@ -15,7 +15,9 @@ from app.journey.start import (
     NOTHING,
     StartChange,
     StartValue,
+    answer_text,
     apply_start_changes,
+    asked_field,
     fill_defaults,
     missing,
     to_spec,
@@ -322,3 +324,40 @@ def test_focus_must_name_a_field(focus):
     with client_with(ScriptedStart(FIRST)) as client:
         view = client.post(JOURNEYS, json={"idea": IDEA}).json()
         assert post(client, view, "messages", text="안녕", focus=focus).status_code == 422
+
+
+def said(value):
+    return StartValue(value=value, source="said")
+
+
+def test_the_bot_asks_the_rule_fields_first_without_offering_to_fill():
+    current = {"goal": said("답을 찾는 상태"), "deployment_target": said("public_service")}
+
+    assert asked_field(current) == "has_gpu"
+    assert answer_text("deployment_target", current) == (
+        "배포 범위를 정했어요. 모델을 직접 실행할 GPU 장비가 있나요?"
+    )
+
+
+def test_once_rules_are_set_it_offers_to_fill_and_keeps_asking_the_rest():
+    current = {
+        "goal": said("답을 찾는 상태"),
+        "deployment_target": said("public_service"),
+        "has_gpu": said("yes"),
+        "data_traits": said(["특별한 것 없음"]),
+    }
+
+    assert asked_field(current) == "context"
+    assert answer_text("data_traits", current) == (
+        "다루는 데이터를 정했어요. 남은 7칸은 '빈칸은 알아서 채워 주세요'로 한 번에 "
+        "채울 수도 있어요. 누가 어떤 상황에서 쓰는 서비스인가요?"
+    )
+
+    for name in ("context", "boundary", "expected_users", "team_size", "duration_weeks"):
+        current[name] = said("값")
+    assert asked_field(current) == "weekly_hours"
+    current["weekly_hours"] = said("값")
+    assert asked_field(current) == "budget"
+    current["budget"] = said("값")
+    assert asked_field(current) is None
+    assert answer_text("budget", current).endswith("모두 채웠어요. 결정을 시작할 수 있어요.")

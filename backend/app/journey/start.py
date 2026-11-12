@@ -164,12 +164,31 @@ START_FIELDS: tuple[StartField, ...] = (
 FIELDS = {field.name: field for field in START_FIELDS}
 GCB_NAMES = tuple(field.name for field in START_FIELDS if field.is_gcb)
 # The follow-up question goes to the blank that changes the most decisions.
-ASK_ORDER = ("goal", "deployment_target", "has_gpu", "data_traits")
+ASK_ORDER = (
+    "goal",
+    "deployment_target",
+    "has_gpu",
+    "data_traits",
+    "context",
+    "boundary",
+    "expected_users",
+    "team_size",
+    "duration_weeks",
+    "weekly_hours",
+    "budget",
+)
 QUESTIONS = {
     "goal": "프로젝트가 끝났을 때 누가 무엇을 할 수 있게 되면 좋을까요?",
     "deployment_target": "어디까지 배포할 계획인가요?",
     "has_gpu": "모델을 직접 실행할 GPU 장비가 있나요?",
     "data_traits": "다루는 데이터에 개인정보나 찾아 답할 문서가 있나요? 해당하는 것을 모두 골라 주세요.",
+    "context": "누가 어떤 상황에서 쓰는 서비스인가요?",
+    "boundary": "결과가 꼭 지켜야 할 기준이 있나요? 예: 답마다 출처를 표시한다.",
+    "expected_users": "실제로 쓸 사람은 몇 명 정도인가요?",
+    "team_size": "함께 만드는 사람은 몇 명인가요?",
+    "duration_weeks": "개발 기간은 얼마나 잡고 있나요?",
+    "weekly_hours": "일주일에 개발에 쓸 수 있는 시간은 얼마나 되나요?",
+    "budget": "모델 호출과 서버에 쓸 수 있는 예산은 어느 정도인가요?",
 }
 
 
@@ -269,10 +288,17 @@ def asked_field(current: Mapping[str, StartValue]) -> str | None:
 
 
 def _next_line(current: Mapping[str, StartValue]) -> str:
-    if not missing(current):
+    """Keeps asking blank by blank; once the fields card rules read are set, it also offers
+    the fill button, since the rest only colours the explanations."""
+    blank = missing(current)
+    if not blank:
         return "모두 채웠어요. 결정을 시작할 수 있어요."
-    question = next_question(current)
-    return question or "남은 칸은 '빈칸은 알아서 채워 주세요'로 채울 수 있어요."
+    question = next_question(current) or ""
+    rules_set = all(name in current for name in ASK_ORDER if FIELDS[name].rule_read)
+    if not rules_set:
+        return question
+    offer = f"남은 {len(blank)}칸은 '빈칸은 알아서 채워 주세요'로 한 번에 채울 수도 있어요."
+    return f"{offer} {question}".strip()
 
 
 def reply_text(applied: list[str], current: Mapping[str, StartValue], focus: str | None) -> str:
