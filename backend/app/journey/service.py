@@ -71,6 +71,7 @@ NO_MODEL_NOTICE = (
 MAX_MODULE_MESSAGES = 30  # Provisional cost ceiling for the build-order conversation.
 MAX_MODULE_UNDO = 20
 MAX_START_MESSAGES = 20  # Provisional cost ceiling for the start-screen conversation.
+FILLED = "빈칸 {}칸을 채웠어요. 사실과 다른 칸은 눌러서 고쳐 주세요."
 MOCK_RECOMMENDATION_NOTICE = (
     "선택지 설명은 AI가 쓰지만, 추천은 아직 카드의 기본값이며 내 프로젝트를 분석한 결과가 아닙니다."
 )
@@ -522,19 +523,27 @@ class JourneyService:
             fields, applied, rejected = apply_start_changes(
                 state.start_fields, reply.changes, "said", focus, text
             )
-            turns = [
-                StartTurn(role="user", text=text),
-                StartTurn(
+            trace = [self._model_event(reply, started)]
+            said = StartTurn(role="user", text=text)
+            if reply.action == "fill":
+                # Asked in words, the same as the button: every filled field stays editable.
+                fields, filled, more = self._fill_blanks(fields, [*state.start_chat, said])
+                trace += more
+                answer = StartTurn(
+                    role="assistant",
+                    text=FILLED.format(len(filled)) if filled else "채울 빈칸이 없어요.",
+                    changes=[*applied, *filled],
+                    rejected=rejected,
+                )
+            else:
+                answer = StartTurn(
                     role="assistant",
                     text=reply_text(applied, fields, focus),
                     changes=applied,
                     rejected=rejected,
                     asks=asked_field(fields),
-                ),
-            ]
-            return self._save_start(
-                journey_id, state, fields, turns, [self._model_event(reply, started)]
-            )
+                )
+            return self._save_start(journey_id, state, fields, [said, answer], trace)
 
     def edit_start(self, journey_id: UUID, revision: int, change: StartChange) -> JourneyView:
         with self._lock(journey_id):
@@ -570,35 +579,37 @@ class JourneyService:
         """Signals take the fixed defaults; blank goal fields are recommended once, else "따로 없음"."""
         with self._lock(journey_id):
             state = self._start_state(journey_id, revision)
-            fields, filled = fill_defaults(state.start_fields)
-            blank = [name for name in GCB_NAMES if name not in fields]
-            trace = []
-            writer = self._deps.start_writer
-            if blank and writer is not None:
-                started = perf_counter()
-                recommendation = writer.recommend_gcb(fields, state.start_chat, blank)
-                if recommendation is not None:
-                    trace.append(self._model_event(recommendation, started))
-                    for pick in recommendation.picks:
-                        text, why = " ".join(pick.value.split()), " ".join(pick.why.split())
-                        if pick.field in blank and pick.field not in fields and text and why:
-                            fields[pick.field] = StartValue(
-                                value=text[:MAX_TEXT], source="recommended", why=why[:200]
-                            )
-                            filled.append(START_FIELD_MAP[pick.field].name_in_text)
-            for name in blank:
-                if name not in fields:
-                    why = "근거를 찾지 못해 비워 둔 것으로 채웠어요."
-                    fields[name] = StartValue(value=NOTHING, source="recommended", why=why)
-                    filled.append(START_FIELD_MAP[name].name_in_text)
+            fields, filled, trace = self._fill_blanks(state.start_fields, state.start_chat)
             if not filled:
                 raise JourneyError(409, "start_nothing_blank", "채울 빈칸이 없어요.")
-            answer = StartTurn(
-                role="assistant",
-                text=f"빈칸 {len(filled)}칸을 채웠어요. 사실과 다른 칸은 눌러서 고쳐 주세요.",
-                changes=filled,
-            )
+            answer = StartTurn(role="assistant", text=FILLED.format(len(filled)), changes=filled)
             return self._save_start(journey_id, state, fields, [answer], trace)
+
+    def _fill_blanks(
+        self, current: dict[str, StartValue], chat: list[StartTurn]
+    ) -> tuple[dict[str, StartValue], list[str], list[NodeEvent]]:
+        fields, filled = fill_defaults(current)
+        blank = [name for name in GCB_NAMES if name not in fields]
+        trace = []
+        writer = self._deps.start_writer
+        if blank and writer is not None:
+            started = perf_counter()
+            recommendation = writer.recommend_gcb(fields, chat, blank)
+            if recommendation is not None:
+                trace.append(self._model_event(recommendation, started))
+                for pick in recommendation.picks:
+                    text, why = " ".join(pick.value.split()), " ".join(pick.why.split())
+                    if pick.field in blank and pick.field not in fields and text and why:
+                        fields[pick.field] = StartValue(
+                            value=text[:MAX_TEXT], source="recommended", why=why[:200]
+                        )
+                        filled.append(START_FIELD_MAP[pick.field].name_in_text)
+        for name in blank:
+            if name not in fields:
+                why = "근거를 찾지 못해 비워 둔 것으로 채웠어요."
+                fields[name] = StartValue(value=NOTHING, source="recommended", why=why)
+                filled.append(START_FIELD_MAP[name].name_in_text)
+        return fields, filled, trace
 
     def _model_event(self, use: Any, started: float) -> NodeEvent:
         return NodeEvent(

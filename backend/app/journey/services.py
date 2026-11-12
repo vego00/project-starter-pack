@@ -3,7 +3,7 @@
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 import httpx
 from pydantic import BaseModel, ValidationError
@@ -324,6 +324,8 @@ class LLMModuleWriter:
 
 class StartOutput(BaseModel):
     changes: list[StartChange] = []
+    # Set when the user asks for the blanks to be filled, the same as pressing the button.
+    action: Literal["fill"] | None = None
 
 
 class GcbPick(BaseModel):
@@ -345,6 +347,7 @@ class ModelUse(BaseModel):
 
 class StartReply(ModelUse):
     changes: list[StartChange] = []
+    action: Literal["fill"] | None = None
 
 
 class StartFailure(BaseModel):
@@ -423,7 +426,8 @@ class LLMStartWriter:
         except Exception as exc:  # noqa: BLE001 - model boundary; the prompt holds user text
             logger.error("start fill failed type=%s", type(exc).__name__)
             return StartFailure(reason=describe_failure(exc))
-        return StartReply(changes=result.output.changes, **_use(result))
+        output = result.output
+        return StartReply(changes=output.changes, action=output.action, **_use(result))
 
     def recommend_gcb(
         self, current: Mapping[str, StartValue], chat: list[StartTurn], blank: list[str]

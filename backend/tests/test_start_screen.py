@@ -361,3 +361,23 @@ def test_once_rules_are_set_it_offers_to_fill_and_keeps_asking_the_rest():
     current["budget"] = said("값")
     assert asked_field(current) is None
     assert answer_text("budget", current).endswith("모두 채웠어요. 결정을 시작할 수 있어요.")
+
+
+def test_asking_in_words_fills_the_blanks_like_the_button():
+    writer = ScriptedStart(
+        FIRST,
+        StartReply(action="fill"),
+        picks=GcbRecommendation(
+            picks=[GcbPick(field="boundary", value="답마다 출처를 표시한다", why="목표에서")]
+        ),
+    )
+    with client_with(writer) as client:
+        view = client.post(JOURNEYS, json={"idea": IDEA}).json()
+        view = post(client, view, "messages", text="알아서 채워봐").json()
+
+        answer = view["start"]["chat"][-1]
+        assert answer["text"].startswith("빈칸 ")
+        assert "기준" in answer["changes"] and "GPU 장비" in answer["changes"]
+        assert value_of(view, "boundary")["source"] == "recommended"
+        assert value_of(view, "has_gpu")["source"] == "default"
+        assert view["start"]["missing"] == []
