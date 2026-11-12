@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent, ReactNode } from "react";
 import type { Journey, StartChange, StartField } from "./api";
-import { EXAMPLES, MAX_IDEA, MIN_IDEA } from "./components";
+import { EXAMPLES, MAX_IDEA, MIN_IDEA, SOURCE } from "./components";
 
 // After this many seconds of reading, say what a reload would lose.
 const LONG_WAIT = 40;
@@ -9,13 +9,6 @@ const LONG_WAIT = 40;
 /** Each returns an error message, or "" when the server took it. */
 type Send = (text: string, focus: string | null) => Promise<string>;
 type Edit = (change: StartChange) => Promise<string>;
-
-const SOURCE: Record<NonNullable<StartField["source"]>, string> = {
-  said: "내 말에서",
-  picked: "직접 고름",
-  default: "기본값",
-  recommended: "추천",
-};
 
 function PanelToggle({
   side,

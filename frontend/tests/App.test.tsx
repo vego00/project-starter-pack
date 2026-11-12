@@ -176,6 +176,96 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("card info strip", () => {
+  const signal = (name: string, extra = {}) => ({
+    name,
+    label: `${name} 이름`,
+    kind: "choice",
+    choices: [
+      { value: "yes", label: "있어요" },
+      { value: "no", label: "없어요" },
+    ],
+    free_text: false,
+    value: "no",
+    display: "없어요",
+    source: "default",
+    why: "GPU 없이 시작하는 기준이에요.",
+    ...extra,
+  });
+
+  it("shows the info a card reads and changes it there", async () => {
+    const view = journey({
+      prompt: decisionPrompt(
+        {},
+        {
+          signals: [
+            signal("has_gpu"),
+            signal("data_traits", {
+              kind: "multi",
+              choices: [
+                { value: "문서 검색 필요", label: "문서 검색 필요" },
+                { value: "개인정보 포함", label: "개인정보 포함" },
+              ],
+              value: ["문서 검색 필요"],
+              display: "문서 검색 필요",
+              source: "said",
+            }),
+          ],
+        },
+      ),
+    });
+    const { user, mock } = await startWith(view);
+
+    const strip = await screen.findByRole("group", {
+      name: "이 카드가 쓰는 정보",
+    });
+    expect(
+      within(strip).getByText("바꾸면 추천이 다시 정해져요"),
+    ).toBeVisible();
+    const gpu = within(strip).getByRole("button", {
+      name: "has_gpu 이름 없어요 기본값",
+    });
+    expect(gpu).toHaveAttribute("aria-expanded", "false");
+    expect(
+      within(strip).getByRole("button", {
+        name: "data_traits 이름 문서 검색 필요 내 말에서",
+      }),
+    ).toBeVisible();
+
+    await user.click(gpu);
+    expect(gpu).toHaveAttribute("aria-expanded", "true");
+    await user.click(within(strip).getByRole("button", { name: "있어요" }));
+    expect(bodyOf(mock.mock.calls.at(-1)!).action).toEqual({
+      action: "signal",
+      field: "has_gpu",
+      value: "yes",
+    });
+
+    await user.click(
+      within(strip).getByRole("button", {
+        name: "data_traits 이름 문서 검색 필요 내 말에서",
+      }),
+    );
+    await user.click(
+      within(strip).getByRole("button", { name: "개인정보 포함" }),
+    );
+    expect(bodyOf(mock.mock.calls.at(-1)!).action).toEqual({
+      action: "signal",
+      field: "data_traits",
+      values: ["문서 검색 필요", "개인정보 포함"],
+    });
+  });
+
+  it("shows no strip for a card that reads no info", async () => {
+    await startWith(journey());
+
+    await screen.findByText("사람 확인이 필요한가요?");
+    expect(
+      screen.queryByRole("group", { name: "이 카드가 쓰는 정보" }),
+    ).toBeNull();
+  });
+});
+
 describe("starting", () => {
   it("requires a meaningful idea and sends it trimmed", async () => {
     const user = userEvent.setup();

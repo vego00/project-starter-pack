@@ -1083,6 +1083,33 @@ button.danger {
 .start-group {
   margin-top: 14px;
 }
+/* Card info strip (ADR-024): a tint panel, no accent; the accent stays on the current card. */
+.signal-strip {
+  margin: 10px 0 12px;
+  padding: 10px 12px;
+  background: var(--tint);
+}
+.signal-strip-head {
+  margin: 0 0 8px;
+  font-size: 0.93rem;
+  color: var(--muted);
+}
+.signal-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.signal-chip {
+  min-height: 44px;
+  background: var(--surface);
+}
+.signal-source {
+  font-size: 0.86rem;
+  color: var(--muted);
+}
+.signal-edit {
+  margin-top: 10px;
+}
 .start-group-label {
   margin: 0 0 4px;
   font-size: 0.86rem;

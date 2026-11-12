@@ -65,6 +65,119 @@ export const MIN_IDEA = 10;
 export const MAX_IDEA = 3000;
 
 type Act = (action: Action) => void;
+type CardSignal = DecisionPrompt["card"]["signals"][number];
+
+/** Where a start field or card info value came from. */
+export const SOURCE: Record<
+  "said" | "picked" | "default" | "recommended",
+  string
+> = {
+  said: "내 말에서",
+  picked: "직접 고름",
+  default: "기본값",
+  recommended: "추천",
+};
+
+/** The info a card reads, above its options; changing one prepares the card again (ADR-024). */
+function SignalStrip({
+  signals,
+  busy,
+  act,
+}: {
+  signals: CardSignal[];
+  busy: boolean;
+  act: Act;
+}) {
+  const [open, setOpen] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+
+  function pick(signal: CardSignal, value: string) {
+    if (signal.kind === "multi") {
+      const held = Array.isArray(signal.value) ? signal.value : [];
+      const values = held.includes(value)
+        ? held.filter((item) => item !== value)
+        : [...held, value];
+      act({ action: "signal", field: signal.name, values });
+    } else act({ action: "signal", field: signal.name, value });
+  }
+
+  function typed(event: FormEvent, signal: CardSignal) {
+    event.preventDefault();
+    if (draft.trim())
+      act({ action: "signal", field: signal.name, value: draft.trim() });
+  }
+
+  return (
+    <div className="signal-strip" role="group" aria-label="이 카드가 쓰는 정보">
+      <p className="signal-strip-head">
+        이 카드가 쓰는 정보 · <span>바꾸면 추천이 다시 정해져요</span>
+      </p>
+      <div className="signal-chips">
+        {signals.map((signal) => (
+          <button
+            type="button"
+            key={signal.name}
+            className="signal-chip"
+            aria-expanded={open === signal.name}
+            onClick={() => {
+              setDraft("");
+              setOpen(open === signal.name ? null : signal.name);
+            }}
+          >
+            {signal.label} <strong>{signal.display}</strong>
+            {signal.source && (
+              <span className="signal-source"> {SOURCE[signal.source]}</span>
+            )}
+          </button>
+        ))}
+      </div>
+      {signals
+        .filter((signal) => signal.name === open)
+        .map((signal) => {
+          const held = Array.isArray(signal.value)
+            ? signal.value
+            : [signal.value];
+          return (
+            <div key={signal.name} className="signal-edit">
+              {signal.why && <p className="muted">{signal.why}</p>}
+              <div className="start-choices">
+                {signal.choices.map((choice) => (
+                  <button
+                    type="button"
+                    key={choice.value}
+                    className={held.includes(choice.value) ? "on" : ""}
+                    aria-pressed={held.includes(choice.value)}
+                    disabled={busy}
+                    onClick={() => pick(signal, choice.value)}
+                  >
+                    {choice.label}
+                  </button>
+                ))}
+              </div>
+              {signal.free_text && (
+                <form
+                  className="start-type"
+                  onSubmit={(event) => typed(event, signal)}
+                >
+                  <label htmlFor={`signal-${signal.name}`} className="sr-only">
+                    {signal.label} 직접 적기
+                  </label>
+                  <input
+                    id={`signal-${signal.name}`}
+                    maxLength={40}
+                    placeholder="직접 적기"
+                    value={draft}
+                    onChange={(event) => setDraft(event.target.value)}
+                  />
+                  <button disabled={busy || !draft.trim()}>저장</button>
+                </form>
+              )}
+            </div>
+          );
+        })}
+    </div>
+  );
+}
 
 // The button that was pressed is gone after a screen change, so keyboard users need a new place.
 function useFocusedHeading(screenKey?: string | number) {
@@ -333,6 +446,14 @@ export function DecisionView({
         <h2 ref={heading} tabIndex={-1}>
           {card.question}
         </h2>
+        {card.signals.length > 0 && (
+          <SignalStrip
+            key={card.card_id}
+            signals={card.signals}
+            busy={busy}
+            act={act}
+          />
+        )}
         {prompt.error && (
           <p className="alert" role="alert">
             {prompt.error}

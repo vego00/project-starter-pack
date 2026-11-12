@@ -77,6 +77,26 @@ const promptSchema = z.discriminatedUnion("type", [
         }),
       ),
       div_refs: z.array(z.string()),
+      // Project info this card reads, changeable on the card (ADR-024).
+      signals: z
+        .array(
+          z.object({
+            name: z.string(),
+            label: z.string(),
+            kind: z.enum(["text", "choice", "multi"]),
+            choices: z.array(
+              z.object({ value: z.string(), label: z.string() }),
+            ),
+            free_text: z.boolean(),
+            value: z.union([z.string(), z.array(z.string())]),
+            display: z.string(),
+            source: z
+              .enum(["said", "picked", "default", "recommended"])
+              .nullable(),
+            why: z.string().nullable(),
+          }),
+        )
+        .default([]),
     }),
     qa: z.array(
       z.object({
@@ -334,6 +354,7 @@ export type Action =
   | { action: "revise"; card_id: string }
   | { action: "focus"; card_id: string }
   | { action: "keep"; card_id: string }
+  | { action: "signal"; field: string; value?: string; values?: string[] }
   | { action: "clarify"; answers: Record<string, unknown> }
   | {
       action: "gcb";
