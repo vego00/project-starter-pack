@@ -21,11 +21,17 @@ from app.journey.design_edit import keep_human_edits
 from app.journey.design_generator import MAX_ATTEMPTS, MAX_OUTAGE_RETRIES, generate_design
 from app.journey.services import JourneyDeps, StartFailure, llm_calls_used
 from app.journey.start import (
+    FIELDS,
     GCB_NAMES,
+    StartChange,
     StartTurn,
     apply_start_changes,
+    as_start_value,
     asked_field,
+    card_defaults,
+    display,
     reply_text,
+    signal_answers,
     start_from_draft,
 )
 from app.journey.state import (
@@ -44,6 +50,7 @@ from app.journey.state import (
     CardBrief,
     CardPresentation,
     CardQA,
+    CardSignal,
     Decision,
     DeferAction,
     FocusAction,
@@ -56,6 +63,8 @@ from app.journey.state import (
     ReopenAction,
     ReviseAction,
     SelectAction,
+    SignalAction,
+    SignalChoice,
     SkippedCard,
 )
 from app.registry.loader import Registry
@@ -174,6 +183,36 @@ def _selection_question(card: DecisionCard) -> DeciderQuestion:
         # Asking is the safe side: a card is left out only on a confident "unneeded".
         default="needed",
     )
+
+
+def _with_signals(state: JourneyState, fields: dict[str, Any], names: list[str]) -> dict[str, Any]:
+    """Start fields and the spec moved together, for the signals in `names` only."""
+    answers = signal_answers({name: fields[name] for name in names})
+    spec = ProjectSpec.model_validate({**state.project_spec.model_dump(), **answers})
+    return {"start_fields": fields, "project_spec": spec}
+
+
+def _card_signals(state: JourneyState, card: DecisionCard) -> list[CardSignal]:
+    signals = []
+    for name in card.uses:
+        field, held = FIELDS[name], state.start_fields.get(name)
+        value = held.value if held else as_start_value(getattr(state.project_spec, name))
+        if value is None:
+            continue
+        signals.append(
+            CardSignal(
+                name=name,
+                label=field.name_in_text,
+                kind=field.kind,
+                choices=[SignalChoice(value=c.value, label=c.label) for c in field.choices],
+                free_text=field.free_text,
+                value=value,
+                display=display(field, value),
+                source=held.source if held else None,
+                why=held.why if held else None,
+            )
+        )
+    return signals
 
 
 def _recommendation_reason(card: DecisionCard, option_id: str, decider: str) -> str:
@@ -357,7 +396,20 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
         # Stage first: a decision made here can invalidate the ones in later stages.
         pending = sorted(state.pending_cards, key=lambda card_id: registry.card(card_id).stage)
         following = next_card(pending, state.deferred_cards, state.focus_card)
-        return {"current_card_id": state.editing_card or following}
+        current = state.editing_card or following
+        update: dict[str, Any] = {"current_card_id": current}
+        if current is None:
+            return update
+        # Info this card reads and nobody gave takes its small-start default now (ADR-024).
+        blank = [
+            name
+            for name in registry.card(current).uses
+            if name not in state.start_fields and getattr(state.project_spec, name) is None
+        ]
+        fields = card_defaults(state.start_fields, blank)
+        if added := [name for name in blank if name in fields]:
+            update.update(_with_signals(state, fields, added))
+        return update
 
     def advisor(state: JourneyState) -> dict[str, Any]:
         advice = deps.advisor.advise(state, registry.card(state.current_card_id))
@@ -467,6 +519,7 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
                 ),
                 learning_refs=list(card.learning_refs),
                 div_refs=list(card.div_refs),
+                signals=_card_signals(state, card),
             ),
         }
 
@@ -537,6 +590,8 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
                 "gate_error": None,
             }
 
+        if isinstance(action, SignalAction):
+            return _change_signal(state, action)
         if isinstance(action, AcceptRecommendationAction):
             option_id = current.recommendation.option_id
             by, rationale = "recommended", current.recommendation.reason
@@ -578,6 +633,22 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
             "needs_review": list(
                 dict.fromkeys([*(c for c in state.needs_review if c != current.card_id), *later])
             ),
+            "gate_outcome": "advance",
+            "gate_error": None,
+        }
+
+    def _change_signal(state: JourneyState, action: SignalAction) -> dict[str, Any]:
+        """Only what this card reads can change here; the card is then prepared again."""
+        card_id = state.current_card.card_id
+        if action.field not in registry.card(card_id).uses:
+            return _reject("이 카드에서 바꿀 수 있는 정보가 아니에요.")
+        change = StartChange(field=action.field, value=action.value, values=action.values)
+        fields, applied, rejected = apply_start_changes(state.start_fields, [change], "picked")
+        if not applied:
+            return _reject(" / ".join(rejected))
+        return {
+            **_with_signals(state, fields, [action.field]),
+            "card_briefs": {k: v for k, v in state.card_briefs.items() if k != card_id},
             "gate_outcome": "advance",
             "gate_error": None,
         }

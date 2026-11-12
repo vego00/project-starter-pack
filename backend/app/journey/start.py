@@ -324,6 +324,17 @@ def to_spec(current: Mapping[str, StartValue]) -> dict[str, Any]:
     return {"action": "gcb", **texts, "answers": signal_answers(current)}
 
 
+def as_start_value(value: Any) -> str | list[str] | None:
+    """A `ProjectSpec` signal written back the way the start fields hold it."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    return str(value)
+
+
 def signal_answers(current: Mapping[str, StartValue]) -> dict[str, Any]:
     """Set signals as `ProjectSpec` values; blank ones are left out."""
     answers: dict[str, Any] = {}

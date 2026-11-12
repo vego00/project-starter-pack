@@ -36,12 +36,15 @@ NODE_WRITES: dict[str, set[str]] = {
     "clarify_question": {"clarifications", "clarify_rounds"},
     "card_selector": {"skipped_cards"},
     "constraint_engine": {"implied", "pending_cards", "conflicts", "blocked_options"},
-    "controller": {"current_card_id"},
+    # Fills blank info the chosen card reads with defaults (ADR-024).
+    "controller": {"current_card_id", "project_spec", "start_fields"},
     "advisor": {"advice"},
     "recommender": {"recommendation"},
     "retriever": {"evidence"},
     "present": {"current_card", "card_briefs"},
-    "decision_gate": GATE_WRITES | {"deferred_cards", "pending_question"},
+    # A `signal` action changes the card's info and drops its saved brief to prepare it again.
+    "decision_gate": GATE_WRITES
+    | {"deferred_cards", "pending_question", "project_spec", "start_fields", "card_briefs"},
     "qa": {"qa_history"},
     "reviewer": {"review_issues", "status"},
     "composer": {"artifacts"},

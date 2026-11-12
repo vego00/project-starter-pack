@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from app.journey.constraints import Conflict
 from app.journey.design import DesignState
 from app.journey.modules import ModuleNote, ModuleTurn
-from app.journey.start import StartTurn, StartValue
+from app.journey.start import StartSource, StartTurn, StartValue
 from app.registry.schema import CardOption
 
 CardId = str
@@ -139,6 +139,26 @@ class OptionView(BaseModel):
     artifacts: list[str] = []
 
 
+class SignalChoice(BaseModel):
+    value: str
+    label: str
+
+
+class CardSignal(BaseModel):
+    """Project info a card reads, shown above its options so it can be changed there (ADR-024).
+    `source` is None for a value given to the journey directly rather than on the start screen."""
+
+    name: str
+    label: str
+    kind: Literal["text", "choice", "multi"]
+    choices: list[SignalChoice]
+    free_text: bool
+    value: str | list[str]
+    display: str
+    source: StartSource | None = None
+    why: str | None = None
+
+
 class CardPresentation(BaseModel):
     card_id: CardId
     version: int
@@ -152,6 +172,7 @@ class CardPresentation(BaseModel):
     to_review: list[str] = []
     learning_refs: list[str] = []
     div_refs: list[str] = []
+    signals: list[CardSignal] = []
 
 
 class CardBrief(BaseModel):
@@ -293,6 +314,16 @@ class KeepAction(_Action):
     card_id: CardId
 
 
+class SignalAction(_Action):
+    """Changes one piece of project info the current card reads; a multi-choice field sends
+    its whole list in `values`."""
+
+    action: Literal["signal"]
+    field: str = Field(max_length=40)
+    value: str = Field(default="", max_length=1000)
+    values: list[Annotated[str, Field(max_length=200)]] = Field(default=[], max_length=20)
+
+
 class GcbAction(_Action):
     action: Literal["gcb"]
     goal: str = Field(default="", max_length=MAX_GCB_CHARS)
@@ -315,7 +346,8 @@ GateAction = Annotated[
     | ReopenAction
     | ReviseAction
     | FocusAction
-    | KeepAction,
+    | KeepAction
+    | SignalAction,
     Field(discriminator="action"),
 ]
 JourneyAction = Annotated[
@@ -327,6 +359,7 @@ JourneyAction = Annotated[
     | ReviseAction
     | FocusAction
     | KeepAction
+    | SignalAction
     | ClarifyAction
     | GcbAction,
     Field(discriminator="action"),
