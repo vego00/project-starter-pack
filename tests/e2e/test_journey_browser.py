@@ -65,8 +65,8 @@ def start(page: Page) -> None:
 
 
 def begin(page: Page) -> None:
-    """The mock stack has no model: blanks take defaults, then the journey starts."""
-    page.get_by_role("button", name="빈칸은 알아서 채워 주세요").click()
+    """The mock stack has no model: goal blanks are filled, then the journey starts."""
+    page.get_by_role("button", name="목표 빈칸은 알아서 채워 주세요").click()
     page.get_by_role("button", name="결정 시작하기").click()
 
 
@@ -114,8 +114,9 @@ def test_all_cards_to_completion_with_reload_and_restart(page: Page):
     page.get_by_role("button", name="배포 범위 고치기 닫기").click()
     fill_field(page, "사용자 수", "20")
     fill_field(page, "개발 인원", "4")
-    page.get_by_role("button", name="빈칸은 알아서 채워 주세요").click()
-    expect(page.get_by_text("기본값").first).to_be_visible()
+    page.get_by_role("button", name="목표 빈칸은 알아서 채워 주세요").click()
+    # GPU and budget stay blank: only the goal is needed to start (ADR-024).
+    expect(page.get_by_role("button", name="결정 시작하기")).to_be_enabled()
     shot(page, "2-brief")
     page.get_by_role("button", name="결정 시작하기").click()
 
@@ -124,6 +125,14 @@ def test_all_cards_to_completion_with_reload_and_restart(page: Page):
     choose_surface(page)
     choose(page, "에이전트를 어떤 구조로 구성할까요?", "고정 파이프라인")
     choose(page, "에이전트가 실행 중간에 사람의 확인을 받아야 하나요?", "승인 후 실행")
+
+    # The blank budget is asked on the card that reads it, with its default.
+    expect(page.get_by_role("heading", name="어떤 경로로 LLM을 사용할까요?")).to_be_visible()
+    strip = page.get_by_role("group", name="이 카드가 쓰는 정보")
+    strip.get_by_role("button", name="예산 무료로만 기본값").click()
+    strip.get_by_role("button", name="월 5만원 이하").click()
+    expect(strip.get_by_role("button", name="예산 월 5만원 이하 직접 고름")).to_be_visible()
+    shot(page, "3b-card-info")
     choose(page, "어떤 경로로 LLM을 사용할까요?", "Gemini")
     choose(page, "서비스가 다루는 데이터를 어디에 저장할까요?", "PostgreSQL")
     choose(page, "문서를 의미로 검색하는 벡터 저장소를 무엇으로 할까요?", "불필요")
@@ -190,6 +199,8 @@ def test_questions_defer_and_reopen(page: Page):
     open_stage(page, "시스템 구성")
     expect(page.get_by_text("Ollama 컨테이너 · 자동 확정")).to_be_visible()
 
+    # The provider card closes the agent stage (ADR-024).
+    open_stage(page, "에이전트 설계")
     page.get_by_role("button", name="모델 제공자 다시 고르기").click()
     expect(page.get_by_role("heading", name="어떤 경로로 LLM을")).to_be_visible()
     open_stage(page, "시스템 구성")
