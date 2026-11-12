@@ -45,7 +45,6 @@ from app.journey.start import (
     apply_start_changes,
     asked_field,
     display,
-    fill_defaults,
     missing,
     reply_text,
     to_spec,
@@ -137,6 +136,8 @@ class StartFieldView(BaseModel):
     display: str | None
     source: StartSource | None
     why: str | None
+    # The first card that asks this signal when it is left blank; None for the GCB.
+    asked_in: str | None
 
 
 class StartView(BaseModel):
@@ -576,7 +577,7 @@ class JourneyService:
             return self._save_start(journey_id, state, fields, turns)
 
     def fill_start(self, journey_id: UUID, revision: int) -> JourneyView:
-        """Signals take the fixed defaults; blank goal fields are recommended once, else "따로 없음"."""
+        """Blank goal fields are recommended once, else "따로 없음". Signals stay blank."""
         with self._lock(journey_id):
             state = self._start_state(journey_id, revision)
             fields, filled, trace = self._fill_blanks(state.start_fields, state.start_chat)
@@ -588,7 +589,8 @@ class JourneyService:
     def _fill_blanks(
         self, current: dict[str, StartValue], chat: list[StartTurn]
     ) -> tuple[dict[str, StartValue], list[str], list[NodeEvent]]:
-        fields, filled = fill_defaults(current)
+        # Only the GCB is filled; blank signals wait for the cards that use them (ADR-024).
+        fields, filled = dict(current), []
         blank = [name for name in GCB_NAMES if name not in fields]
         trace = []
         writer = self._deps.start_writer
@@ -658,10 +660,13 @@ class JourneyService:
 
     def _start_view(self, state: JourneyState) -> StartView:
         fields = []
+        in_journey_order = sorted(self._registry.cards, key=lambda card: card.stage)
         for field in START_FIELDS:
             held = state.start_fields.get(field.name)
+            asked_in = next((c.title for c in in_journey_order if field.name in c.uses), None)
             fields.append(
                 StartFieldView(
+                    asked_in=asked_in,
                     name=field.name,
                     label=field.label,
                     kind=field.kind,

@@ -4,7 +4,7 @@ Field definitions live here only; the screen draws what this module sends. Value
 the user saw them and turned into `ProjectSpec` fields only when the journey starts.
 """
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -163,32 +163,11 @@ START_FIELDS: tuple[StartField, ...] = (
 )
 FIELDS = {field.name: field for field in START_FIELDS}
 GCB_NAMES = tuple(field.name for field in START_FIELDS if field.is_gcb)
-# The follow-up question goes to the blank that changes the most decisions.
-ASK_ORDER = (
-    "goal",
-    "deployment_target",
-    "has_gpu",
-    "data_traits",
-    "context",
-    "boundary",
-    "expected_users",
-    "team_size",
-    "duration_weeks",
-    "weekly_hours",
-    "budget",
-)
+# The chat asks only the GCB, in this order; signals are asked on their cards (ADR-024).
 QUESTIONS = {
     "goal": "프로젝트가 끝났을 때 누가 무엇을 할 수 있게 되면 좋을까요?",
-    "deployment_target": "어디까지 배포할 계획인가요?",
-    "has_gpu": "모델을 직접 실행할 GPU 장비가 있나요?",
-    "data_traits": "다루는 데이터에 개인정보나 찾아 답할 문서가 있나요? 해당하는 것을 모두 골라 주세요.",
     "context": "누가 어떤 상황에서 쓰는 서비스인가요?",
     "boundary": "결과가 꼭 지켜야 할 기준이 있나요? 예: 답마다 출처를 표시한다.",
-    "expected_users": "실제로 쓸 사람은 몇 명 정도인가요?",
-    "team_size": "함께 만드는 사람은 몇 명인가요?",
-    "duration_weeks": "개발 기간은 얼마나 잡고 있나요?",
-    "weekly_hours": "일주일에 개발에 쓸 수 있는 시간은 얼마나 되나요?",
-    "budget": "모델 호출과 서버에 쓸 수 있는 예산은 어느 정도인가요?",
 }
 
 
@@ -257,48 +236,41 @@ def apply_start_changes(
     return updated, list(dict.fromkeys(applied)), rejected
 
 
-def fill_defaults(current: Mapping[str, StartValue]) -> tuple[dict[str, StartValue], list[str]]:
-    """Blank signal fields take the fixed small-start defaults; GCB fields are filled elsewhere."""
+def card_defaults(current: Mapping[str, StartValue], names: Iterable[str]) -> dict[str, StartValue]:
+    """Blank signals among `names` take the fixed small-start defaults (ADR-024: when the card
+    that uses them opens). GCB fields and fields without a default are left alone."""
     updated = dict(current)
-    labels = []
-    for field in START_FIELDS:
-        if field.is_gcb or field.name in updated or field.default is None:
+    for name in names:
+        field = FIELDS[name]
+        if field.is_gcb or name in updated or field.default is None:
             continue
         value = list(field.default) if isinstance(field.default, tuple) else field.default
-        updated[field.name] = StartValue(value=value, source="default", why=field.why)
-        labels.append(field.name_in_text)
-    return updated, labels
+        updated[name] = StartValue(value=value, source="default", why=field.why)
+    return updated
 
 
 def missing(current: Mapping[str, StartValue]) -> list[str]:
-    return [field.name for field in START_FIELDS if field.name not in current]
+    """Only the GCB is needed to start; signals are asked on the cards that use them."""
+    return [name for name in GCB_NAMES if name not in current]
 
 
 def next_question(current: Mapping[str, StartValue]) -> str | None:
-    blank = [name for name in ASK_ORDER if name not in current]
+    blank = missing(current)
     return QUESTIONS[blank[0]] if blank else None
 
 
 def asked_field(current: Mapping[str, StartValue]) -> str | None:
     """The field the question in a reply asks about; None when the reply asks nothing."""
-    if not missing(current):
-        return None
-    blank = [name for name in ASK_ORDER if name not in current]
+    blank = missing(current)
     return blank[0] if blank else None
 
 
 def _next_line(current: Mapping[str, StartValue]) -> str:
-    """Keeps asking blank by blank; once the fields card rules read are set, it also offers
-    the fill button, since the rest only colours the explanations."""
-    blank = missing(current)
-    if not blank:
-        return "모두 채웠어요. 결정을 시작할 수 있어요."
-    question = next_question(current) or ""
-    rules_set = all(name in current for name in ASK_ORDER if FIELDS[name].rule_read)
-    if not rules_set:
-        return question
-    offer = f"남은 {len(blank)}칸은 '빈칸은 알아서 채워 주세요'로 한 번에 채울 수도 있어요."
-    return f"{offer} {question}".strip()
+    if missing(current):
+        return next_question(current) or ""
+    return "오른쪽 정보는 적어 두면 카드에서 다시 묻지 않아요. 목표를 모두 채웠어요. " + (
+        "결정을 시작할 수 있어요."
+    )
 
 
 def reply_text(applied: list[str], current: Mapping[str, StartValue], focus: str | None) -> str:
@@ -349,6 +321,11 @@ def to_spec(current: Mapping[str, StartValue]) -> dict[str, Any]:
         held = current.get(name)
         text = held.value if held and isinstance(held.value, str) else ""
         texts[name] = "" if text == NOTHING else text
+    return {"action": "gcb", **texts, "answers": signal_answers(current)}
+
+
+def signal_answers(current: Mapping[str, StartValue]) -> dict[str, Any]:
+    """Set signals as `ProjectSpec` values; blank ones are left out."""
     answers: dict[str, Any] = {}
     for field in START_FIELDS:
         held = current.get(field.name)
@@ -360,4 +337,4 @@ def to_spec(current: Mapping[str, StartValue]) -> dict[str, Any]:
             answers[field.name] = held.value
         else:
             answers[field.name] = _number_or_text(str(held.value))
-    return {"action": "gcb", **texts, "answers": answers}
+    return answers

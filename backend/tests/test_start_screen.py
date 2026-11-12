@@ -18,8 +18,9 @@ from app.journey.start import (
     answer_text,
     apply_start_changes,
     asked_field,
-    fill_defaults,
+    card_defaults,
     missing,
+    signal_answers,
     to_spec,
 )
 from app.main import create_app
@@ -97,27 +98,34 @@ def test_a_focused_field_is_the_only_one_that_moves():
     assert set(fields) == {"has_gpu"} and applied == ["GPU 장비"]
 
 
-def test_defaults_fill_only_blank_signals_and_name_their_reason():
+def test_card_defaults_fill_only_the_named_blank_signals():
     said = {"has_gpu": StartValue(value="yes", source="said")}
 
-    fields, labels = fill_defaults(said)
+    fields = card_defaults(said, ["has_gpu", "budget", "goal"])
 
-    assert fields["has_gpu"].value == "yes"
-    assert fields["deployment_target"].value == "small_group"
-    assert fields["deployment_target"].source == "default"
-    assert fields["data_traits"].value == ["특별한 것 없음"]
-    assert all(fields[name].why for name in fields if name != "has_gpu")
-    assert "GPU 장비" not in labels
-    assert missing(fields) == ["goal", "context", "boundary"]
+    assert fields["has_gpu"] == said["has_gpu"]
+    assert fields["budget"] == StartValue(
+        value="무료로만", source="default", why="비용이 없는 선택지부터 보는 기준이에요."
+    )
+    assert set(fields) == {"has_gpu", "budget"}
+    assert card_defaults({}, ["data_traits"])["data_traits"].value == ["특별한 것 없음"]
+
+
+def test_missing_counts_the_goal_fields_only():
+    current = {"goal": said("답을 찾는 상태"), "context": said("수강생이 쓴다")}
+
+    assert missing(current) == ["boundary"]
+    assert missing({**current, "boundary": said("출처 표시")}) == []
 
 
 def test_the_start_action_turns_picks_into_project_signals():
-    fields, _ = fill_defaults(
+    fields = card_defaults(
         {
             "goal": StartValue(value="답을 찾는 상태", source="said"),
             "boundary": StartValue(value=NOTHING, source="recommended", why="x"),
             "team_size": StartValue(value="2", source="picked"),
-        }
+        },
+        ["has_gpu", "expected_users", "deployment_target"],
     )
 
     action = to_spec(fields)
@@ -127,6 +135,8 @@ def test_the_start_action_turns_picks_into_project_signals():
     assert action["answers"]["team_size"] == 2
     assert action["answers"]["expected_users"] == "10명 이하"
     assert action["answers"]["deployment_target"] == "small_group"
+    assert "budget" not in action["answers"]
+    assert signal_answers(fields) == action["answers"]
 
 
 class ScriptedStart:
@@ -208,10 +218,13 @@ def test_the_idea_fills_fields_and_the_chat_goes_on_until_the_journey_starts():
         assert value_of(view, "boundary")["source"] == "recommended"
         assert value_of(view, "boundary")["why"] == "목표에서"
         assert value_of(view, "context")["value"] == NOTHING
-        assert value_of(view, "budget")["source"] == "default"
+        # Signals are optional now: a blank one is asked on the card that uses it.
+        assert value_of(view, "budget")["value"] is None
         assert view["start"]["missing"] == []
+        assert post(client, view, "fill").json()["error"]["code"] == "start_nothing_blank"
 
         submit = view["start"]["submit"]
+        assert "budget" not in submit["answers"]
         started = client.post(
             f"{JOURNEYS}/{view['journey_id']}/decisions",
             json={"revision": view["revision"], "action": submit},
@@ -225,8 +238,8 @@ def test_a_tapped_answer_stays_in_the_chat_and_the_next_question_offers_its_choi
     # Only one scripted reply: a tapped answer must not call the model.
     with client_with(ScriptedStart(FIRST)) as client:
         view = client.post(JOURNEYS, json={"idea": IDEA}).json()
-        # FIRST filled the goal and the deployment target, so the reply asks about the GPU.
-        assert view["start"]["chat"][-1]["asks"] == "has_gpu"
+        # FIRST filled the goal, so the reply asks about the next goal field, not a signal.
+        assert view["start"]["chat"][-1]["asks"] == "context"
         assert value_of(view, "has_gpu")["default"] == "no"
         assert value_of(view, "data_traits")["default"] == ["특별한 것 없음"]
 
@@ -235,7 +248,7 @@ def test_a_tapped_answer_stays_in_the_chat_and_the_next_question_offers_its_choi
         assert (said["role"], said["text"], said["picked"]) == ("user", "있어요", True)
         assert reply["text"].startswith("GPU 장비를 정했어요.")
         assert reply["changes"] == ["GPU 장비"]
-        assert reply["asks"] == "data_traits"
+        assert reply["asks"] == "context"
         assert value_of(view, "has_gpu")["source"] == "picked"
 
         values = ["문서 검색 필요", "개인정보 포함"]
@@ -311,6 +324,7 @@ def test_without_a_model_the_fields_are_picked_and_blanks_become_defaults():
 
         view = post(client, view, "fill").json()
         assert value_of(view, "goal")["value"] == NOTHING
+        assert value_of(view, "has_gpu")["value"] is None
         assert view["start"]["missing"] == []
         stale = client.post(
             f"{JOURNEYS}/{view['journey_id']}/start/fill",
@@ -330,37 +344,33 @@ def said(value):
     return StartValue(value=value, source="said")
 
 
-def test_the_bot_asks_the_rule_fields_first_without_offering_to_fill():
+def test_the_bot_asks_only_the_goal_fields():
     current = {"goal": said("답을 찾는 상태"), "deployment_target": said("public_service")}
 
-    assert asked_field(current) == "has_gpu"
-    assert answer_text("deployment_target", current) == (
-        "배포 범위를 정했어요. 모델을 직접 실행할 GPU 장비가 있나요?"
-    )
-
-
-def test_once_rules_are_set_it_offers_to_fill_and_keeps_asking_the_rest():
-    current = {
-        "goal": said("답을 찾는 상태"),
-        "deployment_target": said("public_service"),
-        "has_gpu": said("yes"),
-        "data_traits": said(["특별한 것 없음"]),
-    }
-
     assert asked_field(current) == "context"
-    assert answer_text("data_traits", current) == (
-        "다루는 데이터를 정했어요. 남은 7칸은 '빈칸은 알아서 채워 주세요'로 한 번에 "
-        "채울 수도 있어요. 누가 어떤 상황에서 쓰는 서비스인가요?"
+    assert answer_text("deployment_target", current) == (
+        "배포 범위를 정했어요. 누가 어떤 상황에서 쓰는 서비스인가요?"
     )
 
-    for name in ("context", "boundary", "expected_users", "team_size", "duration_weeks"):
-        current[name] = said("값")
-    assert asked_field(current) == "weekly_hours"
-    current["weekly_hours"] = said("값")
-    assert asked_field(current) == "budget"
-    current["budget"] = said("값")
+    current["context"] = said("수강생이 쓴다")
+    current["boundary"] = said("출처 표시")
     assert asked_field(current) is None
-    assert answer_text("budget", current).endswith("모두 채웠어요. 결정을 시작할 수 있어요.")
+    assert answer_text("boundary", current) == (
+        "기준을 정했어요. 오른쪽 정보는 적어 두면 카드에서 다시 묻지 않아요. "
+        "목표를 모두 채웠어요. 결정을 시작할 수 있어요."
+    )
+
+
+def test_each_signal_names_the_first_card_that_asks_it():
+    with client_with(ScriptedStart(FIRST)) as client:
+        view = client.post(JOURNEYS, json={"idea": IDEA}).json()
+
+        assert value_of(view, "has_gpu")["asked_in"] == "모델 제공자"
+        assert value_of(view, "budget")["asked_in"] == "모델 제공자"
+        assert value_of(view, "data_traits")["asked_in"] == "데이터 저장소"
+        assert value_of(view, "deployment_target")["asked_in"] == "상태 저장"
+        assert value_of(view, "team_size")["asked_in"] == "작업 실행"
+        assert value_of(view, "goal")["asked_in"] is None
 
 
 def test_asking_in_words_fills_the_blanks_like_the_button():
@@ -377,7 +387,7 @@ def test_asking_in_words_fills_the_blanks_like_the_button():
 
         answer = view["start"]["chat"][-1]
         assert answer["text"].startswith("빈칸 ")
-        assert "기준" in answer["changes"] and "GPU 장비" in answer["changes"]
+        assert "기준" in answer["changes"] and "GPU 장비" not in answer["changes"]
         assert value_of(view, "boundary")["source"] == "recommended"
-        assert value_of(view, "has_gpu")["source"] == "default"
+        assert value_of(view, "has_gpu")["value"] is None
         assert view["start"]["missing"] == []
