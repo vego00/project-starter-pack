@@ -249,6 +249,8 @@ class JourneyState(BaseModel):
     module_revision: int = 0
     # The start screen's conversation and fields (ADR-023), kept until the journey starts.
     start_fields: dict[str, StartValue] = {}
+    # Project info changed on the open card (ADR-024); leaving it "unchanged" still rebuilds.
+    info_changed: bool = False
     start_chat: list[StartTurn] = []
     start_revision: int = 0
     trace: Annotated[list[NodeEvent], operator.add] = []

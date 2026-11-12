@@ -793,6 +793,52 @@ def test_signal_outside_the_card_or_invalid_is_rejected(payload):
     assert journey.state.project_spec.team_size is None
 
 
+def advance_to(journey, card_id):
+    while journey.card_id != card_id:
+        journey.send({"action": "accept_recommendation"})
+    return journey
+
+
+def runs(journey, node):
+    return sum(1 for event in journey.state.trace if event.node == node)
+
+
+def test_free_text_the_spec_refuses_is_rejected_not_crashed():
+    journey = advance_to(at_model_provider(), "backend.execution")
+
+    journey.send({"action": "signal", "field": "team_size", "value": "0"})
+
+    assert journey.card_id == "backend.execution"
+    assert journey.prompt["error"] == "개발 인원: 고를 수 있는 값이 아니라 그대로 뒀어요."
+    # The default it took when the card opened stays.
+    assert journey.state.project_spec.team_size == "혼자"
+
+
+def test_changing_shared_info_drops_every_brief_that_read_it():
+    journey = at_model_provider()
+    journey.send({"action": "accept_recommendation"})
+    advance_to(journey, "mlops.model_serving")
+    assert "model.provider" in journey.state.card_briefs
+
+    journey.send({"action": "signal", "field": "has_gpu", "value": "yes"})
+
+    assert "model.provider" not in journey.state.card_briefs
+
+
+def test_changed_info_with_the_same_answer_rebuilds_a_finished_result():
+    journey = at_model_provider().choose_defaults()
+    assert journey.state.status == "completed"
+    composed = runs(journey, "composer")
+    held = journey.state.decisions["model.provider"].option_id
+
+    journey.send({"action": "revise", "card_id": "model.provider"})
+    journey.send({"action": "signal", "field": "has_gpu", "value": "yes"})
+    journey.select(held)
+
+    assert journey.state.project_spec.has_gpu is True
+    assert runs(journey, "composer") == composed + 1
+
+
 def test_signal_in_revise_mode_stays_editing():
     journey = at_model_provider()
     journey.send({"action": "accept_recommendation"})

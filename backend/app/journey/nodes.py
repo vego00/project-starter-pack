@@ -192,6 +192,18 @@ def _with_signals(state: JourneyState, fields: dict[str, Any], names: list[str])
     return {"start_fields": fields, "project_spec": spec}
 
 
+def _leave_unchanged(state: JourneyState) -> dict[str, Any]:
+    """Leaving a card in revise mode as it was. Project info changed on it meanwhile still
+    counts as a change, so a finished result is built again from the new info."""
+    outcome = "advance" if state.info_changed else "unchanged"
+    return {
+        "editing_card": None,
+        "info_changed": False,
+        "gate_outcome": outcome,
+        "gate_error": None,
+    }
+
+
 def _card_signals(state: JourneyState, card: DecisionCard) -> list[CardSignal]:
     signals = []
     for name in card.uses:
@@ -566,7 +578,7 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
         editing = state.editing_card == current.card_id
         if isinstance(action, DeferAction):
             if editing:
-                return {"editing_card": None, "gate_outcome": "unchanged", "gate_error": None}
+                return _leave_unchanged(state)
             others = [card_id for card_id in state.deferred_cards if card_id != current.card_id]
             return {
                 "deferred_cards": [*others, current.card_id],
@@ -608,7 +620,7 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
             return _reject(f"지금은 고를 수 없는 선택지입니다. {view.blocked_reason}")
         held = state.decisions[current.card_id].option_id if editing else None
         if held == option_id:
-            return {"editing_card": None, "gate_outcome": "unchanged", "gate_error": None}
+            return _leave_unchanged(state)
         decision = Decision(
             card_id=current.card_id,
             card_version=current.version,
@@ -633,6 +645,7 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
             "needs_review": list(
                 dict.fromkeys([*(c for c in state.needs_review if c != current.card_id), *later])
             ),
+            "info_changed": False,
             "gate_outcome": "advance",
             "gate_error": None,
         }
@@ -646,9 +659,21 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
         fields, applied, rejected = apply_start_changes(state.start_fields, [change], "picked")
         if not applied:
             return _reject(" / ".join(rejected))
+        try:
+            moved = _with_signals(state, fields, [action.field])
+        except ValidationError:
+            # Free text such as "0" people fits the field but not the spec.
+            name = FIELDS[action.field].name_in_text
+            return _reject(f"{name}: 고를 수 있는 값이 아니라 그대로 뒀어요.")
         return {
-            **_with_signals(state, fields, [action.field]),
-            "card_briefs": {k: v for k, v in state.card_briefs.items() if k != card_id},
+            **moved,
+            # Every card that read this info explains and recommends it again.
+            "card_briefs": {
+                k: v
+                for k, v in state.card_briefs.items()
+                if action.field not in registry.card(k).uses
+            },
+            "info_changed": True,
             "gate_outcome": "advance",
             "gate_error": None,
         }

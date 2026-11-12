@@ -44,7 +44,14 @@ NODE_WRITES: dict[str, set[str]] = {
     "present": {"current_card", "card_briefs"},
     # A `signal` action changes the card's info and drops its saved brief to prepare it again.
     "decision_gate": GATE_WRITES
-    | {"deferred_cards", "pending_question", "project_spec", "start_fields", "card_briefs"},
+    | {
+        "deferred_cards",
+        "pending_question",
+        "project_spec",
+        "start_fields",
+        "card_briefs",
+        "info_changed",
+    },
     "qa": {"qa_history"},
     "reviewer": {"review_issues", "status"},
     "composer": {"artifacts"},
