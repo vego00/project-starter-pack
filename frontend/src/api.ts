@@ -77,6 +77,26 @@ const promptSchema = z.discriminatedUnion("type", [
         }),
       ),
       div_refs: z.array(z.string()),
+      // Project info this card reads, changeable on the card (ADR-024).
+      signals: z
+        .array(
+          z.object({
+            name: z.string(),
+            label: z.string(),
+            kind: z.enum(["text", "choice", "multi"]),
+            choices: z.array(
+              z.object({ value: z.string(), label: z.string() }),
+            ),
+            free_text: z.boolean(),
+            value: z.union([z.string(), z.array(z.string())]),
+            display: z.string(),
+            source: z
+              .enum(["said", "picked", "default", "recommended"])
+              .nullable(),
+            why: z.string().nullable(),
+          }),
+        )
+        .default([]),
     }),
     qa: z.array(
       z.object({
@@ -196,6 +216,43 @@ const modulePlanSchema = z.object({
   tasks: z.array(z.string()),
 });
 
+const startFieldSchema = z.object({
+  name: z.string(),
+  label: z.string(),
+  kind: z.enum(["text", "choice", "multi"]),
+  choices: z.array(z.object({ value: z.string(), label: z.string() })),
+  free_text: z.boolean(),
+  rule_read: z.boolean(),
+  default: z
+    .union([z.string(), z.array(z.string())])
+    .nullable()
+    .default(null),
+  value: z.union([z.string(), z.array(z.string())]).nullable(),
+  display: z.string().nullable(),
+  source: z.enum(["said", "picked", "default", "recommended"]).nullable(),
+  why: z.string().nullable(),
+  // The first card that asks this info when it is left blank (ADR-024).
+  asked_in: z.string().nullable().default(null),
+});
+
+const startSchema = z.object({
+  mode: z.enum(["model", "form"]),
+  fields: z.array(startFieldSchema),
+  chat: z.array(
+    z.object({
+      role: z.enum(["user", "assistant"]),
+      text: z.string(),
+      changes: z.array(z.string()),
+      rejected: z.array(z.string()),
+      asks: z.string().nullable().default(null),
+      picked: z.boolean().default(false),
+    }),
+  ),
+  revision: z.number(),
+  missing: z.array(z.string()),
+  submit: z.record(z.string(), z.unknown()),
+});
+
 const moduleTurnSchema = z.object({
   role: z.enum(["user", "assistant"]),
   text: z.string(),
@@ -260,6 +317,7 @@ const journeySchema = z.object({
   module_chat: z.array(moduleTurnSchema).default([]),
   module_revision: z.number().default(0),
   module_undo_count: z.number().default(0),
+  start: startSchema.nullable().default(null),
   can_reopen: z.boolean().optional().default(false),
 });
 
@@ -277,6 +335,9 @@ export type BlueprintRow = BlueprintNode["rows"][number];
 export type BlueprintStep = NonNullable<BlueprintNode["step"]>;
 export type ModulePlan = Journey["modules"][number];
 export type ModuleTurn = Journey["module_chat"][number];
+export type StartView = NonNullable<Journey["start"]>;
+export type StartField = StartView["fields"][number];
+export type StartChange = { field: string; value?: string; values?: string[] };
 export type ModuleChange =
   | { module: string; field: "goal"; value: string }
   | { module: string; field: "include" | "exclude"; items: string[] }
@@ -293,6 +354,7 @@ export type Action =
   | { action: "revise"; card_id: string }
   | { action: "focus"; card_id: string }
   | { action: "keep"; card_id: string }
+  | { action: "signal"; field: string; value?: string; values?: string[] }
   | { action: "clarify"; answers: Record<string, unknown> }
   | {
       action: "gcb";
@@ -406,6 +468,48 @@ export function packageUrl(id: string): string {
 
 export function summaryUrl(id: string): string {
   return `/api/v1/journeys/${id}/summary.md`;
+}
+
+function startRequest(
+  journey: Journey,
+  path: "messages" | "edits" | "answers" | "fill",
+  body: object,
+): Promise<Journey> {
+  return request(
+    `/api/v1/journeys/${journey.journey_id}/start/${path}`,
+    journeySchema,
+    {
+      method: "POST",
+      body: JSON.stringify({ revision: journey.start?.revision ?? 0, ...body }),
+    },
+  );
+}
+
+export function sendStartMessage(
+  journey: Journey,
+  text: string,
+  focus: string | null,
+): Promise<Journey> {
+  return startRequest(journey, "messages", { text: text.trim(), focus });
+}
+
+export function editStart(
+  journey: Journey,
+  change: StartChange,
+): Promise<Journey> {
+  return startRequest(journey, "edits", { change });
+}
+
+/** A choice tapped under the bot's question; it also adds the answer to the chat. */
+export function answerStart(
+  journey: Journey,
+  change: StartChange,
+): Promise<Journey> {
+  return startRequest(journey, "answers", { change });
+}
+
+export function fillStart(journey: Journey): Promise<Journey> {
+  return startRequest(journey, "fill", {});
 }
 
 function moduleRequest(

@@ -30,7 +30,25 @@ from app.journey.modules import (
 )
 from app.journey.nodes import resume_command
 from app.journey.package import build_package, package_zip
-from app.journey.services import JourneyDeps
+from app.journey.services import JourneyDeps, StartFailure
+from app.journey.start import FIELDS as START_FIELD_MAP
+from app.journey.start import (
+    GCB_NAMES,
+    MAX_TEXT,
+    NOTHING,
+    START_FIELDS,
+    StartChange,
+    StartSource,
+    StartTurn,
+    StartValue,
+    answer_text,
+    apply_start_changes,
+    asked_field,
+    display,
+    missing,
+    reply_text,
+    to_spec,
+)
 from app.journey.state import (
     ClarifyAction,
     Decision,
@@ -51,6 +69,8 @@ NO_MODEL_NOTICE = (
 )
 MAX_MODULE_MESSAGES = 30  # Provisional cost ceiling for the build-order conversation.
 MAX_MODULE_UNDO = 20
+MAX_START_MESSAGES = 20  # Provisional cost ceiling for the start-screen conversation.
+FILLED = "빈칸 {}칸을 채웠어요. 사실과 다른 칸은 눌러서 고쳐 주세요."
 MOCK_RECOMMENDATION_NOTICE = (
     "선택지 설명은 AI가 쓰지만, 추천은 아직 카드의 기본값이며 내 프로젝트를 분석한 결과가 아닙니다."
 )
@@ -97,6 +117,39 @@ class DesignView(BaseModel):
     files: list[str]
 
 
+class StartChoiceView(BaseModel):
+    value: str
+    label: str
+
+
+class StartFieldView(BaseModel):
+    name: str
+    label: str
+    kind: Literal["text", "choice", "multi"]
+    choices: list[StartChoiceView]
+    free_text: bool
+    # Card rules read this field as a fact, so the screen sets it apart.
+    rule_read: bool
+    # What "빈칸은 알아서 채워 주세요" would put here; the choices mark it.
+    default: str | list[str] | None
+    value: str | list[str] | None
+    display: str | None
+    source: StartSource | None
+    why: str | None
+    # The first card that asks this signal when it is left blank; None for the GCB.
+    asked_in: str | None
+
+
+class StartView(BaseModel):
+    mode: Literal["model", "form"]
+    fields: list[StartFieldView]
+    chat: list[StartTurn]
+    revision: int
+    missing: list[str]
+    # The action that starts the journey, built here so the screen sends checked values only.
+    submit: dict[str, Any]
+
+
 class JourneyView(BaseModel):
     journey_id: UUID
     # Echoed back on each action, so a double click or stale tab cannot answer the wrong card.
@@ -115,6 +168,8 @@ class JourneyView(BaseModel):
     module_chat: list[ModuleTurn] = []
     module_revision: int = 0
     module_undo_count: int = 0
+    # Only while the start screen is open (ADR-023).
+    start: StartView | None = None
     # Finished journeys made before the end wait existed cannot change a decision.
     can_reopen: bool = False
 
@@ -377,6 +432,7 @@ class JourneyService:
             module_chat=state.module_chat,
             module_revision=state.module_revision,
             module_undo_count=len(state.module_undo),
+            start=self._start_view(state) if prompt and prompt["type"] == "gcb" else None,
             can_reopen=waiting_at_end,
         )
 
@@ -444,6 +500,196 @@ class JourneyService:
             }
             self._graph.update_state(journey_config(journey_id), update, as_node="designer")
             return self._view(journey_id, self._snapshot(journey_id))
+
+    def send_start_message(
+        self, journey_id: UUID, revision: int, text: str, focus: str | None
+    ) -> JourneyView:
+        """A failed reply changes nothing, so the screen can keep the text and send it again."""
+        with self._lock(journey_id):
+            state = self._start_state(journey_id, revision)
+            writer = self._deps.start_writer
+            if writer is None:
+                raise JourneyError(409, "start_chat_unavailable", "모델이 없어 대화할 수 없어요.")
+            if focus is not None and focus not in START_FIELD_MAP:
+                raise JourneyError(422, "invalid_input", "입력 내용을 확인해 주세요.")
+            typed = sum(turn.role == "user" and not turn.picked for turn in state.start_chat)
+            if typed >= MAX_START_MESSAGES:
+                raise JourneyError(
+                    409, "start_chat_full", "대화 횟수를 다 썼어요. 칸을 눌러 직접 골라 주세요."
+                )
+            started = perf_counter()
+            reply = writer.write(state.start_fields, state.start_chat, text, focus)
+            if isinstance(reply, StartFailure):
+                raise JourneyError(503, "start_reply_failed", reply.reason)
+            fields, applied, rejected = apply_start_changes(
+                state.start_fields, reply.changes, "said", focus, text
+            )
+            trace = [self._model_event(reply, started)]
+            said = StartTurn(role="user", text=text)
+            if reply.action == "fill":
+                # Asked in words, the same as the button: every filled field stays editable.
+                fields, filled, more = self._fill_blanks(fields, [*state.start_chat, said])
+                trace += more
+                answer = StartTurn(
+                    role="assistant",
+                    text=FILLED.format(len(filled)) if filled else "채울 빈칸이 없어요.",
+                    changes=[*applied, *filled],
+                    rejected=rejected,
+                )
+            else:
+                answer = StartTurn(
+                    role="assistant",
+                    text=reply_text(applied, fields, focus),
+                    changes=applied,
+                    rejected=rejected,
+                    asks=asked_field(fields),
+                )
+            return self._save_start(journey_id, state, fields, [said, answer], trace)
+
+    def edit_start(self, journey_id: UUID, revision: int, change: StartChange) -> JourneyView:
+        with self._lock(journey_id):
+            state = self._start_state(journey_id, revision)
+            fields, applied, rejected = apply_start_changes(state.start_fields, [change], "picked")
+            if not applied:
+                raise JourneyError(422, "start_edit_rejected", " / ".join(rejected))
+            return self._save_start(journey_id, state, fields)
+
+    def answer_start(self, journey_id: UUID, revision: int, change: StartChange) -> JourneyView:
+        """A choice tapped under the bot's question: saved as a pick, kept in the chat as a turn,
+        and answered by code, so no model is called."""
+        with self._lock(journey_id):
+            state = self._start_state(journey_id, revision)
+            fields, applied, rejected = apply_start_changes(state.start_fields, [change], "picked")
+            if not applied:
+                raise JourneyError(422, "start_edit_rejected", " / ".join(rejected))
+            field = START_FIELD_MAP[change.field]
+            turns = [
+                StartTurn(
+                    role="user", text=display(field, fields[change.field].value), picked=True
+                ),
+                StartTurn(
+                    role="assistant",
+                    text=answer_text(change.field, fields),
+                    changes=applied,
+                    asks=asked_field(fields),
+                ),
+            ]
+            return self._save_start(journey_id, state, fields, turns)
+
+    def fill_start(self, journey_id: UUID, revision: int) -> JourneyView:
+        """Blank goal fields are recommended once, else "따로 없음". Signals stay blank."""
+        with self._lock(journey_id):
+            state = self._start_state(journey_id, revision)
+            fields, filled, trace = self._fill_blanks(state.start_fields, state.start_chat)
+            if not filled:
+                raise JourneyError(409, "start_nothing_blank", "채울 빈칸이 없어요.")
+            answer = StartTurn(role="assistant", text=FILLED.format(len(filled)), changes=filled)
+            return self._save_start(journey_id, state, fields, [answer], trace)
+
+    def _fill_blanks(
+        self, current: dict[str, StartValue], chat: list[StartTurn]
+    ) -> tuple[dict[str, StartValue], list[str], list[NodeEvent]]:
+        # Only the GCB is filled; blank signals wait for the cards that use them (ADR-024).
+        fields, filled = dict(current), []
+        blank = [name for name in GCB_NAMES if name not in fields]
+        trace = []
+        writer = self._deps.start_writer
+        if blank and writer is not None:
+            started = perf_counter()
+            recommendation = writer.recommend_gcb(fields, chat, blank)
+            if recommendation is not None:
+                trace.append(self._model_event(recommendation, started))
+                for pick in recommendation.picks:
+                    text, why = " ".join(pick.value.split()), " ".join(pick.why.split())
+                    if pick.field in blank and pick.field not in fields and text and why:
+                        fields[pick.field] = StartValue(
+                            value=text[:MAX_TEXT], source="recommended", why=why[:200]
+                        )
+                        filled.append(START_FIELD_MAP[pick.field].name_in_text)
+        for name in blank:
+            if name not in fields:
+                why = "근거를 찾지 못해 비워 둔 것으로 채웠어요."
+                fields[name] = StartValue(value=NOTHING, source="recommended", why=why)
+                filled.append(START_FIELD_MAP[name].name_in_text)
+        return fields, filled, trace
+
+    def _model_event(self, use: Any, started: float) -> NodeEvent:
+        return NodeEvent(
+            node="start_writer",
+            latency_ms=(perf_counter() - started) * 1000,
+            model_id=use.model_id,
+            prompt_version=use.prompt_version,
+            input_tokens=use.input_tokens,
+            output_tokens=use.output_tokens,
+        )
+
+    def _start_state(self, journey_id: UUID, revision: int) -> JourneyState:
+        snapshot = self._snapshot(journey_id)
+        prompt = _pending_prompt(snapshot)
+        if prompt is None or prompt["type"] != "gcb":
+            raise JourneyError(
+                409, "start_closed", "결정을 시작한 뒤에는 시작 정보를 바꿀 수 없어요."
+            )
+        state = JourneyState.model_validate(snapshot.values)
+        if state.start_revision != revision:
+            raise JourneyError(
+                409, "stale_revision", "화면이 최신 상태가 아니에요. 최신 내용을 불러왔어요."
+            )
+        return state
+
+    def _save_start(
+        self,
+        journey_id: UUID,
+        state: JourneyState,
+        fields: dict[str, StartValue],
+        turns: list[StartTurn] | None = None,
+        trace: list[NodeEvent] | None = None,
+    ) -> JourneyView:
+        """Written as the drafter, so the start screen is asked again with the new fields."""
+        update: dict[str, Any] = {
+            "start_fields": fields,
+            "start_revision": state.start_revision + 1,
+        }
+        if turns:
+            update["start_chat"] = [*state.start_chat, *turns]
+        if trace:
+            update["trace"] = trace
+        config = journey_config(journey_id)
+        self._graph.update_state(config, _jsonable(update), as_node="gcb_drafter")
+        return self._view(journey_id, self._snapshot(journey_id))
+
+    def _start_view(self, state: JourneyState) -> StartView:
+        fields = []
+        in_journey_order = sorted(self._registry.cards, key=lambda card: card.stage)
+        for field in START_FIELDS:
+            held = state.start_fields.get(field.name)
+            asked_in = next((c.title for c in in_journey_order if field.name in c.uses), None)
+            fields.append(
+                StartFieldView(
+                    asked_in=asked_in,
+                    name=field.name,
+                    label=field.label,
+                    kind=field.kind,
+                    choices=[StartChoiceView(value=c.value, label=c.label) for c in field.choices],
+                    free_text=field.free_text,
+                    rule_read=field.rule_read,
+                    default=list(field.default)
+                    if isinstance(field.default, tuple)
+                    else field.default,
+                    value=held.value if held else None,
+                    display=display(field, held.value) if held else None,
+                    source=held.source if held else None,
+                    why=held.why if held else None,
+                )
+            )
+        return StartView(
+            mode="model" if self._deps.start_writer is not None else "form",
+            fields=fields,
+            chat=state.start_chat,
+            revision=state.start_revision,
+            missing=missing(state.start_fields),
+            submit=to_spec(state.start_fields),
+        )
 
     def _module_state(self, journey_id: UUID, revision: int) -> JourneyState:
         snapshot = self._snapshot(journey_id)

@@ -1,10 +1,12 @@
 """Ports for the model-backed parts, with mock and real implementations."""
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import Any, Literal, Protocol
 
-from pydantic import BaseModel
+import httpx
+from pydantic import BaseModel, ValidationError
 
 from app.config import Settings
 from app.journey.deciders.base import Decider
@@ -22,11 +24,17 @@ from app.journey.prompts import (
     MODULE_VERSION,
     QA_SYSTEM,
     QA_VERSION,
+    START_GCB_SYSTEM,
+    START_SYSTEM,
+    START_VERSION,
     advisor_user,
     gcb_user,
     module_user,
     qa_user,
+    start_gcb_user,
+    start_user,
 )
+from app.journey.start import StartChange, StartTurn, StartValue
 from app.journey.state import (
     MAX_GCB_CHARS,
     MAX_LLM_CALLS_PER_JOURNEY,
@@ -314,6 +322,128 @@ class LLMModuleWriter:
         )
 
 
+class StartOutput(BaseModel):
+    changes: list[StartChange] = []
+    # Set when the user asks for the blanks to be filled, the same as pressing the button.
+    action: Literal["fill"] | None = None
+
+
+class GcbPick(BaseModel):
+    field: str
+    value: str
+    why: str
+
+
+class StartGcbOutput(BaseModel):
+    picks: list[GcbPick] = []
+
+
+class ModelUse(BaseModel):
+    model_id: str | None = None
+    prompt_version: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+
+
+class StartReply(ModelUse):
+    changes: list[StartChange] = []
+    action: Literal["fill"] | None = None
+
+
+class StartFailure(BaseModel):
+    """Why a call gave nothing, said to the user so they know whether sending again can help."""
+
+    reason: str
+
+
+def describe_failure(exc: Exception) -> str:
+    """Names the failure from its type and status only; the message may hold user text."""
+    if isinstance(exc, httpx.TimeoutException) or "timeout" in type(exc).__name__.lower():
+        return "모델이 제한 시간 안에 답하지 않았어요. 잠시 후 다시 보내 주세요."
+    if isinstance(exc, ValidationError | ValueError):
+        return "모델의 답이 정해진 형식(JSON)이 아니었어요. 다시 보내 주세요."
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    status = status or getattr(exc, "code", None)
+    if status == 429:
+        return "모델 호출 한도에 걸렸어요(HTTP 429). 잠시 후 다시 보내 주세요."
+    if status in (401, 403):
+        return f"모델 API 키가 거부됐어요(HTTP {status}). 키 설정을 확인해 주세요."
+    if isinstance(status, int) and status >= 500:
+        return f"모델 서버에 오류가 났어요(HTTP {status}). 잠시 후 다시 보내 주세요."
+    if isinstance(status, int):
+        return f"모델이 요청을 받지 않았어요(HTTP {status})."
+    if isinstance(exc, httpx.TransportError):
+        return "모델 서버에 연결하지 못했어요. 네트워크를 확인해 주세요."
+    return f"모델 호출이 실패했어요({type(exc).__name__})."
+
+
+class GcbRecommendation(ModelUse):
+    picks: list[GcbPick] = []
+
+
+class StartWriter(Protocol):
+    def write(
+        self,
+        current: Mapping[str, StartValue],
+        chat: list[StartTurn],
+        message: str,
+        focus: str | None,
+    ) -> StartReply | StartFailure: ...
+
+    def recommend_gcb(
+        self, current: Mapping[str, StartValue], chat: list[StartTurn], blank: list[str]
+    ) -> GcbRecommendation | None: ...
+
+
+def _use(result: Any) -> dict[str, Any]:
+    return {
+        "model_id": result.model_id,
+        "prompt_version": START_VERSION,
+        "input_tokens": result.input_tokens,
+        "output_tokens": result.output_tokens,
+    }
+
+
+class LLMStartWriter:
+    """A failure is returned with its cause; the caller keeps the fields so the user can resend."""
+
+    def __init__(self, llm: StructuredLLM):
+        self._llm = llm
+
+    def write(
+        self,
+        current: Mapping[str, StartValue],
+        chat: list[StartTurn],
+        message: str,
+        focus: str | None,
+    ) -> StartReply | StartFailure:
+        try:
+            result = self._llm.generate(
+                system=START_SYSTEM,
+                user=start_user(current, chat, message, focus),
+                schema=StartOutput,
+            )
+        except Exception as exc:  # noqa: BLE001 - model boundary; the prompt holds user text
+            logger.error("start fill failed type=%s", type(exc).__name__)
+            return StartFailure(reason=describe_failure(exc))
+        output = result.output
+        return StartReply(changes=output.changes, action=output.action, **_use(result))
+
+    def recommend_gcb(
+        self, current: Mapping[str, StartValue], chat: list[StartTurn], blank: list[str]
+    ) -> GcbRecommendation | None:
+        try:
+            result = self._llm.generate(
+                system=START_GCB_SYSTEM,
+                user=start_gcb_user(current, chat, blank),
+                schema=StartGcbOutput,
+            )
+        except Exception as exc:  # noqa: BLE001 - model boundary; the prompt holds user text
+            logger.error("start recommendation failed type=%s", type(exc).__name__)
+            return None
+        return GcbRecommendation(picks=result.output.picks, **_use(result))
+
+
 @dataclass(frozen=True)
 class JourneyDeps:
     decider: Decider = field(default_factory=MockDecider)
@@ -325,6 +455,8 @@ class JourneyDeps:
     designer: Designer | None = None
     # None means no model: the build order is filled in with forms instead of a conversation.
     module_writer: ModuleWriter | None = None
+    # None means no model: the start screen is filled with picks and defaults instead of chat.
+    start_writer: StartWriter | None = None
     card_selection: bool = True
 
     @property
@@ -386,5 +518,6 @@ def build_deps(settings: Settings, registry: Registry) -> JourneyDeps:
         responder=LLMResponder(llm, registry),
         designer=LLMDesigner(design_llm, registry),
         module_writer=LLMModuleWriter(llm),
+        start_writer=LLMStartWriter(llm),
         card_selection=settings.card_selection,
     )

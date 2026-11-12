@@ -2,6 +2,7 @@
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  act,
   cleanup,
   render,
   screen,
@@ -155,7 +156,7 @@ async function startWith(view: unknown) {
     screen.getByLabelText("프로젝트 아이디어"),
     "강의 자료를 찾아 답하는 서비스",
   );
-  await user.click(screen.getByRole("button", { name: "결정 시작하기" }));
+  await user.click(screen.getByRole("button", { name: "보내기" }));
   return { user, mock };
 }
 
@@ -175,6 +176,96 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("card info strip", () => {
+  const signal = (name: string, extra = {}) => ({
+    name,
+    label: `${name} 이름`,
+    kind: "choice",
+    choices: [
+      { value: "yes", label: "있어요" },
+      { value: "no", label: "없어요" },
+    ],
+    free_text: false,
+    value: "no",
+    display: "없어요",
+    source: "default",
+    why: "GPU 없이 시작하는 기준이에요.",
+    ...extra,
+  });
+
+  it("shows the info a card reads and changes it there", async () => {
+    const view = journey({
+      prompt: decisionPrompt(
+        {},
+        {
+          signals: [
+            signal("has_gpu"),
+            signal("data_traits", {
+              kind: "multi",
+              choices: [
+                { value: "문서 검색 필요", label: "문서 검색 필요" },
+                { value: "개인정보 포함", label: "개인정보 포함" },
+              ],
+              value: ["문서 검색 필요"],
+              display: "문서 검색 필요",
+              source: "said",
+            }),
+          ],
+        },
+      ),
+    });
+    const { user, mock } = await startWith(view);
+
+    const strip = await screen.findByRole("group", {
+      name: "이 카드가 쓰는 정보",
+    });
+    expect(
+      within(strip).getByText("바꾸면 추천이 다시 정해져요"),
+    ).toBeVisible();
+    const gpu = within(strip).getByRole("button", {
+      name: "has_gpu 이름 없어요 기본값",
+    });
+    expect(gpu).toHaveAttribute("aria-expanded", "false");
+    expect(
+      within(strip).getByRole("button", {
+        name: "data_traits 이름 문서 검색 필요 내 말에서",
+      }),
+    ).toBeVisible();
+
+    await user.click(gpu);
+    expect(gpu).toHaveAttribute("aria-expanded", "true");
+    await user.click(within(strip).getByRole("button", { name: "있어요" }));
+    expect(bodyOf(mock.mock.calls.at(-1)!).action).toEqual({
+      action: "signal",
+      field: "has_gpu",
+      value: "yes",
+    });
+
+    await user.click(
+      within(strip).getByRole("button", {
+        name: "data_traits 이름 문서 검색 필요 내 말에서",
+      }),
+    );
+    await user.click(
+      within(strip).getByRole("button", { name: "개인정보 포함" }),
+    );
+    expect(bodyOf(mock.mock.calls.at(-1)!).action).toEqual({
+      action: "signal",
+      field: "data_traits",
+      values: ["문서 검색 필요", "개인정보 포함"],
+    });
+  });
+
+  it("shows no strip for a card that reads no info", async () => {
+    await startWith(journey());
+
+    await screen.findByText("사람 확인이 필요한가요?");
+    expect(
+      screen.queryByRole("group", { name: "이 카드가 쓰는 정보" }),
+    ).toBeNull();
+  });
+});
+
 describe("starting", () => {
   it("requires a meaningful idea and sends it trimmed", async () => {
     const user = userEvent.setup();
@@ -183,7 +274,7 @@ describe("starting", () => {
     expect(
       screen.getByText(/개인정보나 회사 기밀은 적지 마세요/),
     ).toBeVisible();
-    const submit = screen.getByRole("button", { name: "결정 시작하기" });
+    const submit = screen.getByRole("button", { name: "보내기" });
     expect(submit).toBeDisabled();
 
     await user.type(screen.getByLabelText("프로젝트 아이디어"), "  짧음  ");
@@ -213,7 +304,7 @@ describe("starting", () => {
     render(<App />);
     const input = screen.getByLabelText("프로젝트 아이디어");
     await user.type(input, "강의 자료를 찾아 답하는 서비스");
-    await user.click(screen.getByRole("button", { name: "결정 시작하기" }));
+    await user.click(screen.getByRole("button", { name: "보내기" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("저장소가");
     expect(input).toHaveValue("강의 자료를 찾아 답하는 서비스");
@@ -229,7 +320,7 @@ describe("starting", () => {
       screen.getByLabelText("프로젝트 아이디어"),
       "강의 자료를 찾아 답하는 서비스",
     );
-    await user.click(screen.getByRole("button", { name: "결정 시작하기" }));
+    await user.click(screen.getByRole("button", { name: "보내기" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "서버에 연결할 수 없어요",
@@ -244,7 +335,7 @@ describe("starting", () => {
       screen.getByLabelText("프로젝트 아이디어"),
       "강의 자료를 찾아 답하는 서비스",
     );
-    await user.click(screen.getByRole("button", { name: "결정 시작하기" }));
+    await user.click(screen.getByRole("button", { name: "보내기" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("결과 형식");
   });
@@ -626,98 +717,422 @@ describe("decision card", () => {
   });
 });
 
-describe("gcb", () => {
-  const prompt = {
-    type: "gcb",
-    draft: { goal: "", context: "", boundary: "" },
-    source: "none",
-    error: null,
-  };
-
-  it("sends what the user wrote, trimmed", async () => {
-    const { user, mock } = await startWith(journey({ prompt, revision: 2 }));
-
-    await user.type(
-      await screen.findByLabelText(/끝났을 때/),
-      "  달성된 상태  ",
+describe("start screen", () => {
+  const field = (name: string, kind: string, extra = {}) => ({
+    name,
+    label: `${name} 이름`,
+    kind,
+    choices: [],
+    free_text: false,
+    rule_read: false,
+    value: null,
+    display: null,
+    source: null,
+    why: null,
+    ...extra,
+  });
+  const startView = (overrides = {}) => ({
+    mode: "model",
+    fields: [
+      field("goal", "text", {
+        value: "답을 찾는 상태",
+        display: "답을 찾는 상태",
+        source: "said",
+      }),
+      field("has_gpu", "choice", {
+        rule_read: true,
+        asked_in: "모델 제공자",
+        choices: [
+          { value: "yes", label: "있어요" },
+          { value: "no", label: "없어요" },
+        ],
+      }),
+      field("data_traits", "multi", {
+        rule_read: true,
+        asked_in: "데이터 저장소",
+        choices: [
+          { value: "문서 검색 필요", label: "문서 검색 필요" },
+          { value: "개인정보 포함", label: "개인정보 포함" },
+        ],
+        value: ["문서 검색 필요"],
+        display: "문서 검색 필요",
+        source: "said",
+      }),
+      field("budget", "choice", {
+        free_text: true,
+        asked_in: "모델 제공자",
+        value: "무료로만",
+        display: "무료로만",
+        source: "default",
+        why: "비용이 없는 선택지부터 보는 기준이에요.",
+      }),
+    ],
+    chat: [
+      { role: "user", text: "아이디어", changes: [], rejected: [] },
+      {
+        role: "assistant",
+        text: "2칸을 채웠어요. GPU 장비가 있나요?",
+        changes: ["목표", "다루는 데이터"],
+        rejected: [],
+      },
+    ],
+    revision: 4,
+    missing: ["context"],
+    submit: { action: "gcb", goal: "답을 찾는 상태", answers: {} },
+    ...overrides,
+  });
+  /** The default fields with one of them changed. */
+  const withField = (index: number, change: object) =>
+    startView().fields.map((item, at) =>
+      at === index ? { ...item, ...change } : item,
     );
-    await user.type(screen.getByLabelText(/꼭 지켜야/), "출처 표시");
-    await user.click(
-      screen.getByRole("button", { name: "이 내용으로 결정 시작" }),
-    );
-
-    expect(bodyOf(mock.mock.calls[1])).toEqual({
+  const atStart = (overrides = {}) =>
+    journey({
       revision: 2,
-      action: {
-        action: "gcb",
-        goal: "달성된 상태",
-        context: "",
-        boundary: "출처 표시",
+      prompt: {
+        type: "gcb",
+        draft: { goal: "", context: "", boundary: "" },
+        source: "llm",
+        error: null,
+      },
+      start: startView(overrides),
+    });
+
+  async function open(view: unknown, reply: Handler) {
+    const user = userEvent.setup();
+    const mock = stubFetch((url, init) =>
+      url.includes("/start/")
+        ? reply(url, init)
+        : Response.json(view, { status: 201 }),
+    );
+    render(<App />);
+    await user.type(
+      screen.getByLabelText("프로젝트 아이디어"),
+      "강의 자료를 찾아 답하는 서비스",
+    );
+    await user.click(screen.getByRole("button", { name: "보내기" }));
+    await screen.findByRole("log", { name: "시작 대화" });
+    return { user, mock };
+  }
+
+  it("shows what was filled, from where, and what is left", async () => {
+    await open(atStart(), () => Response.json(atStart()));
+
+    expect(
+      screen.getByText("2칸을 채웠어요. GPU 장비가 있나요?"),
+    ).toBeVisible();
+    const right = screen.getByRole("complementary", {
+      name: "추천에 쓰는 정보",
+    });
+    expect(within(right).getByText("기본값")).toBeVisible();
+    expect(
+      within(right).getByText("비용이 없는 선택지부터 보는 기준이에요."),
+    ).toBeVisible();
+    expect(within(right).getByText("비어 있음")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "결정 시작하기" }),
+    ).toBeDisabled();
+    expect(screen.getByText(/필수 칸 1개가 비어 있어요/)).toBeVisible();
+    expect(screen.queryByRole("region", { name: "설계 그래프" })).toBeNull();
+  });
+
+  it("marks the goal as required and groups the optional info by card", async () => {
+    await open(atStart(), () => Response.json(atStart()));
+
+    const left = screen.getByRole("complementary", { name: "프로젝트 목표" });
+    expect(within(left).getByText("필수 · 1 / 1칸")).toBeVisible();
+    const right = screen.getByRole("complementary", {
+      name: "추천에 쓰는 정보",
+    });
+    expect(within(right).getByText("선택")).toBeVisible();
+    const groups = within(right).getAllByRole("group");
+    expect(groups.map((group) => group.getAttribute("aria-label"))).toEqual([
+      "모델 제공자 카드",
+      "데이터 저장소 카드",
+    ]);
+    expect(within(groups[0]).getByText("has_gpu 이름")).toBeVisible();
+    expect(within(groups[0]).getByText("budget 이름")).toBeVisible();
+    expect(
+      screen.getByText("오른쪽 정보는 비워 둬도 결정을 시작할 수 있어요."),
+    ).toBeVisible();
+  });
+
+  it("starts with the goal filled though info is blank", async () => {
+    await open(atStart({ missing: [] }), () => Response.json(atStart()));
+
+    expect(screen.getByRole("button", { name: "결정 시작하기" })).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "목표 빈칸은 알아서 채워 주세요" }),
+    ).toBeDisabled();
+  });
+
+  it("sends a message about the field in focus and keeps it when it fails", async () => {
+    const { user, mock } = await open(atStart(), () =>
+      errorResponse(503, "start_reply_failed", "문장을 정리하지 못했어요."),
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "has_gpu 이름 고치기" }),
+    );
+    expect(screen.getByText("has_gpu 이름 고치는 중")).toBeVisible();
+    const box = screen.getByLabelText("더 알려 주기");
+    await user.type(box, "GPU는 없어요{Enter}");
+
+    const sent = mock.mock.calls.at(-1)!;
+    expect(sent[0]).toContain("/start/messages");
+    expect(bodyOf(sent)).toEqual({
+      revision: 4,
+      text: "GPU는 없어요",
+      focus: "has_gpu",
+    });
+    expect(await screen.findByText("문장을 정리하지 못했어요.")).toBeVisible();
+    expect(box).toHaveValue("GPU는 없어요");
+  });
+
+  describe("while the first idea is read", () => {
+    function slowStart() {
+      let answer: (response: Response) => void = () => {};
+      stubFetch(
+        () =>
+          new Promise<Response>((resolve) => {
+            answer = resolve;
+          }),
+      );
+      return (response: Response) => answer(response);
+    }
+
+    async function sendIdea(user: ReturnType<typeof userEvent.setup>) {
+      render(<App />);
+      await user.type(
+        screen.getByLabelText("프로젝트 아이디어"),
+        "강의 자료를 찾아 답하는 서비스",
+      );
+      await user.click(screen.getByRole("button", { name: "보내기" }));
+    }
+
+    it("turns into the chat at once and says what it is doing", async () => {
+      const user = userEvent.setup();
+      const reply = slowStart();
+      await sendIdea(user);
+
+      const log = screen.getByRole("log", { name: "시작 대화" });
+      expect(
+        within(log).getByText("강의 자료를 찾아 답하는 서비스"),
+      ).toBeVisible();
+      expect(within(log).getByText("보낸 문장을 읽고 있어요")).toBeVisible();
+      expect(within(log).getByText(/초 지났어요/)).toBeVisible();
+      expect(screen.getByLabelText("더 알려 주기")).toBeDisabled();
+      expect(
+        screen.getAllByText("문장을 다 읽으면 여기에 채워져요."),
+      ).toHaveLength(2);
+
+      reply(Response.json(atStart(), { status: 201 }));
+      expect(await screen.findByText(/초 걸렸어요/)).toBeVisible();
+      expect(screen.getAllByText("방금 채움").length).toBeGreaterThan(0);
+      expect(screen.queryByText("보낸 문장을 읽고 있어요")).toBeNull();
+    });
+
+    it("goes back to the start screen with the idea kept when it fails", async () => {
+      const user = userEvent.setup();
+      const reply = slowStart();
+      await sendIdea(user);
+
+      reply(
+        errorResponse(503, "start_reply_failed", "잠시 후 다시 보내 주세요."),
+      );
+      expect(
+        await screen.findByText("잠시 후 다시 보내 주세요."),
+      ).toBeVisible();
+      expect(screen.getByLabelText("프로젝트 아이디어")).toHaveValue(
+        "강의 자료를 찾아 답하는 서비스",
+      );
+      expect(screen.queryByRole("log", { name: "시작 대화" })).toBeNull();
+    });
+
+    it("says what a reload would lose once it takes long", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        const user = userEvent.setup({
+          advanceTimers: vi.advanceTimersByTime,
+        });
+        slowStart();
+        await sendIdea(user);
+        expect(screen.queryByText(/새로고침하면/)).toBeNull();
+
+        await act(async () => {
+          vi.advanceTimersByTime(41_000);
+        });
+        expect(screen.getByText(/새로고침하면 처음부터/)).toBeVisible();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  it("answers the asked question by tapping one of its choices", async () => {
+    const asking = {
+      role: "assistant",
+      text: "2칸을 채웠어요. GPU 장비가 있나요?",
+      changes: ["목표"],
+      rejected: [],
+      asks: "has_gpu",
+    };
+    const view = atStart({
+      chat: [asking],
+      fields: withField(1, { default: "no" }),
+    });
+    const { user, mock } = await open(view, () => Response.json(view));
+
+    const answers = screen.getByRole("group", { name: "has_gpu 이름 고르기" });
+    expect(
+      within(answers).getByRole("button", { name: /없어요/ }),
+    ).toHaveTextContent("기본값");
+    const right = screen.getByRole("complementary", {
+      name: "추천에 쓰는 정보",
+    });
+    expect(within(right).getByText("지금 묻는 칸")).toBeVisible();
+
+    await user.click(within(answers).getByRole("button", { name: "있어요" }));
+    const sent = mock.mock.calls.at(-1)!;
+    expect(sent[0]).toContain("/start/answers");
+    expect(bodyOf(sent)).toEqual({
+      revision: 4,
+      change: { field: "has_gpu", value: "yes" },
+    });
+  });
+
+  it("answers a several-choice question only when confirmed", async () => {
+    const view = atStart({
+      chat: [
+        {
+          role: "assistant",
+          text: "다루는 데이터를 골라 주세요.",
+          changes: [],
+          rejected: [],
+          asks: "data_traits",
+        },
+      ],
+      fields: withField(2, { value: null, display: null, source: null }),
+    });
+    const { user, mock } = await open(view, () => Response.json(view));
+    const calls = mock.mock.calls.length;
+
+    const answers = screen.getByRole("group", {
+      name: "data_traits 이름 고르기, 여러 개 고를 수 있어요",
+    });
+    const confirm = within(answers).getByRole("button", {
+      name: "골라서 정하기",
+    });
+    expect(confirm).toBeDisabled();
+    await user.click(
+      within(answers).getByRole("button", { name: "문서 검색 필요" }),
+    );
+    await user.click(
+      within(answers).getByRole("button", { name: "개인정보 포함" }),
+    );
+    expect(mock.mock.calls).toHaveLength(calls);
+
+    await user.click(
+      within(answers).getByRole("button", { name: "고른 2개로 정하기" }),
+    );
+    expect(bodyOf(mock.mock.calls.at(-1)!)).toEqual({
+      revision: 4,
+      change: {
+        field: "data_traits",
+        values: ["문서 검색 필요", "개인정보 포함"],
       },
     });
   });
 
-  it("prefills an AI draft, says so, and sends the user's edits", async () => {
-    const { user, mock } = await startWith(
-      journey({
-        prompt: {
-          ...prompt,
-          source: "llm",
-          draft: { goal: "초안 목표", context: "초안 상황", boundary: "" },
+  it("shows a tapped answer as one and offers no choices once the field is set", async () => {
+    const view = atStart({
+      chat: [
+        {
+          role: "user",
+          text: "있어요",
+          changes: [],
+          rejected: [],
+          picked: true,
         },
+        {
+          role: "assistant",
+          text: "GPU 장비를 정했어요.",
+          changes: ["GPU 장비"],
+          rejected: [],
+          asks: "has_gpu",
+        },
+      ],
+      fields: withField(1, {
+        value: "yes",
+        display: "있어요",
+        source: "picked",
       }),
+    });
+    await open(view, () => Response.json(view));
+
+    expect(screen.getByText("눌러서 고름")).toBeVisible();
+    expect(
+      screen.queryByRole("group", { name: "has_gpu 이름 고르기" }),
+    ).toBeNull();
+  });
+
+  it("picks choices in a panel, one or several", async () => {
+    const { user, mock } = await open(atStart(), () =>
+      Response.json(atStart()),
     );
+
+    await user.click(
+      screen.getByRole("button", { name: "has_gpu 이름 고치기" }),
+    );
+    await user.click(screen.getByRole("button", { name: "없어요" }));
+    expect(bodyOf(mock.mock.calls.at(-1)!)).toEqual({
+      revision: 4,
+      change: { field: "has_gpu", value: "no" },
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: "data_traits 이름 고치기" }),
+    );
+    await user.click(screen.getByRole("button", { name: "개인정보 포함" }));
+    expect(bodyOf(mock.mock.calls.at(-1)!).change).toEqual({
+      field: "data_traits",
+      values: ["문서 검색 필요", "개인정보 포함"],
+    });
+  });
+
+  it("fills the blanks, then starts the journey with the checked values", async () => {
+    const filled = atStart({ missing: [] });
+    const { user, mock } = await open(atStart(), (url) =>
+      url.includes("/start/fill")
+        ? Response.json(filled)
+        : Response.json(atStart()),
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "목표 빈칸은 알아서 채워 주세요" }),
+    );
+    expect(mock.mock.calls.at(-1)![0]).toContain("/start/fill");
+    const begin = screen.getByRole("button", { name: "결정 시작하기" });
+    await waitFor(() => expect(begin).toBeEnabled());
+
+    await user.click(begin);
+    expect(bodyOf(mock.mock.calls.at(-1)!)).toEqual({
+      revision: 2,
+      action: { action: "gcb", goal: "답을 찾는 상태", answers: {} },
+    });
+  });
+
+  it("has no conversation without a model", async () => {
+    const formOnly = atStart({
+      mode: "form",
+      chat: [{ role: "user", text: "아이디어", changes: [], rejected: [] }],
+    });
+    await open(formOnly, () => Response.json(formOnly));
 
     expect(
-      await screen.findByText(/AI가 아이디어를 읽고 채운 초안/),
+      screen.getByText(/모델이 연결되지 않아 대화로 채울 수 없어요/),
     ).toBeVisible();
-    const goal = screen.getByLabelText(/끝났을 때/);
-    expect(goal).toHaveValue("초안 목표");
-
-    await user.clear(goal);
-    await user.type(goal, "고친 목표");
-    await user.click(
-      screen.getByRole("button", { name: "이 내용으로 결정 시작" }),
-    );
-
-    expect(bodyOf(mock.mock.calls[1]).action.goal).toBe("고친 목표");
-    expect(bodyOf(mock.mock.calls[1]).action.context).toBe("초안 상황");
-  });
-
-  it("explains an unavailable draft and shows the error", async () => {
-    await startWith(
-      journey({
-        prompt: { ...prompt, source: "unavailable", error: "확인해 주세요" },
-      }),
-    );
-
-    expect(await screen.findByText(/AI 초안을 만들지 못했어요/)).toBeVisible();
-    expect(screen.getByRole("alert")).toHaveTextContent("확인해 주세요");
-  });
-
-  it("asks the clarifying questions on the same screen", async () => {
-    const { user, mock } = await startWith(
-      journey({
-        prompt: {
-          ...prompt,
-          questions: [{ field: "team_size", question: "몇 명인가요?" }],
-        },
-      }),
-    );
-
-    await user.type(await screen.findByLabelText("몇 명인가요?"), "4");
-    await user.click(
-      screen.getByRole("button", { name: "이 내용으로 결정 시작" }),
-    );
-
-    expect(bodyOf(mock.mock.calls[1]).action.answers).toEqual({ team_size: 4 });
-  });
-
-  it("does not show the graph before there is anything to draw", async () => {
-    await startWith(journey({ prompt }));
-
-    await screen.findByLabelText(/끝났을 때/);
-    expect(screen.queryByRole("region", { name: "설계 그래프" })).toBeNull();
+    expect(screen.queryByLabelText("더 알려 주기")).toBeNull();
   });
 });
 
@@ -1133,21 +1548,26 @@ describe("issues and completion", () => {
 });
 
 describe("screen changes and the main action", () => {
-  it("moves focus to the heading of a new screen", async () => {
+  it("keeps typing in the box once the start conversation opens", async () => {
     await startWith(
       journey({
         prompt: {
           type: "gcb",
           draft: { goal: "", context: "", boundary: "" },
-          source: "none",
+          source: "llm",
           error: null,
+        },
+        start: {
+          mode: "model",
+          fields: [],
+          chat: [{ role: "user", text: "아이디어", changes: [], rejected: [] }],
+          revision: 0,
+          missing: [],
+          submit: {},
         },
       }),
     );
-    const heading = await screen.findByRole("heading", {
-      name: "추천에 쓸 내용을 확인해 주세요",
-    });
-    expect(heading).toHaveFocus();
+    expect(await screen.findByLabelText("더 알려 주기")).toHaveFocus();
   });
 
   it("moves focus when the journey completes", async () => {
@@ -1233,7 +1653,7 @@ describe("module conversation", () => {
       screen.getByLabelText("프로젝트 아이디어"),
       "강의 자료를 찾아 답하는 서비스",
     );
-    await user.click(screen.getByRole("button", { name: "결정 시작하기" }));
+    await user.click(screen.getByRole("button", { name: "보내기" }));
     await screen.findByRole("heading", { name: "모든 결정을 마쳤어요" });
     return { user, mock };
   }
@@ -1324,5 +1744,154 @@ describe("module conversation", () => {
     });
     expect(await screen.findByText("정할 값으로 남겨 뒀어요.")).toBeVisible();
     expect(screen.getByLabelText("답변 응답 시간 목표치")).toHaveValue("빨리");
+  });
+});
+
+describe("project list", () => {
+  const PROJECTS_KEY = "starter-pack:projects:v1";
+  const OTHER = "7b1f3c2a-1111-4222-8333-944455556666";
+  const saved = (extra = {}) => ({
+    id: ID,
+    idea: "강의 자료를 찾아 답하는 서비스",
+    name: null,
+    state: "deciding",
+    where: "에이전트 설계 단계",
+    usedAt: Date.now(),
+    ...extra,
+  });
+
+  it("lists an opened project with where it stopped", async () => {
+    const items = stubStorage();
+    const { user } = await startWith(journey());
+    await screen.findByRole("heading", { name: "사람 확인이 필요한가요?" });
+
+    const list = JSON.parse(items.get(PROJECTS_KEY)!);
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({
+      id: ID,
+      state: "deciding",
+      where: "에이전트 설계 단계",
+    });
+
+    await user.click(screen.getByRole("button", { name: "내 프로젝트" }));
+    expect(screen.getByRole("heading", { name: "내 프로젝트" })).toBeVisible();
+    const link = screen.getByRole("link", {
+      name: /강의 자료를 찾아 답하는 서비스/,
+    });
+    expect(link).toHaveAttribute("href", `?journey=${ID}`);
+    expect(screen.getByText("결정 중 · 에이전트 설계 단계")).toBeVisible();
+  });
+
+  it("opens a recent project from the start screen", async () => {
+    stubStorage({ [PROJECTS_KEY]: JSON.stringify([saved()]) });
+    const mock = stubFetch(() => Response.json(journey()));
+    const user = userEvent.setup();
+    render(<App />);
+
+    const recent = screen.getByRole("region", { name: "이어서 하기" });
+    await user.click(within(recent).getByRole("link", { name: /강의 자료/ }));
+
+    expect(mock.mock.calls[0][0]).toContain(`/journeys/${ID}`);
+    expect(
+      await screen.findByRole("heading", { name: "사람 확인이 필요한가요?" }),
+    ).toBeVisible();
+  });
+
+  it("drops a project the server no longer has", async () => {
+    const items = stubStorage({ [PROJECTS_KEY]: JSON.stringify([saved()]) });
+    stubFetch(() => errorResponse(404, "journey_not_found", "없어요"));
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("link", { name: /강의 자료/ }));
+    expect(
+      await screen.findByText("이 프로젝트를 찾지 못해 목록에서 뺐어요."),
+    ).toBeVisible();
+    expect(JSON.parse(items.get(PROJECTS_KEY)!)).toEqual([]);
+  });
+
+  it("renames, filters and removes projects on the list page", async () => {
+    stubStorage({
+      [PROJECTS_KEY]: JSON.stringify([
+        saved(),
+        saved({
+          id: OTHER,
+          idea: "회의록 요약 서비스",
+          state: "done",
+          where: "",
+        }),
+      ]),
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "모두 보기 · 2개" }));
+
+    await user.click(screen.getByRole("button", { name: "완료 1" }));
+    expect(screen.queryByRole("link", { name: /강의 자료/ })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "전체 2" }));
+
+    await user.click(
+      screen.getByRole("button", { name: "회의록 요약 서비스 더 보기" }),
+    );
+    await user.click(screen.getByRole("button", { name: "이름 바꾸기" }));
+    const name = screen.getByLabelText("새 이름");
+    await user.clear(name);
+    await user.type(name, "회의록 정리{Enter}");
+    expect(screen.getByRole("link", { name: "회의록 정리" })).toBeVisible();
+
+    const more = screen.getByRole("button", { name: "회의록 정리 더 보기" });
+    await user.click(more);
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("button", { name: "이름 바꾸기" })).toBeNull();
+    expect(more).toHaveFocus();
+
+    await user.click(more);
+    await user.click(screen.getByRole("button", { name: "목록에서 지우기" }));
+    await user.click(screen.getByRole("button", { name: "지우기" }));
+    expect(screen.queryByRole("link", { name: "회의록 정리" })).toBeNull();
+    expect(screen.getByRole("link", { name: /강의 자료/ })).toBeVisible();
+  });
+
+  it("switches to another project from the top bar", async () => {
+    stubStorage({
+      [PROJECTS_KEY]: JSON.stringify([
+        saved({
+          id: OTHER,
+          idea: "회의록 요약 서비스",
+          state: "done",
+          where: "",
+        }),
+      ]),
+    });
+    const other = journey({ journey_id: OTHER, idea: "회의록 요약 서비스" });
+    const mock = stubFetch((url) =>
+      url.includes(OTHER)
+        ? Response.json(other)
+        : Response.json(journey(), { status: 201 }),
+    );
+    const user = userEvent.setup();
+    render(<App />);
+    await user.type(
+      screen.getByLabelText("프로젝트 아이디어"),
+      "강의 자료를 찾아 답하는 서비스",
+    );
+    await user.click(screen.getByRole("button", { name: "보내기" }));
+
+    const toggle = await screen.findByRole("button", {
+      name: /프로젝트 바꾸기, 지금: 강의 자료/,
+    });
+    await user.click(toggle);
+    await user.keyboard("{Escape}");
+    expect(toggle).toHaveFocus();
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+    await user.click(toggle);
+    await user.click(screen.getByRole("link", { name: /회의록 요약 서비스/ }));
+    expect(mock.mock.calls.at(-1)![0]).toContain(`/journeys/${OTHER}`);
+    expect(
+      await screen.findByRole("button", {
+        name: /프로젝트 바꾸기, 지금: 회의록 요약 서비스/,
+      }),
+    ).toBeVisible();
   });
 });

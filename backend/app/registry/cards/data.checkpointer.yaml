@@ -3,6 +3,7 @@ version: 1
 layer: data
 title: 상태 저장
 question: 에이전트 실행 상태를 어디에 저장할까요?
+uses: [deployment_target]
 options:
   - id: memory
     name: 메모리

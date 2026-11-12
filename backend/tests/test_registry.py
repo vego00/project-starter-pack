@@ -31,6 +31,24 @@ def test_shipped_cards_cover_every_layer_in_journey_order():
     assert layers == sorted(layers, key=LAYERS.index)
 
 
+def test_uses_names_are_signal_fields():
+    from app.journey.start import FIELDS, GCB_NAMES
+
+    signals = set(FIELDS) - set(GCB_NAMES)
+    used = {name for c in load_registry().cards for name in c.uses}
+
+    assert used
+    assert used <= signals
+
+
+def test_model_provider_closes_agent_stage():
+    registry = load_registry()
+    agent_stage = [c.card_id for c in registry.cards if c.stage == 4]
+
+    assert agent_stage[-1] == "model.provider"
+    assert registry.card("model.provider").uses == ("has_gpu", "budget")
+
+
 def test_shipped_card_titles_tell_cards_apart():
     titles = [c.title for c in load_registry().cards]
 

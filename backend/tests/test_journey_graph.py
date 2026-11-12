@@ -711,3 +711,143 @@ def test_gcb_reaches_what_models_read():
     Journey(spec, JourneyDeps(decider=StubDecider()))
 
     assert (seen["project"]["goal"], seen["project"]["boundary"]) == ("목표", "외부 전송 금지")
+
+
+# Project info asked on the card that uses it (ADR-024)
+BLANK = ("has_gpu", "budget", "team_size")
+
+
+def at_model_provider(spec=None):
+    """Signals in BLANK left out, clarify rounds skipped, agent card accepted."""
+    spec = spec or {k: v for k, v in COMPLETE_SPEC.items() if k not in BLANK}
+    journey = Journey(spec)
+    while journey.prompt["type"] == "clarify":
+        journey.send({})
+    journey.send({"action": "accept_recommendation"})
+    assert journey.card_id == "model.provider"
+    return journey
+
+
+def signals_of(journey):
+    return {s["name"]: s for s in journey.prompt["card"]["signals"]}
+
+
+def recommender_runs(journey):
+    return sum(1 for event in journey.state.trace if event.node == "recommender")
+
+
+def test_card_open_fills_blank_used_signals():
+    journey = at_model_provider()
+
+    spec = journey.state.project_spec
+    assert (spec.has_gpu, spec.budget) == (False, "무료로만")
+    signals = signals_of(journey)
+    assert list(signals) == ["has_gpu", "budget"]
+    assert signals["has_gpu"]["value"] == "no"
+    assert signals["has_gpu"]["display"] == "없어요"
+    assert {s["source"] for s in signals.values()} == {"default"}
+
+
+def test_defaults_only_for_current_card():
+    assert at_model_provider().state.project_spec.team_size is None
+
+
+def test_old_journey_keeps_filled_signals():
+    journey = at_model_provider(COMPLETE_SPEC)
+
+    spec = journey.state.project_spec
+    assert (spec.has_gpu, spec.budget) == (False, "월 5만원")
+    signals = signals_of(journey)
+    assert signals["budget"]["value"] == "월 5만원"
+    assert signals["budget"]["source"] is None
+
+
+def test_signal_action_updates_spec_and_reprepares():
+    journey = at_model_provider()
+    before = recommender_runs(journey)
+
+    journey.send({"action": "signal", "field": "has_gpu", "value": "yes"})
+
+    assert journey.card_id == "model.provider"
+    assert journey.state.project_spec.has_gpu is True
+    assert signals_of(journey)["has_gpu"]["source"] == "picked"
+    assert recommender_runs(journey) == before + 1
+    assert journey.prompt["error"] is None
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"action": "signal", "field": "team_size", "value": "혼자"},
+        {"action": "signal", "field": "has_gpu", "value": "maybe"},
+    ],
+)
+def test_signal_outside_the_card_or_invalid_is_rejected(payload):
+    journey = at_model_provider()
+
+    journey.send(payload)
+
+    assert journey.card_id == "model.provider"
+    assert journey.prompt["error"]
+    assert journey.state.project_spec.has_gpu is False
+    assert journey.state.project_spec.team_size is None
+
+
+def advance_to(journey, card_id):
+    while journey.card_id != card_id:
+        journey.send({"action": "accept_recommendation"})
+    return journey
+
+
+def runs(journey, node):
+    return sum(1 for event in journey.state.trace if event.node == node)
+
+
+def test_free_text_the_spec_refuses_is_rejected_not_crashed():
+    journey = advance_to(at_model_provider(), "backend.execution")
+
+    journey.send({"action": "signal", "field": "team_size", "value": "0"})
+
+    assert journey.card_id == "backend.execution"
+    assert journey.prompt["error"] == "개발 인원: 고를 수 있는 값이 아니라 그대로 뒀어요."
+    # The default it took when the card opened stays.
+    assert journey.state.project_spec.team_size == "혼자"
+
+
+def test_changing_shared_info_drops_every_brief_that_read_it():
+    journey = at_model_provider()
+    journey.send({"action": "accept_recommendation"})
+    advance_to(journey, "mlops.model_serving")
+    assert "model.provider" in journey.state.card_briefs
+
+    journey.send({"action": "signal", "field": "has_gpu", "value": "yes"})
+
+    assert "model.provider" not in journey.state.card_briefs
+
+
+def test_changed_info_with_the_same_answer_rebuilds_a_finished_result():
+    journey = at_model_provider().choose_defaults()
+    assert journey.state.status == "completed"
+    composed = runs(journey, "composer")
+    held = journey.state.decisions["model.provider"].option_id
+
+    journey.send({"action": "revise", "card_id": "model.provider"})
+    journey.send({"action": "signal", "field": "has_gpu", "value": "yes"})
+    journey.select(held)
+
+    assert journey.state.project_spec.has_gpu is True
+    assert runs(journey, "composer") == composed + 1
+
+
+def test_signal_in_revise_mode_stays_editing():
+    journey = at_model_provider()
+    journey.send({"action": "accept_recommendation"})
+    journey.send({"action": "revise", "card_id": "model.provider"})
+    review = journey.state.needs_review
+
+    journey.send({"action": "signal", "field": "budget", "value": "월 5만원 이하"})
+
+    assert journey.state.editing_card == "model.provider"
+    assert journey.card_id == "model.provider"
+    assert journey.state.needs_review == review
+    assert journey.state.project_spec.budget == "월 5만원 이하"

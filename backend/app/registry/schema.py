@@ -11,7 +11,8 @@ Layer = Literal["agent", "model", "data", "backend", "devops", "mlops", "cloud",
 LAYER_STAGE = {
     "product": 3,
     "agent": 4,
-    "model": 5,
+    # The agent graph needs a model, so the provider closes the agent stage (ADR-024).
+    "model": 4,
     "data": 5,
     "backend": 5,
     "devops": 5,
@@ -105,6 +106,8 @@ class DecisionCard(_Frozen):
     question: str
     options: tuple[CardOption, ...] = Field(min_length=2)
     signals: dict[str, tuple[str, ...]] = Field(default_factory=dict)
+    # Project info this card reads (ADR-024); a blank one is asked on this card.
+    uses: tuple[str, ...] = ()
     requires: tuple[RequiresRule, ...] = ()
     conflicts: tuple[ConflictRule, ...] = ()
     implies: tuple[ImpliesRule, ...] = ()

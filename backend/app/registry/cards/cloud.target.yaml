@@ -3,6 +3,7 @@ version: 1
 layer: cloud
 title: 배포 위치
 question: 어디에 배포할까요?
+uses: [deployment_target, expected_users]
 options:
   - id: local
     name: 로컬만

@@ -19,7 +19,21 @@ from app.journey.deciders.base import DeciderQuestion, judge, judge_many
 from app.journey.design_constraints import BLOCKING_CARDS, derive_design_constraints
 from app.journey.design_edit import keep_human_edits
 from app.journey.design_generator import MAX_ATTEMPTS, MAX_OUTAGE_RETRIES, generate_design
-from app.journey.services import JourneyDeps, llm_calls_used
+from app.journey.services import JourneyDeps, StartFailure, llm_calls_used
+from app.journey.start import (
+    FIELDS,
+    GCB_NAMES,
+    StartChange,
+    StartTurn,
+    apply_start_changes,
+    as_start_value,
+    asked_field,
+    card_defaults,
+    display,
+    reply_text,
+    signal_answers,
+    start_from_draft,
+)
 from app.journey.state import (
     CLARIFY_QUESTIONS,
     DONE_ACTION,
@@ -36,9 +50,11 @@ from app.journey.state import (
     CardBrief,
     CardPresentation,
     CardQA,
+    CardSignal,
     Decision,
     DeferAction,
     FocusAction,
+    GcbDraft,
     JourneyState,
     KeepAction,
     OptionView,
@@ -47,6 +63,8 @@ from app.journey.state import (
     ReopenAction,
     ReviseAction,
     SelectAction,
+    SignalAction,
+    SignalChoice,
     SkippedCard,
 )
 from app.registry.loader import Registry
@@ -167,6 +185,48 @@ def _selection_question(card: DecisionCard) -> DeciderQuestion:
     )
 
 
+def _with_signals(state: JourneyState, fields: dict[str, Any], names: list[str]) -> dict[str, Any]:
+    """Start fields and the spec moved together, for the signals in `names` only."""
+    answers = signal_answers({name: fields[name] for name in names})
+    spec = ProjectSpec.model_validate({**state.project_spec.model_dump(), **answers})
+    return {"start_fields": fields, "project_spec": spec}
+
+
+def _leave_unchanged(state: JourneyState) -> dict[str, Any]:
+    """Leaving a card in revise mode as it was. Project info changed on it meanwhile still
+    counts as a change, so a finished result is built again from the new info."""
+    outcome = "advance" if state.info_changed else "unchanged"
+    return {
+        "editing_card": None,
+        "info_changed": False,
+        "gate_outcome": outcome,
+        "gate_error": None,
+    }
+
+
+def _card_signals(state: JourneyState, card: DecisionCard) -> list[CardSignal]:
+    signals = []
+    for name in card.uses:
+        field, held = FIELDS[name], state.start_fields.get(name)
+        value = held.value if held else as_start_value(getattr(state.project_spec, name))
+        if value is None:
+            continue
+        signals.append(
+            CardSignal(
+                name=name,
+                label=field.name_in_text,
+                kind=field.kind,
+                choices=[SignalChoice(value=c.value, label=c.label) for c in field.choices],
+                free_text=field.free_text,
+                value=value,
+                display=display(field, value),
+                source=held.source if held else None,
+                why=held.why if held else None,
+            )
+        )
+    return signals
+
+
 def _recommendation_reason(card: DecisionCard, option_id: str, decider: str) -> str:
     default = card.default_recommendation
     if decider == "mock":
@@ -178,10 +238,42 @@ def _recommendation_reason(card: DecisionCard, option_id: str, decider: str) -> 
 
 def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
     def gcb_drafter(state: JourneyState) -> dict[str, Any]:
-        draft = deps.drafter.draft(state)
+        idea = state.project_spec.idea
+        if deps.start_writer is None:
+            draft = deps.drafter.draft(state)
+            return {
+                "gcb_draft": draft,
+                "start_fields": start_from_draft(draft),
+                "start_chat": [StartTurn(role="user", text=idea)],
+                "_trace": draft.model_dump(
+                    include={"model_id", "prompt_version", "input_tokens", "output_tokens"}
+                ),
+            }
+        # The idea is the first message: one call fills the goal and the signals together.
+        reply = deps.start_writer.write({}, [], idea, None)
+        if isinstance(reply, StartFailure):
+            answer = StartTurn(
+                role="assistant",
+                text=f"{reply.reason} 칸을 눌러 직접 채워도 돼요.",
+            )
+            return {
+                "gcb_draft": GcbDraft(source="unavailable"),
+                "start_chat": [StartTurn(role="user", text=idea), answer],
+            }
+        fields, applied, rejected = apply_start_changes({}, reply.changes, "said", message=idea)
+        answer = StartTurn(
+            role="assistant",
+            text=reply_text(applied, fields, None),
+            changes=applied,
+            rejected=rejected,
+            asks=asked_field(fields),
+        )
+        texts = {name: str(fields[name].value) for name in GCB_NAMES if name in fields}
         return {
-            "gcb_draft": draft,
-            "_trace": draft.model_dump(
+            "gcb_draft": GcbDraft(**texts, source="llm", model_id=reply.model_id),
+            "start_fields": fields,
+            "start_chat": [StartTurn(role="user", text=idea), answer],
+            "_trace": reply.model_dump(
                 include={"model_id", "prompt_version", "input_tokens", "output_tokens"}
             ),
         }
@@ -189,8 +281,8 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
     def gcb_gate(state: JourneyState) -> dict[str, Any]:
         draft = state.gcb_draft
         spec = state.project_spec
-        # Everything both clarifying rounds could ask, so one screen is enough.
-        asked = spec.missing_signals()[: MAX_QUESTIONS_PER_ROUND * MAX_CLARIFY_ROUNDS]
+        # The start screen fills every signal (ADR-023), so all of them are accepted here.
+        asked = spec.missing_signals()
         raw = _wait_for_user(
             {
                 "type": "gcb",
@@ -316,7 +408,20 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
         # Stage first: a decision made here can invalidate the ones in later stages.
         pending = sorted(state.pending_cards, key=lambda card_id: registry.card(card_id).stage)
         following = next_card(pending, state.deferred_cards, state.focus_card)
-        return {"current_card_id": state.editing_card or following}
+        current = state.editing_card or following
+        update: dict[str, Any] = {"current_card_id": current}
+        if current is None:
+            return update
+        # Info this card reads and nobody gave takes its small-start default now (ADR-024).
+        blank = [
+            name
+            for name in registry.card(current).uses
+            if name not in state.start_fields and getattr(state.project_spec, name) is None
+        ]
+        fields = card_defaults(state.start_fields, blank)
+        if added := [name for name in blank if name in fields]:
+            update.update(_with_signals(state, fields, added))
+        return update
 
     def advisor(state: JourneyState) -> dict[str, Any]:
         advice = deps.advisor.advise(state, registry.card(state.current_card_id))
@@ -426,6 +531,7 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
                 ),
                 learning_refs=list(card.learning_refs),
                 div_refs=list(card.div_refs),
+                signals=_card_signals(state, card),
             ),
         }
 
@@ -472,7 +578,7 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
         editing = state.editing_card == current.card_id
         if isinstance(action, DeferAction):
             if editing:
-                return {"editing_card": None, "gate_outcome": "unchanged", "gate_error": None}
+                return _leave_unchanged(state)
             others = [card_id for card_id in state.deferred_cards if card_id != current.card_id]
             return {
                 "deferred_cards": [*others, current.card_id],
@@ -496,6 +602,8 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
                 "gate_error": None,
             }
 
+        if isinstance(action, SignalAction):
+            return _change_signal(state, action)
         if isinstance(action, AcceptRecommendationAction):
             option_id = current.recommendation.option_id
             by, rationale = "recommended", current.recommendation.reason
@@ -512,7 +620,7 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
             return _reject(f"지금은 고를 수 없는 선택지입니다. {view.blocked_reason}")
         held = state.decisions[current.card_id].option_id if editing else None
         if held == option_id:
-            return {"editing_card": None, "gate_outcome": "unchanged", "gate_error": None}
+            return _leave_unchanged(state)
         decision = Decision(
             card_id=current.card_id,
             card_version=current.version,
@@ -537,6 +645,35 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
             "needs_review": list(
                 dict.fromkeys([*(c for c in state.needs_review if c != current.card_id), *later])
             ),
+            "info_changed": False,
+            "gate_outcome": "advance",
+            "gate_error": None,
+        }
+
+    def _change_signal(state: JourneyState, action: SignalAction) -> dict[str, Any]:
+        """Only what this card reads can change here; the card is then prepared again."""
+        card_id = state.current_card.card_id
+        if action.field not in registry.card(card_id).uses:
+            return _reject("이 카드에서 바꿀 수 있는 정보가 아니에요.")
+        change = StartChange(field=action.field, value=action.value, values=action.values)
+        fields, applied, rejected = apply_start_changes(state.start_fields, [change], "picked")
+        if not applied:
+            return _reject(" / ".join(rejected))
+        try:
+            moved = _with_signals(state, fields, [action.field])
+        except ValidationError:
+            # Free text such as "0" people fits the field but not the spec.
+            name = FIELDS[action.field].name_in_text
+            return _reject(f"{name}: 고를 수 있는 값이 아니라 그대로 뒀어요.")
+        return {
+            **moved,
+            # Every card that read this info explains and recommends it again.
+            "card_briefs": {
+                k: v
+                for k, v in state.card_briefs.items()
+                if action.field not in registry.card(k).uses
+            },
+            "info_changed": True,
             "gate_outcome": "advance",
             "gate_error": None,
         }

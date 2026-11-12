@@ -10,9 +10,11 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from app.journey.constraints import Conflict
 from app.journey.design import DesignState
 from app.journey.modules import ModuleNote, ModuleTurn
+from app.journey.start import StartSource, StartTurn, StartValue
 from app.registry.schema import CardOption
 
 CardId = str
+RangeText = Annotated[str, Field(min_length=1, max_length=40)]
 DeploymentTarget = Literal["local_demo", "small_group", "public_service"]
 MAX_CLARIFY_ROUNDS = 2
 MAX_QUESTIONS_PER_ROUND = 3
@@ -41,11 +43,12 @@ class ProjectSpec(BaseModel):
     goal: str | None = Field(default=None, min_length=1, max_length=MAX_GCB_CHARS)
     context: str | None = Field(default=None, min_length=1, max_length=MAX_GCB_CHARS)
     boundary: str | None = Field(default=None, min_length=1, max_length=MAX_GCB_CHARS)
-    team_size: int | None = Field(default=None, ge=1)
-    duration_weeks: int | None = Field(default=None, ge=1)
+    # A range picked on the start screen ("10~100명") stays text; nothing invents a number for it.
+    team_size: Annotated[int, Field(ge=1)] | RangeText | None = None
+    duration_weeks: Annotated[int, Field(ge=1)] | RangeText | None = None
     budget: str | None = Field(default=None, min_length=1, max_length=200)
-    expected_users: int | None = Field(default=None, ge=0)
-    weekly_hours: int | None = Field(default=None, ge=1)
+    expected_users: Annotated[int, Field(ge=0)] | RangeText | None = None
+    weekly_hours: Annotated[int, Field(ge=1)] | RangeText | None = None
     data_traits: list[Annotated[str, Field(max_length=200)]] | None = Field(
         default=None, max_length=20
     )
@@ -136,6 +139,26 @@ class OptionView(BaseModel):
     artifacts: list[str] = []
 
 
+class SignalChoice(BaseModel):
+    value: str
+    label: str
+
+
+class CardSignal(BaseModel):
+    """Project info a card reads, shown above its options so it can be changed there (ADR-024).
+    `source` is None for a value given to the journey directly rather than on the start screen."""
+
+    name: str
+    label: str
+    kind: Literal["text", "choice", "multi"]
+    choices: list[SignalChoice]
+    free_text: bool
+    value: str | list[str]
+    display: str
+    source: StartSource | None = None
+    why: str | None = None
+
+
 class CardPresentation(BaseModel):
     card_id: CardId
     version: int
@@ -149,6 +172,7 @@ class CardPresentation(BaseModel):
     to_review: list[str] = []
     learning_refs: list[str] = []
     div_refs: list[str] = []
+    signals: list[CardSignal] = []
 
 
 class CardBrief(BaseModel):
@@ -223,6 +247,12 @@ class JourneyState(BaseModel):
     module_chat: list[ModuleTurn] = []
     module_undo: list[dict[str, ModuleNote]] = []
     module_revision: int = 0
+    # The start screen's conversation and fields (ADR-023), kept until the journey starts.
+    start_fields: dict[str, StartValue] = {}
+    # Project info changed on the open card (ADR-024); leaving it "unchanged" still rebuilds.
+    info_changed: bool = False
+    start_chat: list[StartTurn] = []
+    start_revision: int = 0
     trace: Annotated[list[NodeEvent], operator.add] = []
 
     @property
@@ -286,6 +316,16 @@ class KeepAction(_Action):
     card_id: CardId
 
 
+class SignalAction(_Action):
+    """Changes one piece of project info the current card reads; a multi-choice field sends
+    its whole list in `values`."""
+
+    action: Literal["signal"]
+    field: str = Field(max_length=40)
+    value: str = Field(default="", max_length=1000)
+    values: list[Annotated[str, Field(max_length=200)]] = Field(default=[], max_length=20)
+
+
 class GcbAction(_Action):
     action: Literal["gcb"]
     goal: str = Field(default="", max_length=MAX_GCB_CHARS)
@@ -308,7 +348,8 @@ GateAction = Annotated[
     | ReopenAction
     | ReviseAction
     | FocusAction
-    | KeepAction,
+    | KeepAction
+    | SignalAction,
     Field(discriminator="action"),
 ]
 JourneyAction = Annotated[
@@ -320,6 +361,7 @@ JourneyAction = Annotated[
     | ReviseAction
     | FocusAction
     | KeepAction
+    | SignalAction
     | ClarifyAction
     | GcbAction,
     Field(discriminator="action"),

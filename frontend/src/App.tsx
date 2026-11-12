@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
+  answerStart,
   ApiError,
   editModule,
+  editStart,
+  fillStart,
   getJourney,
   sendAction,
   sendModuleMessage,
+  sendStartMessage,
   startJourney,
   undoModule,
 } from "./api";
@@ -14,13 +18,20 @@ import {
   ClarifyForm,
   CompletedView,
   DecisionView,
-  GcbForm,
   IssuesView,
   ProgressRail,
-  StartForm,
 } from "./components";
 import type { SideView } from "./components";
 import { ModuleChat } from "./moduleChat";
+import {
+  forgetProject,
+  ProjectsPage,
+  ProjectSwitcher,
+  RecentProjects,
+  recordProject,
+  useProjects,
+} from "./projects";
+import { StartChat } from "./startChat";
 import { ThemeToggle } from "./theme";
 
 const LAST_JOURNEY_KEY = "starter-pack:last-journey:v1";
@@ -77,12 +88,15 @@ export default function App() {
   const [confirmingRestart, setConfirmingRestart] = useState(false);
   const [lastAction, setLastAction] = useState<string | null>(null);
   const [side, setSide] = useState<SideView>("summary");
+  const [listing, setListing] = useState(false);
+  const projects = useProjects();
   const stacked = useStacked();
   const inFlight = useRef(false);
 
   function show(next: Journey) {
     setJourney(next);
     rememberJourney(next.journey_id);
+    recordProject(next);
   }
 
   async function run(work: () => Promise<void>) {
@@ -155,7 +169,7 @@ export default function App() {
   }
 
   /** Errors go back to the chat or the field that sent them, not to the page. */
-  async function changeModules(
+  async function changeInPlace(
     work: (current: Journey) => Promise<Journey>,
   ): Promise<string> {
     if (!journey) return "";
@@ -186,12 +200,58 @@ export default function App() {
     setError("");
     setCardOpen(true);
     setConfirmingRestart(false);
+    setListing(false);
+  }
+
+  function openProject(id: string) {
+    void run(async () => {
+      try {
+        show(await getJourney(id));
+        setListing(false);
+        setCardOpen(true);
+        setConfirmingRestart(false);
+      } catch (failure) {
+        if (
+          failure instanceof ApiError &&
+          ["journey_not_found", "invalid_input"].includes(failure.code)
+        ) {
+          forgetProject(id);
+          setError("이 프로젝트를 찾지 못해 목록에서 뺐어요.");
+        } else setError(messageOf(failure));
+      }
+    });
   }
 
   const prompt = journey?.prompt ?? null;
+  const startChat = (current: Journey | null) => (
+    <StartChat
+      journey={current}
+      busy={busy}
+      preview={<SamplePreview />}
+      recent={
+        projects && projects.length > 0 ? (
+          <RecentProjects
+            projects={projects}
+            onOpen={openProject}
+            onAll={() => setListing(true)}
+          />
+        ) : undefined
+      }
+      onIdea={start}
+      onSend={(text, focus) =>
+        changeInPlace((j) => sendStartMessage(j, text, focus))
+      }
+      onEdit={(change) => changeInPlace((j) => editStart(j, change))}
+      onAnswer={(change) => changeInPlace((j) => answerStart(j, change))}
+      onFill={() => changeInPlace(fillStart)}
+      onBegin={() => {
+        if (current?.start) act(current.start.submit as Action);
+      }}
+    />
+  );
   const briefing = prompt?.type === "gcb" || prompt?.type === "clarify";
   const finished = !prompt && journey?.status === "completed";
-  const inWorkspace = journey !== null && !briefing && !finished;
+  const inWorkspace = journey !== null && !briefing && !finished && !listing;
   // The last decision also generates the design, the one wait that runs long.
   const makingDesign =
     prompt?.type === "decision" &&
@@ -237,13 +297,31 @@ export default function App() {
     >
       <header className="topbar">
         <h1>프로젝트 스타터팩</h1>
-        {journey && <span className="topbar-idea">{journey.idea}</span>}
+        {journey && !listing && (
+          <ProjectSwitcher
+            journey={journey}
+            projects={projects ?? []}
+            busy={busy}
+            onOpen={openProject}
+            onAll={() => setListing(true)}
+          />
+        )}
         <div className="topbar-actions">
-          {journey?.notice && (
+          {journey?.notice && !listing && (
             <span className="topbar-notice">{journey.notice}</span>
+          )}
+          {listing ? (
+            <button className="quiet" onClick={() => setListing(false)}>
+              {journey ? "지금 프로젝트로 돌아가기" : "시작 화면으로"}
+            </button>
+          ) : (
+            <button className="quiet" onClick={() => setListing(true)}>
+              내 프로젝트
+            </button>
           )}
           {journey &&
             !finished &&
+            !listing &&
             (confirmingRestart ? (
               <span className="confirm">
                 지금 여정에서 나갈까요?
@@ -282,14 +360,22 @@ export default function App() {
       </p>
       {restoring ? (
         <p className="panel muted">저장된 여정을 불러오는 중이에요…</p>
-      ) : !journey ? (
-        <main>
-          <StartForm busy={busy} onStart={start} preview={<SamplePreview />} />
+      ) : listing ? (
+        <main className="projects-main">
+          <ProjectsPage
+            projects={projects}
+            currentId={journey?.journey_id ?? null}
+            busy={busy}
+            onOpen={openProject}
+            onNew={restart}
+          />
         </main>
+      ) : !journey ? (
+        <main className="start-page">{startChat(null)}</main>
       ) : briefing ? (
-        <main className="brief-page">
+        <main className={prompt.type === "gcb" ? "start-page" : "brief-page"}>
           {prompt.type === "gcb" ? (
-            <GcbForm prompt={prompt} busy={busy} act={act} />
+            startChat(journey)
           ) : (
             <ClarifyForm prompt={prompt} busy={busy} act={act} />
           )}
@@ -308,9 +394,9 @@ export default function App() {
                   journey={journey}
                   busy={busy}
                   onSend={(text) =>
-                    changeModules((current) => sendModuleMessage(current, text))
+                    changeInPlace((current) => sendModuleMessage(current, text))
                   }
-                  onUndo={() => changeModules(undoModule)}
+                  onUndo={() => changeInPlace(undoModule)}
                 />
               }
               graph={
@@ -325,7 +411,7 @@ export default function App() {
                     journey.module_mode === "closed"
                       ? undefined
                       : (change) =>
-                          changeModules((current) =>
+                          changeInPlace((current) =>
                             editModule(current, change),
                           )
                   }
