@@ -745,6 +745,15 @@ export function CompletedView({
               빌드 묶음 다운로드 (파일 {design.files.length}개)
             </a>
           )}
+          {journey.can_plan_deploy && (
+            <button
+              className="wide"
+              disabled={busy}
+              onClick={() => onPlanDeploy?.()}
+            >
+              배포 계획 이어서 세우기 (카드 {unplanned.length}장)
+            </button>
+          )}
           <a
             className={design ? "button" : "button primary"}
             href={summaryUrl(journey.journey_id)}
@@ -752,11 +761,6 @@ export function CompletedView({
           >
             결정 요약 다운로드
           </a>
-          {journey.can_plan_deploy && (
-            <button disabled={busy} onClick={() => onPlanDeploy?.()}>
-              배포 계획 이어서 세우기 (카드 {unplanned.length}장)
-            </button>
-          )}
           <button onClick={onRestart}>새 프로젝트 시작</button>
         </div>
       </section>
