@@ -250,8 +250,15 @@ def run_flow(case: dict, deps: JourneyDeps, registry: Registry) -> dict[str, Any
         design = service.design(view.journey_id)
         result["design"] = design_metrics(design)
         result["artifact"] = design.model_dump(mode="json")
+        # Blank info takes card defaults on the way (ADR-024), so the design reads the final spec.
+        final = JourneyState.model_validate(service._snapshot(view.journey_id).values)
         result["checks"] = design_checks(
-            design, service.package(view.journey_id), registry, case["spec"]["idea"], case=case
+            design,
+            service.package(view.journey_id),
+            registry,
+            case["spec"]["idea"],
+            case=case,
+            final_spec=final.project_spec,
         )
     result["outcome"] = "completed" if view.design else "scenario_unanswered"
     if stopped_at and stopped_at["prompt"] == "step_limit":

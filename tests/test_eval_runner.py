@@ -374,3 +374,61 @@ def test_the_report_names_the_model_that_writes_the_design():
 
     assert runner.design_model(exaone) == runner.EXAONE_MODEL
     assert runner.design_model(gemini) == "g-big"
+
+
+def _fake_design(decisions, spec):
+    import hashlib
+    from types import SimpleNamespace as NS
+
+    digest = hashlib.sha256(
+        json.dumps(spec.model_dump(mode="json"), sort_keys=True).encode()
+    ).hexdigest()
+    return NS(
+        nodes=[],
+        workflow=NS(edges=[]),
+        validation=[],
+        design_revision=1,
+        provenance=NS(
+            decisions=[NS(card_id=k, option_id=v, by=by) for k, (v, by) in decisions.items()],
+            project_spec_hash=digest,
+        ),
+    )
+
+
+def test_a_card_the_case_may_skip_counts_as_chosen_when_skipped():
+    from app.journey.state import ProjectSpec
+
+    from benchmarks.evaluators.design import design_checks
+
+    case = {
+        "spec": {"idea": "과제 피드백 초안을 만드는 서비스"},
+        "selection": {"a.x": "none", "b.y": "on"},
+    }
+    spec = ProjectSpec(**case["spec"])
+    skipped = _fake_design({"a.x": (None, "skipped"), "b.y": ("on", "user")}, spec)
+
+    def status(c):
+        return next(x for x in design_checks(skipped, case=c) if x["id"] == "fixed_choices")[
+            "status"
+        ]
+
+    assert status({**case, "may_skip": ["a.x"]}) == "pass"
+    assert status({**case, "may_skip": []}) == "fail"
+
+
+def test_card_defaults_keep_the_spec_check_passing_but_a_changed_value_fails():
+    from app.journey.state import ProjectSpec
+
+    from benchmarks.evaluators.design import design_checks
+
+    case = {"spec": {"idea": "과제 피드백 초안을 만드는 서비스", "team_size": 2}, "selection": {}}
+    filled = ProjectSpec(**case["spec"], budget="무료로만")
+    changed = ProjectSpec(idea=case["spec"]["idea"], team_size=3)
+
+    def status(final):
+        design = _fake_design({}, final)
+        checks = design_checks(design, case=case, final_spec=final)
+        return next(x for x in checks if x["id"] == "spec_snapshot")["status"]
+
+    assert status(filled) == "pass"
+    assert status(changed) == "fail"

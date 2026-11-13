@@ -9,7 +9,16 @@ from app.journey.package import build_package
 from app.journey.state import ProjectSpec
 
 
-def design_checks(design, package=None, registry=None, idea=None, *, case=None, fixed_choices=True):
+def design_checks(
+    design,
+    package=None,
+    registry=None,
+    idea=None,
+    *,
+    case=None,
+    fixed_choices=True,
+    final_spec=None,
+):
     ids = {node.id for node in design.nodes}
     refs = all(e.source in ids and e.target in ids for e in design.workflow.edges)
     checks = [
@@ -40,24 +49,37 @@ def design_checks(design, package=None, registry=None, idea=None, *, case=None, 
         }
     )
     if case is not None:
-        spec = ProjectSpec.model_validate(case["spec"])
+        given = ProjectSpec.model_validate(case["spec"])
+        # The journey may fill blank info with card defaults, but never change what the case gave.
+        spec = final_spec or given
+        kept = all(getattr(spec, name) == getattr(given, name) for name in given.model_fields_set)
         digest = hashlib.sha256(
             json.dumps(spec.model_dump(mode="json"), sort_keys=True).encode()
         ).hexdigest()
         checks.append(
             {
                 "id": "spec_snapshot",
-                "status": "pass" if digest == design.provenance.project_spec_hash else "fail",
+                "status": "pass"
+                if kept and digest == design.provenance.project_spec_hash
+                else "fail",
             }
         )
-        selected = {d.card_id: d.option_id for d in design.provenance.decisions}
+        refs = {d.card_id: d for d in design.provenance.decisions}
+        may_skip = set(case.get("may_skip", []))
+
+        def chosen(card_id, option_id):
+            ref = refs.get(card_id)
+            if ref is not None and ref.by == "skipped":
+                return card_id in may_skip
+            return ref is not None and ref.option_id == option_id
+
         checks.append(
             {
                 "id": "fixed_choices",
                 "status": "not_run"
                 if not fixed_choices
                 else "pass"
-                if all(selected.get(k) == v for k, v in case["selection"].items())
+                if all(chosen(k, v) for k, v in case["selection"].items())
                 else "fail",
             }
         )
