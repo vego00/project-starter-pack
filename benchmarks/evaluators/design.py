@@ -1,0 +1,66 @@
+"""Structural checks do not assert semantic requirement satisfaction."""
+
+import hashlib
+import io
+import json
+import zipfile
+
+from app.journey.package import build_package
+from app.journey.state import ProjectSpec
+
+
+def design_checks(design, package=None, registry=None, idea=None, *, case=None, fixed_choices=True):
+    ids = {node.id for node in design.nodes}
+    refs = all(e.source in ids and e.target in ids for e in design.workflow.edges)
+    checks = [
+        {"id": "node_references", "status": "pass" if refs else "fail"},
+        {
+            "id": "validation",
+            "status": "not_run"
+            if design.validation is None
+            else "fail"
+            if any(i.severity == "error" for i in design.validation or [])
+            else "pass",
+        },
+    ]
+    # Compare every downloaded file against this exact saved revision, not a keyword.
+    status = "not_run"
+    if package is not None:
+        with zipfile.ZipFile(io.BytesIO(package)) as archive:
+            actual = {
+                name.removeprefix("starter-pack/"): archive.read(name).decode()
+                for name in archive.namelist()
+            }
+        status = "pass" if actual == build_package(design, registry, idea) else "fail"
+    checks.append(
+        {
+            "id": "package_matches_revision",
+            "status": status,
+            "design_revision": design.design_revision,
+        }
+    )
+    if case is not None:
+        spec = ProjectSpec.model_validate(case["spec"])
+        digest = hashlib.sha256(
+            json.dumps(spec.model_dump(mode="json"), sort_keys=True).encode()
+        ).hexdigest()
+        checks.append(
+            {
+                "id": "spec_snapshot",
+                "status": "pass" if digest == design.provenance.project_spec_hash else "fail",
+            }
+        )
+        selected = {d.card_id: d.option_id for d in design.provenance.decisions}
+        checks.append(
+            {
+                "id": "fixed_choices",
+                "status": "not_run"
+                if not fixed_choices
+                else "pass"
+                if all(selected.get(k) == v for k, v in case["selection"].items())
+                else "fail",
+            }
+        )
+        if case.get("design_checks"):
+            checks = [c for c in checks if c["id"] in case["design_checks"]]
+    return checks

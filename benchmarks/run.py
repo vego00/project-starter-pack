@@ -13,11 +13,13 @@ import argparse
 import json
 import logging
 import re
+import signal
 import statistics
 import subprocess
 import sys
 import time
 from collections import Counter
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -26,6 +28,7 @@ from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
+sys.path.insert(0, str(ROOT))
 
 import yaml  # noqa: E402
 from app.config import Settings  # noqa: E402
@@ -35,13 +38,17 @@ from app.journey.design_generator import (  # noqa: E402
     MAX_OUTAGE_RETRIES,
     generate_design,
 )
+from app.journey.llm import EXAONE_MODEL  # noqa: E402
 from app.journey.prompts import DESIGN_VERSION  # noqa: E402
 from app.journey.service import JourneyService  # noqa: E402
-from app.journey.services import JourneyDeps, build_deps  # noqa: E402
+from app.journey.services import JourneyDeps, StartFailure, build_deps  # noqa: E402
 from app.journey.state import JourneyAction, JourneyState, ProjectSpec  # noqa: E402
 from app.registry.loader import Registry, load_registry  # noqa: E402
 from langgraph.checkpoint.memory import InMemorySaver  # noqa: E402
 from pydantic import TypeAdapter  # noqa: E402
+
+from benchmarks.evaluators.design import design_checks  # noqa: E402
+from benchmarks.evaluators.intake import IntakeCase, evaluate  # noqa: E402
 
 CASES_DIR = ROOT / "benchmarks" / "datasets" / "cases"
 REPORTS_DIR = ROOT / "reports"
@@ -64,6 +71,51 @@ class CountingDesigner:
         return self.inner.draft(*args, **kwargs)
 
 
+class ScenarioUnanswered(Exception):
+    pass
+
+
+class CallBudgetExceeded(BaseException):
+    pass
+
+
+class CountingStartWriter:
+    def __init__(self, inner, limit=20):
+        self.inner, self.limit = inner, limit
+        self.calls = 0
+        self.failures = 0
+        self.attempts = []
+
+    def _call(self, method, *args, **kwargs):
+        if self.calls >= self.limit:
+            raise CallBudgetExceeded()
+        self.calls += 1
+        started = time.perf_counter()
+        event = {"method": method, "source": "error"}
+        try:
+            reply = getattr(self.inner, method)(*args, **kwargs)
+            failed = reply is None or isinstance(reply, StartFailure)
+            self.failures += failed
+            if isinstance(reply, StartFailure):
+                event["reason"] = reply.reason
+            event.update(
+                source="unavailable" if failed else "model" if reply.model_id else "mock",
+                model_id=getattr(reply, "model_id", None),
+                input_tokens=getattr(reply, "input_tokens", None),
+                output_tokens=getattr(reply, "output_tokens", None),
+            )
+            return reply
+        finally:
+            event["seconds"] = round(time.perf_counter() - started, 3)
+            self.attempts.append(event)
+
+    def write(self, *args, **kwargs):
+        return self._call("write", *args, **kwargs)
+
+    def recommend_gcb(self, *args, **kwargs):
+        return self._call("recommend_gcb", *args, **kwargs)
+
+
 class _Lines(logging.Handler):
     def __init__(self):
         super().__init__(logging.INFO)
@@ -73,9 +125,25 @@ class _Lines(logging.Handler):
         self.lines.append(record.getMessage())
 
 
+def design_model(settings: Settings) -> str:
+    """The model that writes the design: with K-EXAONE as the service model it writes it too."""
+    if settings.provider == "exaone":
+        return settings.exaone_model or EXAONE_MODEL
+    return settings.gemini_design_model or settings.gemini_model or "-"
+
+
 def load_cases(names: list[str] | None = None) -> list[dict[str, Any]]:
     paths = sorted(CASES_DIR.glob("*.yaml"))
     cases = [yaml.safe_load(path.read_text("utf-8")) for path in paths]
+    for case in cases:
+        if case.get("evaluation") == "intake":
+            IntakeCase.model_validate(case)
+        else:
+            ProjectSpec.model_validate(case["spec"])
+    if len({c["id"] for c in cases}) != len(cases):
+        raise ValueError("Duplicate case id")
+    if names and set(names) - {case["id"] for case in cases}:
+        raise ValueError("Unknown case id")
     return [case for case in cases if names is None or case["id"] in names]
 
 
@@ -118,6 +186,11 @@ def _choose(case: dict, card: dict, registry: Registry) -> str:
     """The case's choice, else the recommendation, else the card's default; never a blocked one."""
     card_id = card["card_id"]
     open_options = [view["option"]["id"] for view in card["options"] if not view["blocked_reason"]]
+    if case.get("evaluation") == "design":
+        fixed = case["selection"].get(card_id)
+        if fixed not in open_options:
+            raise ScenarioUnanswered(f"fixed_choice_unavailable:{card_id}")
+        return fixed
     option = case["selection"].get(card_id) or card["recommendation"]["option_id"]
     option = option or registry.card(card_id).default_recommendation.option
     return option if option in open_options else open_options[0]
@@ -140,6 +213,8 @@ def run_flow(case: dict, deps: JourneyDeps, registry: Registry) -> dict[str, Any
             action = {"action": "clarify", "answers": {}}
         elif kind == "fork":
             action = {"action": "plan_deploy"}
+        elif kind == "done":
+            break
         elif kind == "decision":
             card = prompt["card"]
             asked.append(card["card_id"])
@@ -151,6 +226,8 @@ def run_flow(case: dict, deps: JourneyDeps, registry: Registry) -> dict[str, Any
             stopped_at = {"prompt": kind, "rules": issues}
             break
         view = service.act(view.journey_id, view.revision, ACTION.validate_python(action))
+    else:
+        stopped_at = {"prompt": "step_limit"}
     skipped = {c.card_id: c.skip_confidence for c in view.cards if c.state == "skipped"}
     agreed = [
         recommendations[card_id][0] == option
@@ -170,7 +247,15 @@ def run_flow(case: dict, deps: JourneyDeps, registry: Registry) -> dict[str, Any
         "recommendation_agreed": [sum(agreed), len(agreed)],
     }
     if view.design is not None:
-        result["design"] = design_metrics(service.design(view.journey_id))
+        design = service.design(view.journey_id)
+        result["design"] = design_metrics(design)
+        result["artifact"] = design.model_dump(mode="json")
+        result["checks"] = design_checks(
+            design, service.package(view.journey_id), registry, case["spec"]["idea"], case=case
+        )
+    result["outcome"] = "completed" if view.design else "scenario_unanswered"
+    if stopped_at and stopped_at["prompt"] == "step_limit":
+        result["outcome"] = "step_limit"
     return result
 
 
@@ -182,28 +267,176 @@ def run_blank(case: dict, deps: JourneyDeps, registry: Registry) -> dict[str, An
     return {
         "design": design_metrics(outcome.design.current),
         "tokens": [outcome.input_tokens, outcome.output_tokens],
+        "outcome": "completed",
+        "artifact": outcome.design.current.model_dump(mode="json"),
+        "checks": design_checks(outcome.design.current, case=case, fixed_choices=False),
     }
 
 
-def run_case(case: dict, mode: str, deps: JourneyDeps, registry: Registry) -> dict[str, Any]:
-    """One run of one case, with the journey's log lines collected around it."""
+def _snapshot_start(view):
+    return {
+        "fields": {f.name: f.model_dump() for f in view.start.fields},
+        "asks": view.start.chat[-1].asks if view.start.chat else None,
+        "missing": view.start.missing,
+        "rejected": view.start.chat[-1].rejected if view.start.chat else [],
+    }
+
+
+def run_intake(case, deps, registry):
+    service = JourneyService(registry, InMemorySaver(), deps)
+    failures_before = getattr(deps.start_writer, "failures", 0)
+    view = service.start(ProjectSpec(idea=case["idea"]))
+    snapshots = {"initial": _snapshot_start(view)}
+    events = []
+    outcome = "completed"
+    if deps.start_writer is None:
+        outcome = "mock_unavailable"
+    elif getattr(deps.start_writer, "failures", 0) > failures_before:
+        outcome = "product_error"
+    else:
+        for turn in case.get("turns", []):
+            view = service.send_start_message(
+                view.journey_id, view.start.revision, turn["message"], turn.get("focus")
+            )
+            snapshots[turn["id"]] = _snapshot_start(view)
+        # Reply only by stable field ID, and never invent an answer for the scenario.
+        for _ in range(MAX_STEPS):
+            snap = _snapshot_start(view)
+            asks = snap["asks"]
+            if not asks:
+                break
+            if asks not in case.get("answers", {}):
+                events.append({"type": "unanswered_question", "field": asks})
+                outcome = "scenario_unanswered"
+                break
+            message = case["answers"][asks]
+            view = service.send_start_message(view.journey_id, view.start.revision, message, asks)
+            events.append({"type": "answered", "field": asks})
+        else:
+            outcome = "step_limit"
+    snapshots["final"] = _snapshot_start(view)
+    target = case.get("continue_to")
+    if target and outcome == "completed" and not view.start.missing:
+        view = service.act(
+            view.journey_id, view.revision, ACTION.validate_python(view.start.submit)
+        )
+        for _ in range(MAX_STEPS):
+            prompt = view.prompt or {}
+            card = prompt.get("card", {})
+            if card.get("card_id") == target:
+                snapshots[f"card:{target}"] = {
+                    "fields": {item["name"]: item for item in card.get("signals", [])}
+                }
+                break
+            if prompt.get("type") == "fork":
+                action = {"action": "plan_deploy"}
+            elif card.get("card_id") in case.get("selection", {}):
+                action = {"action": "select", "option_id": case["selection"][card["card_id"]]}
+            else:
+                events.append(
+                    {
+                        "type": "unexpected_prompt",
+                        "prompt": prompt.get("type"),
+                        "card_id": card.get("card_id"),
+                    }
+                )
+                outcome = "scenario_unanswered"
+                break
+            view = service.act(view.journey_id, view.revision, ACTION.validate_python(action))
+        else:
+            outcome = "step_limit"
+    if view.start and view.start.missing and outcome == "completed":
+        outcome = "scenario_unanswered"
+    checks = evaluate(case["checks"], snapshots)
+    # A question about a field already filled at that checkpoint is redundant.
+    for name, snap in snapshots.items():
+        asks = snap.get("asks")
+        if asks and snap["fields"].get(asks, {}).get("value") is not None:
+            checks.append({"id": "redundant_question", "checkpoint": name, "status": "fail"})
+    if outcome == "mock_unavailable":
+        for check in checks:
+            check["status"] = "not_run"
+    return {
+        "journey_id": str(view.journey_id),
+        "outcome": outcome,
+        "snapshots": snapshots,
+        "events": events,
+        "checks": checks,
+    }
+
+
+class CaseTimeout(BaseException):
+    pass
+
+
+@contextmanager
+def deadline(seconds):
+    # The CLI runs on the main thread on Linux/WSL. Interrupt the call, not a detached thread.
+    previous = signal.signal(signal.SIGALRM, lambda *_: (_ for _ in ()).throw(CaseTimeout()))
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+
+
+def run_case(
+    case: dict, mode: str, deps: JourneyDeps, registry: Registry, timeout_s: float = 600
+) -> dict[str, Any]:
+    if mode not in {"flow", "blank", "intake"}:
+        raise ValueError("Unknown evaluation mode")
     lines = _Lines()
     logger = logging.getLogger("app.journey")
+    old_level = logger.level
     logger.addHandler(lines)
     logger.setLevel(logging.INFO)
-    calls_before = getattr(deps.designer, "calls", 0)
+    counter = CountingDesigner(deps.designer) if deps.designer else None
+    if counter:
+        deps = replace(deps, designer=counter)
+    if deps.start_writer and not isinstance(deps.start_writer, CountingStartWriter):
+        deps = replace(deps, start_writer=CountingStartWriter(deps.start_writer))
+    start_before = getattr(deps.start_writer, "calls", 0)
     started = time.perf_counter()
     try:
-        body = run_flow(case, deps, registry) if mode == "flow" else run_blank(case, deps, registry)
+        with deadline(timeout_s):
+            execute = {"flow": run_flow, "blank": run_blank, "intake": run_intake}[mode]
+            body = execute(case, deps, registry)
+    except ScenarioUnanswered as exc:
+        body = {"outcome": "scenario_unanswered", "reason": str(exc)}
+    except CallBudgetExceeded:
+        body = {"outcome": "budget_exhausted"}
+    except (CaseTimeout, TimeoutError):
+        body = {"outcome": "timeout"}
+    except Exception as exc:
+        body = {
+            "outcome": "product_error",
+            "error_type": type(exc).__name__,
+            "error_code": getattr(exc, "code", None),
+        }
     finally:
         logger.removeHandler(lines)
+        logger.setLevel(old_level)
+    findings = log_findings(lines.lines)
+    calls = counter.calls if counter else 0
     return {
         "case": case["id"],
         "case_status": case["status"],
         "mode": mode,
-        "seconds": round(time.perf_counter() - started, 1),
-        "design_calls": getattr(deps.designer, "calls", 0) - calls_before,
-        **log_findings(lines.lines),
+        "family": case.get("family", case["id"]),
+        "evaluation": "intake" if mode == "intake" else "design",
+        "seconds": round(time.perf_counter() - started, 3),
+        "design_calls": calls,
+        "single_draft_pass": body.get("design", {}).get("source") == "model"
+        and calls == 1
+        and not any(findings.values()),
+        "start_calls": getattr(deps.start_writer, "calls", 0) - start_before,
+        "start_attempts": getattr(deps.start_writer, "attempts", [])[start_before:],
+        "http_attempts": None,
+        "human_review": [
+            {"criterion": item, "status": "pending"} for item in case.get("human_review", [])
+        ],
+        **findings,
         **body,
     }
 
@@ -219,19 +452,17 @@ def _row(cells: list[Any]) -> str:
 def summarize(results: list[dict], meta: dict) -> str:
     lines = [f"# 평가 실행 {meta['stamp']}", ""]
     lines += [f"- {key}: {value}" for key, value in meta.items() if key != "stamp"]
-    head = ["사례", "흐름", "회수", "맞춤 설계", "첫 시도 통과", "분기 있음", "반복 한도 있음",
+    head = ["사례", "흐름", "회수", "맞춤 설계", "단일 draft 통과", "분기 있음", "반복 한도 있음",
             "조건 연결선(중앙값)", "걸린 규칙", "429", "초(중앙값)"]  # fmt: skip
     lines += ["", _row(head), _row(["---"] * len(head))]
     groups: dict[tuple, list[dict]] = {}
     for result in results:
+        if result["mode"] == "intake":
+            continue
         groups.setdefault((result["case"], result["mode"]), []).append(result)
     for (case_id, mode), runs in groups.items():
         model = [r["design"] for r in runs if r.get("design", {}).get("source") == "model"]
-        first = sum(
-            1
-            for r in runs
-            if r.get("design", {}).get("source") == "model" and not r["failed_rules"]
-        )
+        first = sum(1 for r in runs if r.get("single_draft_pass"))
         rules = Counter(rule for r in runs for attempt in r["failed_rules"] for rule in attempt)
         top = ", ".join(f"{rule} {count}" for rule, count in rules.most_common(4)) or "-"
         lines.append(
@@ -251,7 +482,7 @@ def summarize(results: list[dict], meta: dict) -> str:
                 ]
             )
         )
-    flows = [r for r in results if r["mode"] == "flow"]
+    flows = [r for r in results if r["mode"] == "flow" and "skipped" in r]
     if flows:
         head = [
             "사례",
@@ -278,6 +509,27 @@ def summarize(results: list[dict], meta: dict) -> str:
                     ]
                 )  # fmt: skip
             )
+    lines += [
+        "",
+        "단일 draft 통과는 designer.draft 1회에 성공한 결과다. SDK 내부 HTTP 재시도는 미계측이다.",
+        "mock은 파이프라인 검증이며 모델 품질 결과가 아니다. 같은 family의 변형은 새 사용자 시나리오가 아니다.",
+    ]
+    head = ["평가", "사례", "family", "완료 상태", "자동 pass/fail/not_run", "사람 평가 대기"]
+    lines += ["", _row(head), _row(["---"] * len(head))]
+    for r in results:
+        counts = Counter(c["status"] for c in r.get("checks", []))
+        lines.append(
+            _row(
+                [
+                    r.get("evaluation"),
+                    r["case"],
+                    r.get("family"),
+                    r.get("outcome"),
+                    "/".join(str(counts[k]) for k in ("pass", "fail", "not_run")),
+                    len(r.get("human_review", [])),
+                ]
+            )
+        )
     lines += ["", "횟수가 작아 1~2회 차이는 잡음으로 본다. 원자료는 같은 폴더의 results.json."]
     return "\n".join(lines) + "\n"
 
@@ -301,43 +553,103 @@ def main(argv: list[str] | None = None) -> Path:
     parser.add_argument("--budget", type=int, default=DEFAULT_BUDGET, help="max design calls")
     parser.add_argument("--gap", type=float, help="seconds between runs")
     parser.add_argument("--label", default="")
+    parser.add_argument(
+        "--intake-budget",
+        type=int,
+        default=20,
+        help="max start writer calls across this evaluation; SDK retries excluded",
+    )
+    parser.add_argument("--mock", action="store_true", help="ignore provider/decider in .env")
+    parser.add_argument(
+        "--allow-real", action="store_true", help="explicitly enable configured APIs"
+    )
+    parser.add_argument("--timeout", type=float, default=600, help="seconds per case (Linux/WSL)")
     args = parser.parse_args(argv)
 
     overrides = {"gemini_design_model": args.design_model} if args.design_model else {}
+    if args.mock:
+        overrides.update(provider="mock", decider="mock")
     settings = Settings(**overrides)
+    if not args.allow_real and (settings.provider != "mock" or settings.decider != "mock"):
+        parser.error(
+            "Real APIs require --allow-real after checking environment and budget; use --mock"
+        )
+    if not re.fullmatch(r"[A-Za-z0-9_.-]*", args.label):
+        parser.error("label must contain only letters, digits, _, . or -")
+    if args.gap is not None and args.gap < 0:
+        parser.error("gap must be nonnegative")
+    if args.runs < 1 or args.timeout <= 0 or args.budget < 0 or args.intake_budget < 0:
+        parser.error("runs/timeout must be positive, budget nonnegative")
+    modes = args.modes.split(",")
+    if set(modes) - {"flow", "blank", "intake"}:
+        parser.error("modes: flow,blank,intake")
+
+    cases = load_cases(args.cases.split(",") if args.cases else None)
+    if not any(
+        (case.get("evaluation") == "intake") == (mode == "intake")
+        for case in cases
+        for mode in modes
+    ):
+        parser.error("No cases match the requested modes")
     registry = load_registry()
     deps = build_deps(settings, registry)
+    start_counter = (
+        CountingStartWriter(deps.start_writer, args.intake_budget) if deps.start_writer else None
+    )
+    # Intake measures extraction. Later card recommendations stay mock and cannot spend API calls.
+    intake_deps = JourneyDeps(start_writer=start_counter)
     counter = CountingDesigner(deps.designer) if deps.designer else None
     if counter:
         deps = replace(deps, designer=counter)
     gap = args.gap if args.gap is not None else (DEFAULT_GAP_S if counter else 0)
-    cases = load_cases(args.cases.split(",") if args.cases else None)
-
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
     meta = {
         "stamp": stamp,
         "commit": _commit(),
+        "working_tree_dirty": bool(
+            subprocess.run(
+                # Untracked files such as new reports do not change what ran.
+                ["git", "status", "--porcelain", "--untracked-files=no"],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+        ),
         "provider": settings.provider,
         "decider": f"{settings.decider} ({settings.jev_route})",
-        "design_model": settings.gemini_design_model or settings.gemini_model or "-",
+        "design_model": design_model(settings),
         "prompt": DESIGN_VERSION,
         "runs": args.runs,
         "label": args.label or "-",
     }
     results: list[dict] = []
     for case in cases:
-        for mode in args.modes.split(","):
+        for mode in modes:
+            if (case.get("evaluation") == "intake") != (mode == "intake"):
+                continue
             for run in range(1, args.runs + 1):
-                if counter and counter.calls + CALLS_PER_DESIGN > args.budget:
+                if mode != "intake" and counter and counter.calls + CALLS_PER_DESIGN > args.budget:
                     meta["stopped"] = f"설계 호출 예산 {args.budget}회에 닿아 멈춤"
                     break
                 if results and gap:
                     time.sleep(gap)
-                result = {"run": run, **run_case(case, mode, deps, registry)}
+                result = {
+                    "run": run,
+                    **run_case(
+                        case,
+                        mode,
+                        intake_deps if mode == "intake" else deps,
+                        registry,
+                        args.timeout,
+                    ),
+                }
                 results.append(result)
                 source = result.get("design", {}).get("source", "-")
                 print(f"{case['id']} {mode} {run}: {source} {result['seconds']}s", flush=True)
     meta["design_calls"] = counter.calls if counter else 0
+    meta["start_calls"] = start_counter.calls if start_counter else 0
+    meta["intake_budget"] = args.intake_budget
+    meta["intake_card_dependencies"] = "mock (extraction only)"
 
     out = REPORTS_DIR / (f"{stamp}-{args.label}" if args.label else stamp)
     out.mkdir(parents=True, exist_ok=True)
