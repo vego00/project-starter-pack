@@ -333,7 +333,8 @@ export function StartChat({
   const composer = useRef<HTMLFormElement>(null);
   const boxTop = useRef<number | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
-  const reading = sent !== null && start === null;
+  // Tied to `busy`, so a failed start shows the start screen in the same render as the error.
+  const reading = sent !== null && start === null && busy;
   const started = start !== null;
   const shown = started || reading;
   const formOnly = start?.mode === "form";
@@ -352,8 +353,8 @@ export function StartChat({
 
   useEffect(() => {
     // A failed start goes back to the start screen with the idea still in the box.
-    if (reading && !busy) setSent(null);
-  }, [reading, busy]);
+    if (sent && !start && !busy) setSent(null);
+  }, [sent, start, busy]);
 
   useLayoutEffect(() => {
     // The box slides from the middle to the bottom instead of jumping there.

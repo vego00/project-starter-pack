@@ -1895,3 +1895,111 @@ describe("project list", () => {
     ).toBeVisible();
   });
 });
+
+describe("fork after the agent design", () => {
+  const fork = {
+    type: "fork",
+    remaining: [{ card_id: "cloud.target", title: "배포 위치" }],
+    asks: ["배포 범위", "사용자 수"],
+    error: null,
+  };
+
+  it("shows both ways on with what each one gives", async () => {
+    const { user, mock } = await startWith(
+      journey({ prompt: fork, cards: cards("decided", "pending") }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "에이전트 설계를 마쳤어요" }),
+    ).toBeVisible();
+    const end = screen.getByRole("button", { name: /여기서 끝내기/ });
+    expect(end).toHaveTextContent("빠지는 것: 배포 위치");
+    const plan = screen.getByRole("button", { name: /배포 계획 세우기/ });
+    expect(plan).toHaveTextContent("카드 1장이 더 있어요");
+    expect(plan).toHaveTextContent(
+      "카드에서 물어볼 정보: 배포 범위, 사용자 수",
+    );
+    expect(screen.getByText("여기서 끝낼까요?")).toBeVisible();
+
+    await user.click(end);
+
+    expect(bodyOf(mock.mock.calls[1]).action).toEqual({ action: "end_here" });
+  });
+
+  it("goes on to the deployment cards", async () => {
+    const { user, mock } = await startWith(
+      journey({ prompt: fork, cards: cards("decided", "pending") }),
+    );
+
+    await user.click(
+      await screen.findByRole("button", { name: /배포 계획 세우기/ }),
+    );
+
+    expect(bodyOf(mock.mock.calls[1]).action).toEqual({
+      action: "plan_deploy",
+    });
+  });
+
+  it("can still change an agent decision at the fork", async () => {
+    const { user, mock } = await startWith(
+      journey({ prompt: fork, cards: cards("decided", "pending") }),
+    );
+
+    await openStage(user, /^에이전트 설계 \d/);
+    await user.click(
+      screen.getByRole("button", { name: "agent.hitl 제목 다시 고르기" }),
+    );
+
+    expect(bodyOf(mock.mock.calls[1]).action).toEqual({
+      action: "revise",
+      card_id: "agent.hitl",
+    });
+  });
+
+  it("lets a journey that ended there plan the rest later", async () => {
+    const { user, mock } = await startWith(
+      journey({
+        status: "completed",
+        prompt: null,
+        cards: cards("decided", "unplanned"),
+        can_reopen: true,
+        can_plan_deploy: true,
+      }),
+    );
+
+    expect(
+      await screen.findByText("에이전트 설계까지 결정 1개를 마쳤어요"),
+    ).toBeVisible();
+    await user.click(
+      screen.getByRole("button", {
+        name: "배포 계획 이어서 세우기 (카드 1장)",
+      }),
+    );
+
+    expect(bodyOf(mock.mock.calls[1]).action).toEqual({
+      action: "plan_deploy",
+    });
+  });
+
+  it("plans from one undecided card in the stage strip", async () => {
+    const { user, mock } = await startWith(
+      journey({
+        status: "completed",
+        prompt: null,
+        cards: cards("decided", "unplanned"),
+        can_reopen: true,
+        can_plan_deploy: true,
+      }),
+    );
+
+    await openStage(user, /^시스템 구성 \d/);
+    await user.click(
+      screen.getByRole("button", { name: "cloud.target 제목 이어서 정하기" }),
+    );
+
+    expect(bodyOf(mock.mock.calls[1]).action).toEqual({
+      action: "plan_deploy",
+      card_id: "cloud.target",
+    });
+  });
+});

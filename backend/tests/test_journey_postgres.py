@@ -66,7 +66,10 @@ def test_journey_continues_across_processes_until_completed():
     assert step(journey_id, "resume", select("pipeline"))["card_id"] == "agent.hitl"
     assert step(journey_id, "resume", select("question"))["card_id"] == "model.provider"
 
-    walk = ("gemini", "postgres", "pgvector", "postgres", "sync", "none", "external_api")
+    # The fork after the agent design is answered in a new process too (ADR-024).
+    assert step(journey_id, "resume", select("gemini"))["type"] == "fork"
+    assert step(journey_id, "resume", {"action": "plan_deploy"})["card_id"] == "data.primary_db"
+    walk = ("postgres", "pgvector", "postgres", "sync", "none", "external_api")
     for option_id in walk:
         result = step(journey_id, "resume", select(option_id))
     assert result["card_id"] == "cloud.target"

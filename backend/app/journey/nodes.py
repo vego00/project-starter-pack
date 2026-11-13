@@ -14,7 +14,7 @@ from pydantic import ValidationError
 from app.journey.blueprint import OPTION_ICONS
 from app.journey.composers.summary import ARTIFACT_KEY, compose_summary
 from app.journey.constraints import displaced, evaluate, preview, revived
-from app.journey.controller import next_card
+from app.journey.controller import next_card, split_at_fork
 from app.journey.deciders.base import DeciderQuestion, judge, judge_many
 from app.journey.design_constraints import BLOCKING_CARDS, derive_design_constraints
 from app.journey.design_edit import keep_human_edits
@@ -37,6 +37,7 @@ from app.journey.start import (
 from app.journey.state import (
     CLARIFY_QUESTIONS,
     DONE_ACTION,
+    FORK_ACTION,
     GATE_ACTION,
     GCB_ACTION,
     ISSUE_ACTION,
@@ -53,11 +54,13 @@ from app.journey.state import (
     CardSignal,
     Decision,
     DeferAction,
+    EndHereAction,
     FocusAction,
     GcbDraft,
     JourneyState,
     KeepAction,
     OptionView,
+    PlanDeployAction,
     ProjectSpec,
     Recommendation,
     ReopenAction,
@@ -237,6 +240,22 @@ def _recommendation_reason(card: DecisionCard, option_id: str, decider: str) -> 
 
 
 def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
+    def _stage(card_id: str) -> int:
+        return registry.card(card_id).stage
+
+    def _plan_deploy(state: JourneyState, action: PlanDeployAction) -> dict[str, Any]:
+        _, late = split_at_fork(state.pending_cards, _stage)
+        if not late:
+            return _reject("더 정할 배포 카드가 없어요.")
+        if action.card_id is not None and action.card_id not in late:
+            return _reject("지금 고를 수 있는 카드가 아닙니다.")
+        return {
+            "plan_scope": "full",
+            "focus_card": action.card_id,
+            "gate_outcome": "advance",
+            "gate_error": None,
+        }
+
     def gcb_drafter(state: JourneyState) -> dict[str, Any]:
         idea = state.project_spec.idea
         if deps.start_writer is None:
@@ -406,8 +425,13 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
 
     def controller(state: JourneyState) -> dict[str, Any]:
         # Stage first: a decision made here can invalidate the ones in later stages.
-        pending = sorted(state.pending_cards, key=lambda card_id: registry.card(card_id).stage)
-        following = next_card(pending, state.deferred_cards, state.focus_card)
+        pending = sorted(state.pending_cards, key=_stage)
+        # Cards deferred in the agent design come back before the fork, not after every card.
+        early, _ = split_at_fork(pending, _stage)
+        if state.focus_card in pending:
+            following = state.focus_card
+        else:
+            following = next_card(early or pending, state.deferred_cards)
         current = state.editing_card or following
         update: dict[str, Any] = {"current_card_id": current}
         if current is None:
@@ -741,12 +765,43 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
             return _reject("다시 고를 카드를 지정해 주세요.")
         return _reopen(state, action.card_id)
 
+    def fork_gate(state: JourneyState) -> dict[str, Any]:
+        """After the agent design: end with the system left undecided, or plan the deployment."""
+        _, late = split_at_fork(sorted(state.pending_cards, key=_stage), _stage)
+        asks = [
+            name
+            for card_id in late
+            for name in registry.card(card_id).uses
+            if name not in state.start_fields and getattr(state.project_spec, name) is None
+        ]
+        raw = _wait_for_user(
+            {
+                "type": "fork",
+                "remaining": [
+                    {"card_id": card_id, "title": registry.card(card_id).title} for card_id in late
+                ],
+                "asks": [FIELDS[name].name_in_text for name in dict.fromkeys(asks)],
+                "error": state.gate_error,
+            }
+        )
+        try:
+            action = FORK_ACTION.validate_python(raw)
+        except ValidationError:
+            return _reject("여기서 끝낼지, 배포 계획을 세울지 골라 주세요.")
+        if isinstance(action, EndHereAction):
+            return {"plan_scope": "agent", "gate_outcome": "advance", "gate_error": None}
+        if isinstance(action, PlanDeployAction):
+            return _plan_deploy(state, action)
+        return _revise(state, action.card_id)
+
     def done_gate(state: JourneyState) -> dict[str, Any]:
         raw = _wait_for_user({"type": "done", "error": state.gate_error})
         try:
             action = DONE_ACTION.validate_python(raw)
         except ValidationError:
             return _reject("다시 고를 카드를 지정해 주세요.")
+        if isinstance(action, PlanDeployAction):
+            return _plan_deploy(state, action)
         if isinstance(action, KeepAction):
             return _keep(state, action.card_id)
         if isinstance(action, ReviseAction):
@@ -772,5 +827,6 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
         "composer": composer,
         "designer": designer,
         "issue_gate": issue_gate,
+        "fork_gate": fork_gate,
         "done_gate": done_gate,
     }

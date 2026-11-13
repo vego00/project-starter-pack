@@ -39,15 +39,23 @@ COMPLETE_SPEC = {
 
 
 class Journey:
-    """Drives a journey the way an API would: start once, then answer each interrupt."""
+    """Drives a journey the way an API would: start once, then answer each interrupt.
+    By default the fork after the agent design goes on to the deployment cards."""
 
-    def __init__(self, spec=None, deps=None, checkpointer=None):
+    def __init__(self, spec=None, deps=None, checkpointer=None, at_fork="plan"):
         self.id = uuid4()
+        self.at_fork = at_fork
         self.saver = checkpointer or InMemorySaver()
         self.graph = build_graph(REGISTRY, checkpointer=self.saver, deps=deps)
         self.config = journey_config(self.id)
         project = ProjectSpec(**(spec or COMPLETE_SPEC))
         self.result = self.graph.invoke(journey_input(self.id, project), self.config)
+        self._past_fork()
+
+    def _past_fork(self):
+        waiting = self.waiting
+        if self.at_fork == "plan" and waiting is not None and waiting["type"] == "fork":
+            self.result = self.graph.invoke(resume_command({"action": "plan_deploy"}), self.config)
 
     @property
     def waiting(self):
@@ -70,6 +78,7 @@ class Journey:
 
     def send(self, payload):
         self.result = self.graph.invoke(resume_command(payload), self.config)
+        self._past_fork()
         return self
 
     def select(self, option_id):
@@ -333,18 +342,21 @@ def test_questions_per_card_are_limited_then_decision_still_works():
     assert journey.select("none").card_id == "model.provider"
 
 
-def test_deferred_card_returns_after_the_others():
+def test_a_deferred_agent_card_returns_at_the_end_of_the_agent_design():
     journey = Journey().send({"action": "defer"})
     assert journey.card_id == "model.provider"
     assert journey.prompt["progress"]["deferred"] == 1
 
+    journey.send({"action": "accept_recommendation"})
+    # Asked again before the fork, not after the deployment cards (ADR-024).
+    assert journey.card_id == "agent.hitl"
+    journey.select("none")
     seen = []
-    while journey.card_id != "agent.hitl":
+    while journey.prompt:
         seen.append(journey.card_id)
         journey.send({"action": "accept_recommendation"})
 
-    assert seen == list(REGISTRY.card_ids[1:])
-    journey.select("none")
+    assert seen == list(REGISTRY.card_ids[2:])
     assert journey.prompt is None
     assert journey.state.status == "completed"
     assert journey.state.deferred_cards == []
@@ -559,8 +571,9 @@ def test_shipped_registry_starts_at_the_earliest_stage_and_completes():
     result = graph.invoke(journey_input(journey_id, ProjectSpec(**COMPLETE_SPEC)), config)
     assert result["__interrupt__"][0].value["card"]["card_id"] == "product.surface"
 
-    while result["__interrupt__"][0].value["type"] != "done":
-        result = graph.invoke(resume_command({"action": "accept_recommendation"}), config)
+    while (kind := result["__interrupt__"][0].value["type"]) != "done":
+        action = "plan_deploy" if kind == "fork" else "accept_recommendation"
+        result = graph.invoke(resume_command({"action": action}), config)
 
     state = JourneyState.model_validate(graph.get_state(config).values)
     assert state.status == "completed"
@@ -851,3 +864,110 @@ def test_signal_in_revise_mode_stays_editing():
     assert journey.card_id == "model.provider"
     assert journey.state.needs_review == review
     assert journey.state.project_spec.budget == "월 5만원 이하"
+
+
+# Fork after the agent design (ADR-024)
+AGENT_CARDS = ["agent.hitl", "model.provider"]
+
+
+def at_fork():
+    journey = Journey(at_fork="ask")
+    for _ in AGENT_CARDS:
+        journey.send({"action": "accept_recommendation"})
+    return journey
+
+
+def test_the_fork_follows_the_agent_design_and_lists_what_is_left():
+    journey = at_fork()
+
+    fork = journey.prompt
+    assert fork["type"] == "fork"
+    later = [c for c in REGISTRY.card_ids if c not in AGENT_CARDS]
+    assert sorted(item["card_id"] for item in fork["remaining"]) == sorted(later)
+    assert all(item["title"] for item in fork["remaining"])
+    assert set(journey.state.decisions) == set(AGENT_CARDS)
+
+
+def test_ending_at_the_fork_builds_the_design_with_the_system_left_open():
+    journey = at_fork().send({"action": "end_here"})
+
+    state = journey.state
+    assert journey.waiting["type"] == "done"
+    assert state.status == "completed"
+    assert state.plan_scope == "agent"
+    assert set(state.decisions) == set(AGENT_CARDS)
+    design = state.design.current
+    assert design is not None
+    open_ones = [u for u in design.unknowns if u.text.startswith("아직 정하지 않은 결정")]
+    assert open_ones and not any(u.blocks_confirmation for u in open_ones)
+
+
+def test_after_ending_the_deployment_cards_can_still_be_planned():
+    journey = at_fork().send({"action": "end_here"}).send({"action": "plan_deploy"})
+
+    assert journey.prompt["type"] == "decision"
+    seen = []
+    while journey.prompt:
+        assert journey.prompt["type"] == "decision"
+        seen.append(journey.card_id)
+        journey.send({"action": "accept_recommendation"})
+    assert set(journey.state.decisions) | set(journey.state.implied) == set(REGISTRY.card_ids)
+    assert journey.state.plan_scope == "full"
+
+
+def test_planning_from_the_end_can_start_at_a_chosen_card():
+    journey = at_fork().send({"action": "end_here"})
+    target = journey.state.pending_cards[-1]
+
+    journey.send({"action": "plan_deploy", "card_id": target})
+
+    assert journey.card_id == target
+
+
+def test_planning_rejects_a_card_that_is_not_a_deployment_card():
+    journey = at_fork().send({"action": "plan_deploy", "card_id": "agent.hitl"})
+
+    assert journey.prompt["type"] == "fork"
+    assert journey.prompt["error"]
+
+
+def test_choosing_to_plan_asks_the_deployment_cards_without_a_second_fork():
+    journey = at_fork().send({"action": "plan_deploy"})
+
+    while journey.prompt:
+        assert journey.prompt["type"] == "decision"
+        journey.send({"action": "accept_recommendation"})
+    assert journey.state.status == "completed"
+
+
+def test_an_agent_decision_can_be_revised_at_the_fork_and_the_fork_returns():
+    journey = at_fork().send({"action": "revise", "card_id": "agent.hitl"})
+    assert journey.card_id == "agent.hitl"
+    held = journey.state.decisions["agent.hitl"].option_id
+
+    journey.select(held)
+
+    assert journey.prompt["type"] == "fork"
+
+
+@pytest.mark.parametrize("payload", [{"action": "select", "option_id": "x"}, {}, "end"])
+def test_anything_else_at_the_fork_asks_again(payload):
+    journey = at_fork().send(payload)
+
+    assert journey.prompt["type"] == "fork"
+    assert journey.prompt["error"]
+    assert journey.state.plan_scope is None
+
+
+def test_a_system_card_decided_early_means_the_fork_is_not_shown():
+    # Like journeys saved before the fork existed: a decided system card passed it already.
+    journey = Journey(at_fork="ask")
+    target = next(c for c in REGISTRY.card_ids if c not in AGENT_CARDS)
+    journey.send({"action": "focus", "card_id": target})
+    assert journey.card_id == target
+    journey.send({"action": "accept_recommendation"})
+
+    while journey.prompt:
+        assert journey.prompt["type"] == "decision"
+        journey.send({"action": "accept_recommendation"})
+    assert journey.state.status == "completed"

@@ -79,7 +79,12 @@ class Run:
     def answer_all(self, choices=None):
         """Answers every card asked, in order, and returns the cards that were asked."""
         asked = []
-        while self.card_id and len(asked) < 30:
+        while len(asked) < 30:
+            if self.view.prompt and self.view.prompt["type"] == "fork":
+                self.send(action="plan_deploy")
+                continue
+            if not self.card_id:
+                break
             card = self.view.prompt["card"]
             asked.append(card["card_id"])
             option_id = (choices or {}).get(card["card_id"]) or card["recommendation"]["option_id"]

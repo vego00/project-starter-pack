@@ -70,6 +70,15 @@ def select(client, view, option_id):
     return response.json()
 
 
+def select_each(client, view, option_ids):
+    """Picks each option in turn, going on to the deployment cards at the fork."""
+    for option_id in option_ids:
+        if view["prompt"]["type"] == "fork":
+            view = act(client, view, action="plan_deploy").json()
+        view = select(client, view, option_id)
+    return view
+
+
 def error_code(response):
     return response.json()["error"]["code"]
 
@@ -78,6 +87,9 @@ def test_full_journey_through_the_api(client):
     view = start(client)
     seen = []
     while view["prompt"]:
+        if view["prompt"]["type"] == "fork":
+            view = act(client, view, action="plan_deploy").json()
+            continue
         card = view["prompt"]["card"]
         seen.append(card["card_id"])
         view = select(client, view, card["recommendation"]["option_id"])
@@ -226,6 +238,9 @@ def test_actions_must_match_the_current_prompt(client):
 def test_finished_journey_rejects_actions(client):
     view = start(client)
     while view["prompt"]:
+        if view["prompt"]["type"] == "fork":
+            view = act(client, view, action="plan_deploy").json()
+            continue
         view = select(client, view, view["prompt"]["card"]["recommendation"]["option_id"])
 
     response = act(client, view, action="defer")
@@ -245,8 +260,7 @@ def test_unknown_option_is_explained_on_the_same_card(client):
 
 def test_issue_flow_through_the_api(client):
     view = start(client)
-    for option_id in ("none", "gemini", "postgres", "sync", "none", "external_api"):
-        view = select(client, view, option_id)
+    view = select_each(client, view, ("none", "gemini", "postgres", "sync", "none", "external_api"))
     view = act(client, view, action="reopen", card_id="model.provider").json()
     view = select(client, view, "ollama")
     view = select(client, view, "local")
@@ -265,8 +279,9 @@ def test_issue_flow_through_the_api(client):
 
 def test_warnings_are_listed_on_the_finished_journey(client):
     view = start(client)
-    for option_id in ("none", "gemini", "postgres", "sync", "none", "ollama", "gcp"):
-        view = select(client, view, option_id)
+    view = select_each(
+        client, view, ("none", "gemini", "postgres", "sync", "none", "ollama", "gcp")
+    )
 
     assert view["status"] == "completed"
     # Gemini with Ollama serving on GCP: self-serving on cloud, and an API provider that self-serves.
@@ -280,6 +295,9 @@ def finish(client, spec=SPEC):
         view = act(client, view, action="clarify", answers={}).json()
         view = act(client, view, action="clarify", answers={}).json()
     while view["prompt"]:
+        if view["prompt"]["type"] == "fork":
+            view = act(client, view, action="plan_deploy").json()
+            continue
         view = select(client, view, view["prompt"]["card"]["recommendation"]["option_id"])
     return view
 
@@ -310,8 +328,7 @@ def test_summary_of_unknown_journey_is_not_found(client):
 
 def test_summary_is_rewritten_after_an_issue_is_fixed(client):
     view = start(client)
-    for option_id in ("none", "gemini", "postgres", "sync", "none", "external_api"):
-        view = select(client, view, option_id)
+    view = select_each(client, view, ("none", "gemini", "postgres", "sync", "none", "external_api"))
     view = act(client, view, action="reopen", card_id="model.provider").json()
     view = select(client, select(client, view, "ollama"), "local")
     url = f"{JOURNEYS}/{view['journey_id']}/summary.md"
