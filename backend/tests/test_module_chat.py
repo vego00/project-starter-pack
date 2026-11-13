@@ -111,6 +111,8 @@ def finish(client):
         prompt = view["prompt"]
         if prompt["type"] == "clarify":
             action = {"action": "clarify", "answers": {}}
+        elif prompt["type"] == "fork":
+            action = {"action": "plan_deploy"}
         else:
             action = {"action": "accept_recommendation"}
         response = client.post(

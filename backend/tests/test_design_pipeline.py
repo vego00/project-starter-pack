@@ -518,6 +518,8 @@ def run_journey(client, idea=IDEA):
             }
         elif prompt["type"] == "clarify":
             action = {"action": "clarify", "answers": {}}
+        elif prompt["type"] == "fork":
+            action = {"action": "plan_deploy"}
         else:
             action = {"action": "accept_recommendation"}
         before = view

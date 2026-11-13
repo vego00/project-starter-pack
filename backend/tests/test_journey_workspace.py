@@ -70,7 +70,10 @@ def recommended(card):
 
 
 def decide_all(client, view):
-    while view["prompt"] and view["prompt"]["type"] == "decision":
+    while view["prompt"] and view["prompt"]["type"] in ("decision", "fork"):
+        if view["prompt"]["type"] == "fork":
+            view = ok(client, view, action="plan_deploy")
+            continue
         view = ok(client, view, action="select", option_id=recommended(card_of(view)))
     return view
 
@@ -870,3 +873,65 @@ def test_only_the_edge_that_loops_back_states_the_limit(client):
 
     assert back == "수정 요청 (최대 2회)"
     assert forward == "검토"
+
+
+# Fork after the agent design (ADR-024)
+def to_fork(client):
+    view = start(client)
+    while view["prompt"]["type"] == "decision":
+        view = ok(client, view, action="select", option_id=recommended(card_of(view)))
+    return view
+
+
+def test_the_fork_comes_after_the_last_agent_stage_card(client):
+    view = to_fork(client)
+
+    assert view["prompt"]["type"] == "fork"
+    assert view["status"] == "in_progress"
+    decided = {c["card_id"] for c in view["cards"] if c["state"] in ("decided", "implied")}
+    assert decided and all(status(view, c)["stage"] <= 4 for c in decided)
+    remaining = {item["card_id"] for item in view["prompt"]["remaining"]}
+    assert remaining and all(status(view, c)["stage"] >= 5 for c in remaining)
+
+
+def test_ending_at_the_fork_gives_a_package_with_the_system_left_open(client):
+    view = ok(client, to_fork(client), action="end_here")
+
+    assert view["status"] == "completed"
+    assert view["prompt"] is None
+    assert view["can_plan_deploy"] is True
+    unplanned = [c for c in view["cards"] if c["state"] == "unplanned"]
+    assert unplanned and all(c["stage"] >= 5 for c in unplanned)
+    archive = client.get(f"{JOURNEYS}/{view['journey_id']}/package.zip")
+    assert archive.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(archive.content)) as package:
+        infra = package.read("starter-pack/docs/infrastructure.md").decode("utf-8")
+    assert "아직 정하지 않았어요" in infra
+
+
+def test_planning_after_the_end_opens_the_chosen_deployment_card(client):
+    view = ok(client, to_fork(client), action="end_here")
+    target = next(c for c in view["cards"] if c["state"] == "unplanned")["card_id"]
+
+    view = ok(client, view, action="plan_deploy", card_id=target)
+
+    assert card_of(view)["card_id"] == target
+    assert view["can_plan_deploy"] is False
+    view = decide_all(client, view)
+    assert view["status"] == "completed"
+    assert not [c for c in view["cards"] if c["state"] in ("unplanned", "pending")]
+
+
+def test_planning_is_refused_when_nothing_is_left_to_plan(client):
+    view = decide_all(client, start(client))
+
+    response = act(client, view, action="plan_deploy")
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "plan_deploy_rejected"
+
+
+def test_ending_is_only_possible_at_the_fork(client):
+    response = act(client, start(client), action="end_here")
+
+    assert response.json()["error"]["code"] == "action_not_allowed"

@@ -229,6 +229,8 @@ class JourneyState(BaseModel):
     editing_card: CardId | None = None
     # Decisions in later stages made before an earlier stage changed.
     needs_review: list[CardId] = []
+    # Chosen at the fork after the agent stage (ADR-024): "agent" ends there, None is not asked yet.
+    plan_scope: Literal["agent", "full"] | None = None
     advice: Advice | None = None
     recommendation: Recommendation | None = None
     evidence: list[Evidence] = []
@@ -326,6 +328,19 @@ class SignalAction(_Action):
     values: list[Annotated[str, Field(max_length=200)]] = Field(default=[], max_length=20)
 
 
+class EndHereAction(_Action):
+    """Ends at the agent design; the system cards stay undecided (ADR-024)."""
+
+    action: Literal["end_here"]
+
+
+class PlanDeployAction(_Action):
+    """Goes on to the system cards, from `card_id` when given."""
+
+    action: Literal["plan_deploy"]
+    card_id: CardId | None = None
+
+
 class GcbAction(_Action):
     action: Literal["gcb"]
     goal: str = Field(default="", max_length=MAX_GCB_CHARS)
@@ -362,6 +377,8 @@ JourneyAction = Annotated[
     | FocusAction
     | KeepAction
     | SignalAction
+    | EndHereAction
+    | PlanDeployAction
     | ClarifyAction
     | GcbAction,
     Field(discriminator="action"),
@@ -369,6 +386,12 @@ JourneyAction = Annotated[
 GCB_ACTION = TypeAdapter(GcbAction)
 GATE_ACTION = TypeAdapter(GateAction)
 ISSUE_ACTION = TypeAdapter(ReopenAction)
+FORK_ACTION = TypeAdapter(
+    Annotated[EndHereAction | PlanDeployAction | ReviseAction, Field(discriminator="action")]
+)
 DONE_ACTION = TypeAdapter(
-    Annotated[ReopenAction | ReviseAction | KeepAction, Field(discriminator="action")]
+    Annotated[
+        ReopenAction | ReviseAction | KeepAction | PlanDeployAction,
+        Field(discriminator="action"),
+    ]
 )

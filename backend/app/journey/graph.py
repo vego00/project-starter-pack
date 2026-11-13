@@ -9,6 +9,7 @@ from langgraph.graph import START, StateGraph
 from langgraph.types import Checkpointer
 from pydantic import BaseModel
 
+from app.journey.controller import deploy_planned, split_at_fork
 from app.journey.nodes import Node, build_nodes
 from app.journey.services import JourneyDeps
 from app.journey.state import JourneyState, NodeEvent, ProjectSpec
@@ -57,7 +58,8 @@ NODE_WRITES: dict[str, set[str]] = {
     "composer": {"artifacts"},
     "designer": {"design"},
     "issue_gate": GATE_WRITES,
-    "done_gate": GATE_WRITES,
+    "fork_gate": {"plan_scope", "focus_card", "editing_card", "gate_outcome", "gate_error"},
+    "done_gate": GATE_WRITES | {"plan_scope"},
 }
 
 
@@ -107,11 +109,21 @@ def _after_clarify(state: JourneyState) -> str:
     return "card_selector" if state.clarify_passed else "clarify_question"
 
 
-def _after_engine(state: JourneyState) -> str:
-    if state.pending_cards or state.editing_card:
-        return "controller"
-    # Nothing changed, so a finished design is not generated again.
-    return "done_gate" if state.gate_outcome == "unchanged" else "reviewer"
+def _after_engine_for(registry: Registry):
+    def stage_of(card_id: str) -> int | None:
+        return registry.card(card_id).stage if card_id in registry.card_ids else None
+
+    def route(state: JourneyState) -> str:
+        early, late = split_at_fork(state.pending_cards, lambda c: registry.card(c).stage)
+        if early or state.editing_card:
+            return "controller"
+        if late and state.plan_scope != "agent":
+            planned = deploy_planned(state.plan_scope, state.decisions, stage_of)
+            return "controller" if planned else "fork_gate"
+        # Nothing changed, so a finished design is not generated again.
+        return "done_gate" if state.gate_outcome == "unchanged" else "reviewer"
+
+    return route
 
 
 def _after_controller(state: JourneyState) -> str | list[str]:
@@ -130,6 +142,10 @@ def _after_review(state: JourneyState) -> str:
 
 def _after_issue(state: JourneyState) -> str:
     return "issue_gate" if state.gate_outcome == "invalid" else "constraint_engine"
+
+
+def _after_fork(state: JourneyState) -> str:
+    return "fork_gate" if state.gate_outcome == "invalid" else "constraint_engine"
 
 
 def _after_done(state: JourneyState) -> str:
@@ -153,8 +169,11 @@ def build_graph(registry: Registry, *, checkpointer: Checkpointer, deps: Journey
     graph.add_edge("clarify_question", "intake")
     graph.add_edge("card_selector", "constraint_engine")
     graph.add_conditional_edges(
-        "constraint_engine", _after_engine, ["controller", "reviewer", "done_gate"]
+        "constraint_engine",
+        _after_engine_for(registry),
+        ["controller", "fork_gate", "reviewer", "done_gate"],
     )
+    graph.add_conditional_edges("fork_gate", _after_fork, ["fork_gate", "constraint_engine"])
     graph.add_conditional_edges("controller", _after_controller, [*PREPARERS, "present"])
     graph.add_edge(["advisor", "recommender", "retriever"], "present")
     graph.add_edge("present", "decision_gate")

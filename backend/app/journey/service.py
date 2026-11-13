@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from app.journey.blueprint import Blueprint, BlueprintExample, blueprint_examples, build_blueprint
 from app.journey.composers.summary import ARTIFACT_KEY
+from app.journey.controller import AGENT_STAGE
 from app.journey.design import DesignState, ServiceDesign
 from app.journey.design_constraints import derive_design_constraints
 from app.journey.design_edit import (
@@ -52,11 +53,13 @@ from app.journey.start import (
 from app.journey.state import (
     ClarifyAction,
     Decision,
+    EndHereAction,
     GcbAction,
     JourneyAction,
     JourneyState,
     KeepAction,
     NodeEvent,
+    PlanDeployAction,
     ProjectSpec,
     ReopenAction,
     ReviseAction,
@@ -88,7 +91,8 @@ class CardStatus(BaseModel):
     stage: int
     title: str
     question: str
-    state: Literal["decided", "implied", "deferred", "current", "pending", "skipped"]
+    # "unplanned": a system card left undecided by ending at the agent design (ADR-024).
+    state: Literal["decided", "implied", "deferred", "current", "pending", "skipped", "unplanned"]
     needs_review: bool = False
     editing: bool = False
     option_id: str | None = None
@@ -172,6 +176,8 @@ class JourneyView(BaseModel):
     start: StartView | None = None
     # Finished journeys made before the end wait existed cannot change a decision.
     can_reopen: bool = False
+    # Ended at the agent design with system cards left: they can still be planned.
+    can_plan_deploy: bool = False
 
 
 def _pending_prompt(snapshot: StateSnapshot) -> dict[str, Any] | None:
@@ -189,14 +195,16 @@ def _resume_payload(action: JourneyAction) -> Any:
 
 def _allowed(prompt_type: str, action: JourneyAction) -> bool:
     if prompt_type == "done":
-        return isinstance(action, ReopenAction | ReviseAction | KeepAction)
+        return isinstance(action, ReopenAction | ReviseAction | KeepAction | PlanDeployAction)
+    if prompt_type == "fork":
+        return isinstance(action, EndHereAction | PlanDeployAction | ReviseAction)
     if prompt_type == "clarify":
         return isinstance(action, ClarifyAction)
     if prompt_type == "gcb":
         return isinstance(action, GcbAction)
     if prompt_type == "issues":
         return isinstance(action, ReopenAction)
-    return not isinstance(action, ClarifyAction | GcbAction)
+    return not isinstance(action, ClarifyAction | GcbAction | EndHereAction | PlanDeployAction)
 
 
 class JourneyService:
@@ -231,7 +239,8 @@ class JourneyService:
             prompt = _pending_prompt(snapshot)
             finished = prompt is None or prompt["type"] == "done"
             if finished and not (
-                prompt is not None and isinstance(action, ReopenAction | ReviseAction | KeepAction)
+                prompt is not None
+                and isinstance(action, ReopenAction | ReviseAction | KeepAction | PlanDeployAction)
             ):
                 raise JourneyError(409, "journey_finished", "이미 끝난 여정이에요.")
             if not _allowed(prompt["type"], action):
@@ -240,6 +249,8 @@ class JourneyService:
                 )
             if prompt["type"] == "done" and isinstance(action, ReopenAction | ReviseAction):
                 self._check_reopen(JourneyState.model_validate(snapshot.values), action)
+            if prompt["type"] == "done" and isinstance(action, PlanDeployAction):
+                self._check_plan_deploy(JourneyState.model_validate(snapshot.values), action)
             config = journey_config(journey_id)
             self._graph.invoke(resume_command(_resume_payload(action)), config)
             return self._view(journey_id, self._snapshot(journey_id))
@@ -346,6 +357,20 @@ class JourneyService:
         if action.card_id not in state.decisions:
             raise JourneyError(409, "reopen_rejected", "정하지 않은 카드는 다시 고를 수 없어요.")
 
+    def _unplanned(self, state: JourneyState) -> list[str]:
+        if state.plan_scope != "agent":
+            return []
+        return [
+            card_id
+            for card_id in state.pending_cards
+            if self._registry.card(card_id).stage > AGENT_STAGE
+        ]
+
+    def _check_plan_deploy(self, state: JourneyState, action: PlanDeployAction) -> None:
+        unplanned = self._unplanned(state)
+        if not unplanned or (action.card_id is not None and action.card_id not in unplanned):
+            raise JourneyError(409, "plan_deploy_rejected", "더 정할 배포 카드가 없어요.")
+
     def _lock(self, journey_id: UUID) -> Any:
         with self._locks_guard:
             lock = self._locks.get(journey_id)
@@ -368,6 +393,7 @@ class JourneyService:
     def _card_statuses(self, state: JourneyState) -> list[CardStatus]:
         decided: dict[str, Decision] = state.all_decisions
         skipped = state.skipped
+        unplanned = set(self._unplanned(state))
         statuses = []
         for card in self._registry.cards:
             decision = decided.get(card.card_id)
@@ -380,6 +406,8 @@ class JourneyService:
                 kind = "deferred"
             elif card.card_id in skipped:
                 kind = "skipped"
+            elif card.card_id in unplanned:
+                kind = "unplanned"
             else:
                 kind = "pending"
             statuses.append(
@@ -413,7 +441,7 @@ class JourneyService:
         prompt = _pending_prompt(snapshot)
         waiting_at_end = prompt is not None and prompt["type"] == "done"
         status = state.status
-        if prompt is not None and prompt["type"] in ("gcb", "clarify", "decision"):
+        if prompt is not None and prompt["type"] in ("gcb", "clarify", "decision", "fork"):
             # A reopened card is asked again after the reviewer last said "completed".
             status = "in_progress"
         return JourneyView(
@@ -434,6 +462,7 @@ class JourneyService:
             module_undo_count=len(state.module_undo),
             start=self._start_view(state) if prompt and prompt["type"] == "gcb" else None,
             can_reopen=waiting_at_end,
+            can_plan_deploy=waiting_at_end and bool(self._unplanned(state)),
         )
 
     def _plan(self, state: JourneyState) -> list[ModulePlan]:
