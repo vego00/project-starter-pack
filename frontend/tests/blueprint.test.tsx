@@ -86,6 +86,7 @@ function journey(overrides: Partial<Journey> = {}): Journey {
     module_undo_count: 0,
     start: null,
     can_reopen: false,
+    can_plan_deploy: false,
     ...overrides,
   };
 }

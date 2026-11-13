@@ -1612,6 +1612,12 @@ export function BlueprintPanel({
       (card?.state === "pending" || card?.state === "deferred")
     );
   };
+  // After ending at the agent design, a blank system part plans from its card (ADR-024).
+  const canPlan = (node: BlueprintNode | undefined) =>
+    !example &&
+    !busy &&
+    journey.can_plan_deploy === true &&
+    cardOf(node)?.state === "unplanned";
 
   // The same rule as the stage strip's "다시 고르기".
   const canChange = (node: BlueprintNode | undefined) =>
@@ -1624,6 +1630,8 @@ export function BlueprintPanel({
   function openCard(node: BlueprintNode) {
     if (canFocus(node)) {
       act({ action: "focus", card_id: node.card_id! });
+    } else if (canPlan(node)) {
+      act({ action: "plan_deploy", card_id: node.card_id! });
     } else if (canChange(node)) {
       act({ action: "revise", card_id: node.card_id! });
     }
@@ -1862,7 +1870,8 @@ export function BlueprintPanel({
   const stateClass = (node: BlueprintNode) =>
     [
       selected === node.id && "selected",
-      (node.step || canFocus(node) || canChange(node)) && "editable",
+      (node.step || canFocus(node) || canPlan(node) || canChange(node)) &&
+        "editable",
       (cardOf(node)?.state === "current" || cardOf(node)?.editing) && "current",
       !example && changed.has(node.id) && "changed",
       cardOf(node)?.needs_review && "review",
@@ -2107,7 +2116,9 @@ export function BlueprintPanel({
         <StepDetail
           node={current}
           isDraft={blueprint.agent_is_draft}
-          canOpen={(target) => canFocus(target) || canChange(target)}
+          canOpen={(target) =>
+            canFocus(target) || canPlan(target) || canChange(target)
+          }
           open={openCard}
           onClose={() => setSelected(null)}
         />

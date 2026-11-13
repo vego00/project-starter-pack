@@ -102,6 +102,12 @@ def choose_surface(page: Page, option: str = "웹 화면") -> None:
     choose(page, SURFACE, option)
 
 
+def plan_deploy(page: Page) -> None:
+    """The fork after the agent design (ADR-024): go on to the deployment cards."""
+    expect(page.get_by_role("heading", name="에이전트 설계를 마쳤어요")).to_be_visible()
+    page.get_by_role("button", name=re.compile("^배포 계획 세우기")).click()
+
+
 def test_all_cards_to_completion_with_reload_and_restart(page: Page):
     shot(page, "1-start")
     start(page)
@@ -134,6 +140,7 @@ def test_all_cards_to_completion_with_reload_and_restart(page: Page):
     expect(strip.get_by_role("button", name="예산 월 5만원 이하 직접 고름")).to_be_visible()
     shot(page, "3b-card-info")
     choose(page, "어떤 경로로 LLM을 사용할까요?", "Gemini")
+    plan_deploy(page)
     choose(page, "서비스가 다루는 데이터를 어디에 저장할까요?", "PostgreSQL")
     choose(page, "문서를 의미로 검색하는 벡터 저장소를 무엇으로 할까요?", "불필요")
 
@@ -183,6 +190,34 @@ def test_all_cards_to_completion_with_reload_and_restart(page: Page):
     assert "참고 템플릿" in build
 
 
+def test_ending_at_the_agent_design_and_planning_the_rest_later(page: Page):
+    start(page)
+    skip_clarify(page)
+    choose_surface(page)
+    choose(page, "에이전트를 어떤 구조로 구성할까요?", "고정 파이프라인")
+    choose(page, "에이전트가 실행 중간에 사람의 확인을 받아야 하나요?", "승인 후 실행")
+    choose(page, "어떤 경로로 LLM을 사용할까요?", "Gemini")
+
+    expect(page.get_by_role("heading", name="에이전트 설계를 마쳤어요")).to_be_visible()
+    expect(page.get_by_text("여기서 끝낼까요?")).to_be_visible()
+    shot(page, "fork")
+    page.get_by_role("button", name=re.compile("^여기서 끝내기")).click()
+
+    expect(page.get_by_role("heading", name="설계가 준비됐어요")).to_be_visible()
+    expect(page.get_by_text("에이전트 설계까지 결정 4개를 마쳤어요")).to_be_visible()
+    shot(page, "fork-ended")
+    with page.expect_download() as download:
+        page.get_by_role("link", name="빌드 묶음 다운로드").click()
+    with zipfile.ZipFile(download.value.path()) as archive:
+        infra = archive.read("starter-pack/docs/infrastructure.md").decode("utf-8")
+    assert "아직 정하지 않았어요" in infra
+
+    page.reload()
+    page.get_by_role("button", name=re.compile("^배포 계획 이어서 세우기")).click()
+    choose(page, "서비스가 다루는 데이터를 어디에 저장할까요?", "PostgreSQL")
+    expect(page.get_by_role("heading", name="여기서 끝낼까요?")).to_be_hidden()
+
+
 def test_questions_defer_and_reopen(page: Page):
     start(page)
     skip_clarify(page)
@@ -196,6 +231,9 @@ def test_questions_defer_and_reopen(page: Page):
     expect(page.get_by_role("heading", name="어떤 경로로 LLM을")).to_be_visible()
 
     choose(page, "어떤 경로로 LLM을 사용할까요?", "Ollama 로컬")
+
+    # A card deferred in the agent design comes back before the fork (ADR-024).
+    expect(page.get_by_role("heading", name="에이전트가 실행 중간에 사람의 확인을")).to_be_visible()
     open_stage(page, "시스템 구성")
     expect(page.get_by_text("Ollama 컨테이너 · 자동 확정")).to_be_visible()
 
@@ -257,6 +295,7 @@ def reach_data_cards(page: Page) -> None:
     choose(page, "에이전트를 어떤 구조로 구성할까요?", "고정 파이프라인")
     choose(page, "에이전트가 실행 중간에 사람의 확인을 받아야 하나요?", "승인 후 실행")
     choose(page, "어떤 경로로 LLM을 사용할까요?", "Gemini")
+    plan_deploy(page)
     choose(page, "서비스가 다루는 데이터를 어디에 저장할까요?", "PostgreSQL")
 
 

@@ -113,6 +113,13 @@ const promptSchema = z.discriminatedUnion("type", [
     issues: z.array(issueSchema),
     error: z.string().nullable(),
   }),
+  // After the agent design: end here or plan the deployment (ADR-024).
+  z.object({
+    type: z.literal("fork"),
+    remaining: z.array(z.object({ card_id: z.string(), title: z.string() })),
+    asks: z.array(z.string()),
+    error: z.string().nullable(),
+  }),
 ]);
 
 const blueprintGraphSchema = z.object({
@@ -282,6 +289,7 @@ const journeySchema = z.object({
         "current",
         "pending",
         "skipped",
+        "unplanned",
       ]),
       option_name: z.string().nullable(),
       by: z.enum(["user", "recommended", "implied"]).nullable(),
@@ -319,6 +327,7 @@ const journeySchema = z.object({
   module_undo_count: z.number().default(0),
   start: startSchema.nullable().default(null),
   can_reopen: z.boolean().optional().default(false),
+  can_plan_deploy: z.boolean().optional().default(false),
 });
 
 export type Journey = z.infer<typeof journeySchema>;
@@ -327,6 +336,7 @@ export type DecisionPrompt = Extract<Prompt, { type: "decision" }>;
 export type GcbPrompt = Extract<Prompt, { type: "gcb" }>;
 export type ClarifyPrompt = Extract<Prompt, { type: "clarify" }>;
 export type IssuesPrompt = Extract<Prompt, { type: "issues" }>;
+export type ForkPrompt = Extract<Prompt, { type: "fork" }>;
 export type CardStatus = Journey["cards"][number];
 export type Blueprint = Journey["blueprint"];
 export type BlueprintGraph = Blueprint["agent"];
@@ -354,6 +364,8 @@ export type Action =
   | { action: "revise"; card_id: string }
   | { action: "focus"; card_id: string }
   | { action: "keep"; card_id: string }
+  | { action: "end_here" }
+  | { action: "plan_deploy"; card_id?: string }
   | { action: "signal"; field: string; value?: string; values?: string[] }
   | { action: "clarify"; answers: Record<string, unknown> }
   | {

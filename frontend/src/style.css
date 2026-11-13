@@ -718,6 +718,20 @@ button.danger {
 .option .choose.primary {
   justify-self: stretch;
 }
+.fork {
+  display: grid;
+  gap: 12px;
+}
+.fork-choice {
+  display: grid;
+  gap: 8px;
+  text-align: left;
+  padding: 16px;
+  line-height: 1.6;
+}
+.fork-choice strong {
+  font-size: 1.07rem;
+}
 .badge {
   flex: none;
   background: var(--tint);

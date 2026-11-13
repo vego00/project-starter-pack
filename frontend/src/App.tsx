@@ -18,6 +18,7 @@ import {
   ClarifyForm,
   CompletedView,
   DecisionView,
+  ForkView,
   IssuesView,
   ProgressRail,
 } from "./components";
@@ -162,7 +163,7 @@ export default function App() {
 
   /** Moving to a card from the rail or the graph has to show that card. */
   function actAndShowCard(action: Action) {
-    if (["focus", "reopen", "revise"].includes(action.action)) {
+    if (["focus", "reopen", "revise", "plan_deploy"].includes(action.action)) {
       setCardOpen(true);
     }
     act(action);
@@ -254,11 +255,12 @@ export default function App() {
   const inWorkspace = journey !== null && !briefing && !finished && !listing;
   // The last decision also generates the design, the one wait that runs long.
   const makingDesign =
-    prompt?.type === "decision" &&
-    !prompt.current_option_id &&
-    ["select", "accept_recommendation"].includes(lastAction ?? "") &&
-    journey!.cards.filter((c) => !c.option_name && c.state !== "skipped")
-      .length <= 1;
+    (prompt?.type === "fork" && lastAction === "end_here") ||
+    (prompt?.type === "decision" &&
+      !prompt.current_option_id &&
+      ["select", "accept_recommendation"].includes(lastAction ?? "") &&
+      journey!.cards.filter((c) => !c.option_name && c.state !== "skipped")
+        .length <= 1);
   const panels = journey && [
     <BlueprintPanel
       key="graph"
@@ -275,6 +277,9 @@ export default function App() {
     >
       {prompt?.type === "decision" && (
         <DecisionView prompt={prompt} busy={busy} act={act} />
+      )}
+      {prompt?.type === "fork" && (
+        <ForkView prompt={prompt} busy={busy} act={act} />
       )}
       {prompt?.type === "issues" && (
         <IssuesView
@@ -387,6 +392,8 @@ export default function App() {
             <CompletedView
               journey={journey}
               onRestart={restart}
+              busy={busy}
+              onPlanDeploy={() => actAndShowCard({ action: "plan_deploy" })}
               side={side}
               onSide={setSide}
               moduleChat={

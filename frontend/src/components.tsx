@@ -6,6 +6,7 @@ import type {
   CardStatus,
   ClarifyPrompt,
   DecisionPrompt,
+  ForkPrompt,
   GcbPrompt,
   IssuesPrompt,
   Journey,
@@ -54,6 +55,7 @@ const STATE_LABEL = {
   current: "지금 결정",
   pending: "대기",
   skipped: "해당 없음",
+  unplanned: "정하지 않음",
 };
 
 export const EXAMPLES = [
@@ -620,6 +622,66 @@ export function IssuesView({
   );
 }
 
+/** After the agent design: end with the system left undecided, or plan it (ADR-024). */
+export function ForkView({
+  prompt,
+  busy,
+  act,
+}: {
+  prompt: ForkPrompt;
+  busy: boolean;
+  act: Act;
+}) {
+  const heading = useFocusedHeading();
+  const titles = prompt.remaining.map((card) => card.title).join(", ");
+  return (
+    <section className="panel fork">
+      <h2 ref={heading} tabIndex={-1}>
+        에이전트 설계를 마쳤어요
+      </h2>
+      <p className="muted">
+        배포할 계획이 없다면 여기서 끝낼 수 있어요. 끝낸 뒤에도 완료 화면에서
+        배포 계획을 이어서 세울 수 있어요.
+      </p>
+      {prompt.error && (
+        <p className="alert" role="alert">
+          {prompt.error}
+        </p>
+      )}
+      <button
+        className="fork-choice"
+        disabled={busy}
+        onClick={() => act({ action: "end_here" })}
+      >
+        <strong>여기서 끝내기</strong>
+        <span className="muted">
+          받는 것: 설계 문서, 에이전트 정의, 사람이 할 일을 적은 인프라 문서가
+          든 빌드 묶음
+        </span>
+        <span className="muted">
+          빠지는 것: {titles}. 묶음의 인프라 문서에는 ‘아직 정하지 않음’으로
+          나가요.
+        </span>
+      </button>
+      <button
+        className="fork-choice"
+        disabled={busy}
+        onClick={() => act({ action: "plan_deploy" })}
+      >
+        <strong>배포 계획 세우기</strong>
+        <span className="muted">
+          카드 {prompt.remaining.length}장이 더 있어요. {titles}.
+        </span>
+        {prompt.asks.length > 0 && (
+          <span className="muted">
+            카드에서 물어볼 정보: {prompt.asks.join(", ")}
+          </span>
+        )}
+      </button>
+    </section>
+  );
+}
+
 const NODE_KIND: Record<string, string> = {
   agent: "에이전트",
   code: "코드",
@@ -635,10 +697,14 @@ export function CompletedView({
   moduleChat,
   side = "summary",
   onSide,
+  onPlanDeploy,
+  busy = false,
 }: {
   journey: Journey;
   graph: ReactNode;
   onRestart: () => void;
+  onPlanDeploy?: () => void;
+  busy?: boolean;
   moduleChat?: ReactNode;
   side?: SideView;
   onSide?: (side: SideView) => void;
@@ -648,11 +714,16 @@ export function CompletedView({
   const heading = useFocusedHeading();
   const design = journey.design;
   const count = journey.cards.filter((card) => card.option_name).length;
+  const unplanned = journey.cards.filter((card) => card.state === "unplanned");
   return (
     <>
       <section className="done-band">
         <div className="done-title">
-          <p className="muted">결정 {count}개를 모두 마쳤어요</p>
+          <p className="muted">
+            {unplanned.length > 0
+              ? `에이전트 설계까지 결정 ${count}개를 마쳤어요`
+              : `결정 ${count}개를 모두 마쳤어요`}
+          </p>
           <h2 ref={heading} tabIndex={-1}>
             {design ? "설계가 준비됐어요" : "모든 결정을 마쳤어요"}
           </h2>
@@ -681,6 +752,11 @@ export function CompletedView({
           >
             결정 요약 다운로드
           </a>
+          {journey.can_plan_deploy && (
+            <button disabled={busy} onClick={() => onPlanDeploy?.()}>
+              배포 계획 이어서 세우기 (카드 {unplanned.length}장)
+            </button>
+          )}
           <button onClick={onRestart}>새 프로젝트 시작</button>
         </div>
       </section>
@@ -778,7 +854,9 @@ function ResultSummary({ journey }: { journey: Journey }) {
               <span className="eyebrow">{card.title}</span>
               <strong>
                 {card.option_name ??
-                  (card.state === "skipped" ? STATE_LABEL.skipped : null)}
+                  (card.state === "skipped" || card.state === "unplanned"
+                    ? STATE_LABEL[card.state]
+                    : null)}
               </strong>
               {card.by && <span className="badge">{BY_LABEL[card.by]}</span>}
               {card.by === "implied" && (
@@ -812,7 +890,9 @@ export function ProgressRail({
   ).length;
   // Skipped cards are not asked, so they are not part of what is left to decide.
   const total = journey.cards.filter((card) => card.state !== "skipped").length;
-  const canReopen = journey.prompt?.type === "decision" || journey.can_reopen;
+  const atFork = journey.prompt?.type === "fork";
+  const canReopen =
+    journey.prompt?.type === "decision" || atFork || journey.can_reopen;
   const canFocus = journey.prompt?.type === "decision";
   const stages = STAGE_NAMES.map((name, stage) => ({
     name,
@@ -841,7 +921,11 @@ export function ProgressRail({
     const reopen =
       canReopen && !card.editing ? REOPEN_LABEL[card.state] : undefined;
     const focus = canFocus ? FOCUS_LABEL[card.state] : undefined;
-    const action = reopen ?? focus;
+    const plan =
+      journey.can_plan_deploy && card.state === "unplanned"
+        ? "이어서 정하기"
+        : undefined;
+    const action = reopen ?? focus ?? plan;
     const value = (
       <span className="step-value">
         {card.option_name ??
@@ -871,7 +955,9 @@ export function ProgressRail({
                       action: card.state === "decided" ? "revise" : "reopen",
                       card_id: card.card_id,
                     }
-                  : { action: "focus", card_id: card.card_id },
+                  : plan
+                    ? { action: "plan_deploy", card_id: card.card_id }
+                    : { action: "focus", card_id: card.card_id },
               );
             }}
           >
@@ -951,6 +1037,11 @@ export function ProgressRail({
               </button>
             );
           })}
+          {atFork && (
+            <span className="stage-tab current" aria-current="step">
+              여기서 끝낼까요?
+            </span>
+          )}
         </div>
         <p className="rail-title">
           <strong>
