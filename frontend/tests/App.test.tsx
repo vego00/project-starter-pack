@@ -943,8 +943,7 @@ describe("start screen", () => {
       expect(
         await screen.findByText("잠시 후 다시 보내 주세요."),
       ).toBeVisible();
-      // The start screen comes back one render after the error shows.
-      expect(await screen.findByLabelText("프로젝트 아이디어")).toHaveValue(
+      expect(screen.getByLabelText("프로젝트 아이디어")).toHaveValue(
         "강의 자료를 찾아 답하는 서비스",
       );
       expect(screen.queryByRole("log", { name: "시작 대화" })).toBeNull();
