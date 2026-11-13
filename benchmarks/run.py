@@ -138,6 +138,8 @@ def run_flow(case: dict, deps: JourneyDeps, registry: Registry) -> dict[str, Any
             action = {"action": "gcb", **prompt["draft"]}
         elif kind == "clarify":
             action = {"action": "clarify", "answers": {}}
+        elif kind == "fork":
+            action = {"action": "plan_deploy"}
         elif kind == "decision":
             card = prompt["card"]
             asked.append(card["card_id"])
