@@ -2,7 +2,8 @@
 
 Run 1 already exists (runs/<case>-<arm>, scoring/score-<case>). This adds runs 2..N with the
 same prompts, isolation flags and models, scores each case's pair blind under fresh random IDs,
-and writes a summary. Usage: python3 repeat.py <work dir> [reps=5] [parallel=6]
+and writes a summary. Usage: python3 repeat.py <work dir> [reps=5] [parallel=6] [cases=toss,baemin,daangn]
+With a case list, the key and summary files carry the case names so parallel runners never share a file.
 """
 
 import concurrent.futures as cf
@@ -19,7 +20,8 @@ HERE = Path(__file__).parent
 WORK = Path(sys.argv[1])
 REPS = int(sys.argv[2]) if len(sys.argv) > 2 else 5
 PARALLEL = int(sys.argv[3]) if len(sys.argv) > 3 else 6
-CASES = ["toss", "baemin", "daangn"]
+CASES = sys.argv[4].split(",") if len(sys.argv) > 4 else ["toss", "baemin", "daangn"]
+TAG = "" if len(sys.argv) <= 4 else "-" + "-".join(CASES)
 SYSTEM = "You are a helpful assistant."
 FLAGS = ["--tools", "", "--strict-mcp-config", "--setting-sources", "",
          "--system-prompt", SYSTEM, "--no-session-persistence", "--output-format", "json"]
@@ -115,7 +117,7 @@ def main():
     say(f"responses to make: {len(todo)} (sonnet, {PARALLEL} at a time)")
     run_all(todo, "sonnet")
 
-    key_file = scoring / "blind-key-repeat.json"
+    key_file = scoring / f"blind-key-repeat{TAG}.json"
     key = json.loads(key_file.read_text()) if key_file.exists() else {}
     score_todo = []
     for rep in range(2, REPS + 1):
@@ -153,8 +155,8 @@ def main():
             by_arm = {k[rid]: s for rid, s in p["scores"].items() if rid in k}
             rows.append({"case": case, "rep": rep, "A": by_arm.get("A"), "B": by_arm.get("B"),
                          "first_action": p["verdict"], "verdict_line": p["verdict_line"]})
-    (WORK / "repeat-summary.json").write_text(json.dumps(rows, ensure_ascii=False, indent=2), "utf-8")
-    say("summary: repeat-summary.json")
+    (WORK / f"repeat-summary{TAG}.json").write_text(json.dumps(rows, ensure_ascii=False, indent=2), "utf-8")
+    say(f"summary: repeat-summary{TAG}.json")
     for r in rows:
         if r.get("missing"):
             print(f"{r['case']} r{r['rep']}: missing")
