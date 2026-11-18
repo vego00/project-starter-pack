@@ -1,0 +1,51 @@
+{
+  "exit_code": 0,
+  "requested_model": "sonnet",
+  "system_prompt": "You are a helpful assistant.",
+  "flags": "-p --tools '' --strict-mcp-config --setting-sources '' --no-session-persistence --output-format json",
+  "finished_at": "2026-11-18T14:58:56+09:00",
+  "claude_version": "2.1.327 (Claude Code)",
+  "sampling": "Claude Code CLI default (not configurable)",
+  "is_error": false,
+  "num_turns": 1,
+  "duration_ms": 28695,
+  "session_id": "79c6fcb4-4495-4038-9f2f-5fcbaf14639b",
+  "stop_reason": "end_turn",
+  "models_used": [
+    "claude-sonnet-5-5"
+  ],
+  "usage": {
+    "input_tokens": 2,
+    "cache_creation_input_tokens": 1157,
+    "cache_read_input_tokens": 0,
+    "output_tokens": 3541,
+    "output_tokens_details": {
+      "thinking_tokens": 1065
+    },
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 1157,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "inference_geo": "global",
+    "iterations": [
+      {
+        "input_tokens": 2,
+        "output_tokens": 3541,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 1157,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 1157
+        },
+        "type": "message"
+      }
+    ],
+    "speed": "standard",
+    "fallback_credit": null
+  }
+}
