@@ -253,14 +253,17 @@ def test_single_draft_metric_never_counts_retry_success(
     monkeypatch, calls, fields, statuses, expected
 ):
     class Designer:
-        def draft(self):
+        def draft(self, state, constraints, problems):
             pass
 
     def fake_blank(case, deps, registry):
         for _ in range(calls):
-            deps.designer.draft()
+            deps.designer.draft(None, None, [])
         return {"design": {"source": "model"}}
 
+    # This checks the counting only; recording needs a real draft and is tested on its own.
+    counting = runner.CountingDesigner
+    monkeypatch.setattr(runner, "CountingDesigner", lambda inner, record=False: counting(inner))
     monkeypatch.setattr(runner, "run_blank", fake_blank)
     monkeypatch.setattr(
         runner,
@@ -432,3 +435,145 @@ def test_card_defaults_keep_the_spec_check_passing_but_a_changed_value_fails():
 
     assert status(filled) == "pass"
     assert status(changed) == "fail"
+
+
+RESCORE = Path(__file__).resolve().parents[1] / "benchmarks" / "rescore.py"
+rescore_spec = importlib.util.spec_from_file_location("eval_rescore", RESCORE)
+rescorer = importlib.util.module_from_spec(rescore_spec)
+rescore_spec.loader.exec_module(rescorer)
+
+
+def _approval_journey():
+    from uuid import uuid4
+
+    from app.journey.state import Decision, JourneyState, ProjectSpec
+
+    choices = {"agent.topology": "pipeline", "agent.hitl": "approval", "model.provider": "gemini",
+               "data.checkpointer": "postgres", "backend.execution": "sync"}  # fmt: skip
+    return JourneyState(
+        journey_id=uuid4(),
+        project_spec=ProjectSpec(idea="피드백을 확인한 뒤에만 보낸다"),
+        decisions={
+            card_id: Decision(
+                card_id=card_id,
+                card_version=REGISTRY.card(card_id).version,
+                option_id=option,
+                by="user",
+                at="2026-11-18T00:00:00Z",
+            )
+            for card_id, option in choices.items()
+        },  # fmt: skip
+    )
+
+
+def _node(node_id, kind, inputs, outputs, tools=()):
+    fields = {"id": node_id, "kind": kind, "responsibility": f"{node_id} 역할",
+              "inputs": [{"name": n, "type": "str"} for n in inputs],
+              "outputs": [{"name": n, "type": "str"} for n in outputs],
+              "tools": list(tools), "done_when": "끝남", "on_failure": "알린다"}  # fmt: skip
+    if kind == "agent":
+        fields["model"] = {"capability": "답변", "provider_scope": "gemini"}
+    return fields
+
+
+def _send_draft(approve_first: bool):
+    """Sending happens after the human approves, or (approve_first=False) before it."""
+    from app.journey.design_generator import DesignDraft
+
+    order = ["search", "answer", "approve", "send"] if approve_first else [
+        "search", "answer", "send", "approve"]  # fmt: skip
+    mailer = {"name": "mailer", "access": "external_write", "reason": "발송"}
+    return DesignDraft.model_validate({
+        "requirements": [{"id": "R-1", "problem": "확인 없이 나간다", "success_example": "확인 뒤 발송",
+                          "input": "질문", "expected_output": "발송된 답", "evidence": "확인한 뒤에만",
+                          "core": True, "node_ids": ["search", "answer"], "output": "text",
+                          "eval_case_ids": ["E-1"], "task_ids": ["T-1"]}],
+        "nodes": [_node("search", "agent", ["question"], ["hits"]),
+                  _node("answer", "agent", ["hits"], ["text"]),
+                  _node("send", "agent", ["text"], ["sent"], [mailer]),
+                  _node("approve", "human", ["text"], ["ok"])],
+        "workflow": {"entry": "search", "exits": [order[-1]], "max_model_calls": 4,
+                     "edges": [{"source": a, "target": b} for a, b in zip(order, order[1:])]},
+        "eval_cases": [{"id": "E-1", "given": "답", "expect": "확인 뒤 발송"}],
+        "tasks": [{"id": "T-1", "title": "발송", "inputs": "답", "produces": "함수",
+                   "verify_by": "확인 뒤에만 보낸다"}],
+        "reasons": [{"text": "검색과 답변의 컨텍스트가 다르다", "requirement_ids": ["R-1"]}],
+    })  # fmt: skip
+
+
+class _Scripted:
+    def __init__(self, *outputs):
+        self.outputs = list(outputs)
+
+    def draft(self, state, constraints, problems):
+        from app.journey.design_generator import DesignAttempt
+
+        output = self.outputs.pop(0)
+        if isinstance(output, Exception):
+            raise output
+        return DesignAttempt(draft=output, model_id="test-model", input_tokens=10, output_tokens=5)
+
+
+def test_each_design_attempt_is_kept_with_its_rejection_and_tokens():
+    from app.journey.design_generator import generate_design
+
+    counter = runner.CountingDesigner(
+        _Scripted(_send_draft(approve_first=False), _send_draft(approve_first=True)), record=True
+    )
+
+    outcome = generate_design(_approval_journey(), REGISTRY, counter, attempts=2)
+
+    first, second = counter.attempts
+    assert outcome.design.status == "review_required"
+    assert first["outcome"] == "rejected"
+    assert first["rules"] == ["permission.write_without_approval"]
+    assert first["draft"]["nodes"][2]["id"] == "send" and first["problems_in"] == []
+    assert second["outcome"] == "accepted" and second["rules"] == []
+    assert any("send" in problem for problem in second["problems_in"])
+    assert runner.attempt_tokens(counter.attempts) == {"input_tokens": 20, "output_tokens": 10}
+
+
+def test_a_failed_call_is_kept_without_a_draft_and_leaves_tokens_unknown():
+    counter = runner.CountingDesigner(_Scripted(RuntimeError("down")), record=True)
+
+    with pytest.raises(RuntimeError):
+        counter.draft(_approval_journey(), None, [])
+
+    assert counter.attempts == [
+        {"call": 1, "prompt_version": runner.DESIGN_VERSION, "problems_in": [],
+         "outcome": "call_failed", "error_type": "RuntimeError", "error_code": None}
+    ]  # fmt: skip
+    assert runner.attempt_tokens(counter.attempts) == {"input_tokens": 0, "output_tokens": 0}
+
+
+def test_a_saved_rejected_draft_is_rechecked_without_a_model(tmp_path):
+    from app.journey.design_generator import generate_design
+
+    counter = runner.CountingDesigner(
+        _Scripted(_send_draft(approve_first=False), _send_draft(approve_first=True)), record=True
+    )
+    generate_design(_approval_journey(), REGISTRY, counter, attempts=2)
+    saved = {"results": [{"case": "C4", "mode": "flow", "run": 1,
+                          "design_attempts": counter.attempts}]}  # fmt: skip
+    (tmp_path / "results.json").write_text(json.dumps(saved, ensure_ascii=False), "utf-8")
+
+    text = rescorer.main([str(tmp_path)])
+
+    assert "시도 1" in text and "시도 2" not in text  # only the rejected draft by default
+    assert "`permission.write_without_approval`" in text
+    assert "실행 때와 비교: 같음" in text
+    assert "`send` (agent) 도구: mailer(external_write)" in text
+    assert "answer → send" in text and "send → approve" in text
+    assert (tmp_path / "rescore.md").read_text("utf-8").startswith("# 저장된 초안 다시 검사")
+
+
+def test_rescore_reports_when_the_validator_now_disagrees(tmp_path):
+    from app.journey.design_generator import generate_design
+
+    counter = runner.CountingDesigner(_Scripted(_send_draft(approve_first=False)), record=True)
+    generate_design(_approval_journey(), REGISTRY, counter, attempts=1)
+    counter.attempts[0]["rules"] = ["some.old_rule"]  # as if an older validator had run
+
+    lines = rescorer.rescore([{"case": "C4", "run": 1, "design_attempts": counter.attempts}])
+
+    assert any("달라짐 (실행 때: some.old_rule)" in line for line in lines)

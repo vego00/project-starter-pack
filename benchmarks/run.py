@@ -36,7 +36,10 @@ from app.journey.design import ServiceDesign  # noqa: E402
 from app.journey.design_generator import (  # noqa: E402
     MAX_ATTEMPTS,
     MAX_OUTAGE_RETRIES,
+    DesignDraft,
+    assemble_design,
     generate_design,
+    provenance_for,
 )
 from app.journey.llm import EXAONE_MODEL  # noqa: E402
 from app.journey.prompts import DESIGN_VERSION  # noqa: E402
@@ -45,7 +48,7 @@ from app.journey.services import JourneyDeps, StartFailure, build_deps  # noqa: 
 from app.journey.state import JourneyAction, JourneyState, ProjectSpec  # noqa: E402
 from app.registry.loader import Registry, load_registry  # noqa: E402
 from langgraph.checkpoint.memory import InMemorySaver  # noqa: E402
-from pydantic import TypeAdapter  # noqa: E402
+from pydantic import TypeAdapter, ValidationError  # noqa: E402
 
 from benchmarks.evaluators.design import design_checks  # noqa: E402
 from benchmarks.evaluators.intake import IntakeCase, evaluate  # noqa: E402
@@ -60,15 +63,77 @@ DEFAULT_GAP_S = 20  # Between runs with a real model; fewer 429s were seen with 
 
 
 class CountingDesigner:
-    """Counts design calls so a run stops before the budget instead of after it."""
+    """Counts design calls so a run stops before the budget instead of after it.
 
-    def __init__(self, inner):
+    With record=True it also keeps every attempt: the problems it was sent, the draft it returned,
+    and what the validator said. A rejected draft can then be re-checked with rescore.py later,
+    without another model call. A draft that broke the output contract has no draft to keep, only
+    the failed fields, because the model client raises before returning it.
+    """
+
+    def __init__(self, inner, record=False):
         self.inner = inner
         self.calls = 0
+        self.record = record
+        self.attempts: list[dict[str, Any]] = []
 
-    def draft(self, *args, **kwargs):
+    def draft(self, state, constraints, problems):
         self.calls += 1
-        return self.inner.draft(*args, **kwargs)
+        if not self.record:
+            return self.inner.draft(state, constraints, problems)
+        entry: dict[str, Any] = {
+            "call": self.calls,
+            "prompt_version": DESIGN_VERSION,
+            "problems_in": list(problems),
+        }
+        self.attempts.append(entry)
+        try:
+            attempt = self.inner.draft(state, constraints, problems)
+        except ValidationError as exc:
+            entry["outcome"] = "contract_error"
+            entry["contract_fields"] = [
+                ".".join(map(str, e["loc"])) + ":" + e["type"]
+                for e in exc.errors(include_input=False, include_url=False)
+            ]
+            raise
+        except Exception as exc:
+            entry.update(
+                outcome="call_failed",
+                error_type=type(exc).__name__,
+                error_code=getattr(exc, "code", None),
+            )
+            raise
+        provenance = provenance_for(
+            state,
+            constraints,
+            source="model",
+            model_id=attempt.model_id,
+            prompt_version=DESIGN_VERSION,
+        )
+        fields = {name: getattr(attempt.draft, name) for name in DesignDraft.model_fields}
+        issues = assemble_design(fields, constraints, provenance).validation or []
+        entry.update(
+            outcome="rejected" if any(i.severity == "error" for i in issues) else "accepted",
+            model_id=attempt.model_id,
+            input_tokens=attempt.input_tokens,
+            output_tokens=attempt.output_tokens,
+            rules=sorted({i.rule_id for i in issues if i.severity == "error"}),
+            warnings=sorted({i.rule_id for i in issues if i.severity == "warning"}),
+            draft=attempt.draft.model_dump(mode="json"),
+            constraints=constraints.model_dump(mode="json"),
+            provenance=provenance.model_dump(mode="json"),
+        )
+        return attempt
+
+
+def attempt_tokens(attempts: list[dict]) -> dict[str, int | None]:
+    """Summed over the drafts that came back. None when a draft reported no count."""
+    drafts = [a for a in attempts if a.get("outcome") in ("accepted", "rejected")]
+    totals: dict[str, int | None] = {}
+    for key in ("input_tokens", "output_tokens"):
+        values = [a.get(key) for a in drafts]
+        totals[key] = None if any(v is None for v in values) else sum(values)
+    return totals
 
 
 class ScenarioUnanswered(Exception):
@@ -398,7 +463,7 @@ def run_case(
     old_level = logger.level
     logger.addHandler(lines)
     logger.setLevel(logging.INFO)
-    counter = CountingDesigner(deps.designer) if deps.designer else None
+    counter = CountingDesigner(deps.designer, record=True) if deps.designer else None
     if counter:
         deps = replace(deps, designer=counter)
     if deps.start_writer and not isinstance(deps.start_writer, CountingStartWriter):
@@ -440,6 +505,8 @@ def run_case(
         "start_calls": getattr(deps.start_writer, "calls", 0) - start_before,
         "start_attempts": getattr(deps.start_writer, "attempts", [])[start_before:],
         "http_attempts": None,
+        "design_attempts": counter.attempts if counter else [],
+        "design_tokens": attempt_tokens(counter.attempts) if counter else {},
         "human_review": [
             {"criterion": item, "status": "pending"} for item in case.get("human_review", [])
         ],
@@ -654,6 +721,12 @@ def main(argv: list[str] | None = None) -> Path:
                 source = result.get("design", {}).get("source", "-")
                 print(f"{case['id']} {mode} {run}: {source} {result['seconds']}s", flush=True)
     meta["design_calls"] = counter.calls if counter else 0
+    tokens = [r.get("design_tokens") or {} for r in results if r.get("mode") != "intake"]
+    for key in ("input_tokens", "output_tokens"):
+        values = [t.get(key) for t in tokens if t]
+        meta[f"design_{key}"] = sum(values) if values and None not in values else "미확인"
+    # Prices change and are not in the repo, so cost is not computed here.
+    meta["design_cost"] = "미확인"
     meta["start_calls"] = start_counter.calls if start_counter else 0
     meta["intake_budget"] = args.intake_budget
     meta["intake_card_dependencies"] = "mock (extraction only)"
