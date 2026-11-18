@@ -690,3 +690,50 @@ def test_a_field_named_like_a_keyword_survives():
         "properties": {"pattern": {"type": "string"}},
         "required": ["pattern"],
     }
+
+
+@pytest.mark.parametrize("hitl", ["approval", "none"])
+def test_the_failure_pattern_the_prompt_asks_for_passes_the_validator(hitl):
+    """design-v7 tells the model to send every failure to one handler that only records it,
+    to loop only on a human rejection with that handler as the way out, and to keep sending in
+    its own node after approval. If the validator ever rejects that, the prompt must change."""
+    from app.journey.design_generator import assemble_design, provenance_for
+
+    state = journey(**{"agent.hitl": hitl})
+    constraints = derive_design_constraints(state, REGISTRY)
+    handler = node("handle_failure", "code", ["error"], [])
+    handler["tools"] = [{"name": "failure_log", "access": "write", "reason": "실패 기록"}]
+    nodes = [node("search", "agent", ["question"], ["hits", "error"]),
+             node("answer", "agent", ["hits"], ["text", "error"]), handler]  # fmt: skip
+    edges = [
+        {"source": "search", "target": "answer", "condition": "검색 성공"},
+        {"source": "search", "target": "handle_failure", "condition": "검색 실패",
+         "on_failure": True},
+        {"source": "answer", "target": "handle_failure", "condition": "작성 실패",
+         "on_failure": True},
+    ]  # fmt: skip
+    limits, exits = [], ["answer", "handle_failure"]
+    if hitl == "approval":
+        send = node("send", "code", ["text"], ["sent"])
+        send["tools"] = [{"name": "mailer", "access": "external_write", "reason": "발송"}]
+        nodes += [node("approve", "human", ["text"], ["ok"]), send]
+        edges += [
+            {"source": "answer", "target": "approve", "condition": "초안 완료"},
+            {"source": "approve", "target": "send", "condition": "승인"},
+            {"source": "approve", "target": "answer", "condition": "거절"},
+            {"source": "send", "target": "handle_failure", "condition": "발송 실패",
+             "on_failure": True},
+        ]  # fmt: skip
+        limits = [{"node_ids": ["answer", "approve"], "max_iterations": 3,
+                   "on_exceeded": "handle_failure"}]  # fmt: skip
+        exits = ["send", "handle_failure"]
+    pattern = draft(nodes=nodes, workflow={"entry": "search", "exits": exits, "edges": edges,
+                                           "loop_limits": limits, "max_model_calls": 6})  # fmt: skip
+    fields = {name: getattr(pattern, name) for name in DesignDraft.model_fields}
+    provenance = provenance_for(
+        state, constraints, source="model", model_id="m", prompt_version="v"
+    )
+
+    design = assemble_design(fields, constraints, provenance)
+
+    assert design.validation == []

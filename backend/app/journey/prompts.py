@@ -14,7 +14,7 @@ from app.registry.schema import DecisionCard
 ADVISOR_VERSION = "advisor-v2"
 GCB_VERSION = "gcb-v1"
 QA_VERSION = "qa-v1"
-DESIGN_VERSION = "design-v6"
+DESIGN_VERSION = "design-v7"
 MODULE_VERSION = "module-v1"
 MODULE_CHAT_TURNS = 8
 START_VERSION = "start-v3"
@@ -114,13 +114,15 @@ DESIGN_SYSTEM = """당신은 사용자의 pain point와 결정을 바탕으로 �
 - 모든 노드는 entry에서 닿아야 하고 exits 중 하나로 갈 수 있어야 합니다.
 - 시작 노드를 뺀 노드의 inputs는 앞선 노드의 outputs에 같은 이름과 같은 type으로 있어야 합니다.
 - 실패하거나 거절될 수 있는 단계는 그때 갈 노드로 연결선을 하나 더 두고, 각 연결선의 condition에 언제 그 길로 가는지 씁니다. 사람 승인 노드는 승인과 거절 두 길을 둡니다. 외부 호출, 코드 실행, 검색처럼 실패할 수 있는 노드는 실패했을 때 갈 길을 두고 그 연결선의 on_failure를 true로 씁니다.
+- 실패 길(on_failure=true)은 자기 자신이나 앞 단계로 돌리지 않습니다. 실패 길은 실패만 처리하는 code 노드(예: handle_failure)로 보냅니다. 이 노드는 무엇이 실패했는지 서비스 안에 기록하고(write) 끝나므로 exits에 넣고, 다른 노드로 가는 연결선과 external_write 도구를 두지 않습니다. 여러 노드의 실패 길이 이 노드 하나로 모여도 됩니다.
+- 다시 시도가 필요하면 연결선으로 그리지 않고 그 노드의 on_failure 설명에 몇 번 다시 시도하는지 씁니다.
 - 한 노드에서 연결선이 둘 이상 나가면 모든 연결선에 condition을 씁니다. LIMITS.routing이 model이나 model_with_subgraphs이면 다음 노드를 고르는 노드가 있어야 합니다.
-- 순환이 있으면 loop_limits에 그 노드들과 한도를 적고, on_exceeded는 순환 밖의 노드여야 합니다. 거절되어 앞 단계로 돌아가는 길도 순환입니다. 예: draft → review → (거절) draft이면 node_ids는 [draft, review], on_exceeded는 순환 밖의 노드(예: 사람에게 알리고 끝내는 notify 노드)이고, 그 노드도 exits로 가야 합니다.
+- 연결선으로 그리는 순환은 사람이 거절해 앞 단계로 돌아가는 길뿐입니다. 순환이 있으면 loop_limits에 그 노드들과 한도를 적고, on_exceeded는 실패 처리 노드로 둡니다. 예: draft → review → (거절) draft이면 node_ids는 [draft, review], on_exceeded는 handle_failure입니다.
 - state_fields의 name은 포트 이름과 같게 씁니다. writers의 outputs와 readers의 inputs에 그 이름이 있어야 합니다. 그 이름을 내보내는 노드는 모두 writers에 넣습니다. writer가 둘 이상이면 merge를 적습니다.
 - state_fields에는 노드가 내보내는 값만 넣으므로 writers는 비울 수 없습니다. 어떤 노드의 outputs에도 없는 이름은 state_fields에 넣지 않습니다. 사용자 입력은 시작 노드의 inputs로 받고, 다음 노드가 쓰려면 시작 노드의 outputs로 내보낸 뒤 그 이름을 state_fields에 넣습니다.
 - agent 노드의 provider_scope와 fallback_scope에는 LIMITS.allowed_providers의 값을 그대로 씁니다. 목록이 null이면 "미정"으로 씁니다.
 - 도구의 access는 셋 중 하나입니다. read는 읽기, write는 서비스 안의 저장(자기 DB, 파일), external_write는 서비스 밖에 남는 쓰기(메일·메신저 발송, 결제, 외부 저장소 변경)입니다.
-- external_write 도구는 사람 확인 지점 뒤에 둡니다. entry에서 그 노드로 가는 모든 길이 사람 확인 노드를 지나야 하므로, 거절되어 돌아가는 앞 단계 노드에는 external_write 도구를 두지 않습니다. write는 사람 확인 앞에 있어도 됩니다.
+- external_write 도구는 사람 확인 지점 뒤의 발송 전용 노드 하나에만 둡니다. entry에서 그 노드로 가는 모든 길이 사람 확인 노드를 지나야 하므로, 거절되어 돌아가는 앞 단계 노드와 실패 처리 노드에는 external_write 도구를 두지 않습니다. 저장(write)과 발송(external_write)을 한 노드에 합치지 않습니다. 저장은 사람 확인 앞에 있어도 됩니다. 어떤 실패 길도 발송 노드로 가지 않습니다.
 - 에이전트가 있으면 workflow.max_model_calls를 적습니다.
 - tasks는 만들 순서대로 쓰고, depends_on은 앞에 나온 작업만 가리킵니다. 첫 작업은 초보자가 바로 시작할 수 있어야 합니다.
 

@@ -256,10 +256,16 @@ def template_design(state: JourneyState, constraints: DesignConstraints) -> Serv
 
 # How to fix the rules drafts broke most in fixed-case runs. Sent with the problem on a retry.
 FIX_HINTS = {
-    "loop.no_limit": "순환하는 노드를 모두 loop_limits의 node_ids에 넣고 max_iterations를 적으세요",
-    "loop.no_way_out": "on_exceeded를 그 순환에 들어 있지 않은 노드로 바꾸세요",
+    "loop.no_limit": (
+        "실패 길이 만든 순환이면 그 길을 실패 처리 노드로 보내세요. 사람 거절로 생긴 순환이면 "
+        "그 노드들을 loop_limits의 node_ids에 넣고 max_iterations를 적으세요"
+    ),
+    "loop.no_way_out": (
+        "on_exceeded를 순환 밖에 있고 다시 순환으로 돌아가는 길이 없는 실패 처리 노드로 바꾸세요"
+    ),
     "permission.write_without_approval": (
-        "쓰기 도구를 entry에서 오는 모든 길이 사람 확인 노드를 지난 뒤의 노드로 옮기세요"
+        "external_write 도구를 사람 확인 뒤의 발송 전용 노드로 옮기고, 그 노드로 가는 실패 길을 "
+        "실패 처리 노드로 바꾸세요"
     ),
     "decision.too_few_agents": "권한, 컨텍스트, 모델 능력이 다른 일을 찾아 agent 노드를 나누세요",
     "owner.writer_has_no_output": "writers에는 그 이름을 outputs로 내보내는 노드만 넣으세요",
