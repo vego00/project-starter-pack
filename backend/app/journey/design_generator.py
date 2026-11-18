@@ -111,7 +111,8 @@ def _spec_hash(state: JourneyState) -> str:
     return hashlib.sha256(spec.encode("utf-8")).hexdigest()
 
 
-def _provenance(state: JourneyState, constraints: DesignConstraints, **source) -> Provenance:
+def provenance_for(state: JourneyState, constraints: DesignConstraints, **source) -> Provenance:
+    """What a design was made from. Public so a saved draft can be rebuilt and checked later."""
     return Provenance(
         journey_revision=len(state.trace),
         project_spec_hash=_spec_hash(state),
@@ -121,10 +122,13 @@ def _provenance(state: JourneyState, constraints: DesignConstraints, **source) -
     )
 
 
-def _with_decisions(
+def assemble_design(
     fields: dict, constraints: DesignConstraints, provenance: Provenance
 ) -> ServiceDesign:
-    """Unknowns and warnings from the decisions come from code, so a model cannot lose them."""
+    """Unknowns and warnings from the decisions come from code, so a model cannot lose them.
+
+    The validator runs here, so rebuilding a saved draft with the same constraints re-checks it.
+    """
     unknowns = list(constraints.unknowns)
     known = {unknown.text for unknown in unknowns}
     unknowns += [u for u in fields.pop("unknowns", []) if u.text not in known]
@@ -200,7 +204,7 @@ def template_design(state: JourneyState, constraints: DesignConstraints) -> Serv
         _template_node("finish", "code", "결과를 사용자에게 돌려준다", [finish_input], ["result"])
     )
     agent_count = sum(node["kind"] == "agent" for node in nodes)
-    return _with_decisions(
+    return assemble_design(
         {
             "requirements": [
                 Requirement(
@@ -246,7 +250,7 @@ def template_design(state: JourneyState, constraints: DesignConstraints) -> Serv
             ],
         },
         constraints,
-        _provenance(state, constraints, source="template"),
+        provenance_for(state, constraints, source="template"),
     )
 
 
@@ -361,10 +365,10 @@ def _generate(
                     output_tokens=(usage.get("output_tokens") or 0) + (attempt.output_tokens or 0),
                 )
                 fields = {name: getattr(attempt.draft, name) for name in DesignDraft.model_fields}
-                design = _with_decisions(
+                design = assemble_design(
                     fields,
                     constraints,
-                    _provenance(
+                    provenance_for(
                         state,
                         constraints,
                         source="model",
