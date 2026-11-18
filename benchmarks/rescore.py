@@ -95,6 +95,13 @@ def rescore(results: list[dict], case: str | None = None, show_all: bool = False
                 out += ["", "관련 노드와 연결선:"]
                 for node_id in nodes:
                     out += describe(design, node_id)
+            if any(i.rule_id.startswith("loop.") for i in errors):
+                out += ["", "반복 한도:"]
+                out += [
+                    f"- {', '.join(limit.node_ids)}: 최대 {limit.max_iterations}회, "
+                    f"넘으면 → {limit.on_exceeded}"
+                    for limit in design.workflow.loop_limits
+                ] or ["- 없음"]
             out.append("")
     return out or ["다시 볼 거절된 초안이 없습니다."]
 
