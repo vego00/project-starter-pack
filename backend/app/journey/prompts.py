@@ -14,7 +14,7 @@ from app.registry.schema import DecisionCard
 ADVISOR_VERSION = "advisor-v2"
 GCB_VERSION = "gcb-v1"
 QA_VERSION = "qa-v1"
-DESIGN_VERSION = "design-v7"
+DESIGN_VERSION = "design-v7.1"
 MODULE_VERSION = "module-v1"
 MODULE_CHAT_TURNS = 8
 START_VERSION = "start-v3"
@@ -114,7 +114,7 @@ DESIGN_SYSTEM = """당신은 사용자의 pain point와 결정을 바탕으로 �
 - 모든 노드는 entry에서 닿아야 하고 exits 중 하나로 갈 수 있어야 합니다.
 - 시작 노드를 뺀 노드의 inputs는 앞선 노드의 outputs에 같은 이름과 같은 type으로 있어야 합니다.
 - 실패하거나 거절될 수 있는 단계는 그때 갈 노드로 연결선을 하나 더 두고, 각 연결선의 condition에 언제 그 길로 가는지 씁니다. 사람 승인 노드는 승인과 거절 두 길을 둡니다. 외부 호출, 코드 실행, 검색처럼 실패할 수 있는 노드는 실패했을 때 갈 길을 두고 그 연결선의 on_failure를 true로 씁니다.
-- 실패 길(on_failure=true)은 자기 자신이나 앞 단계로 돌리지 않습니다. 실패 길은 실패만 처리하는 code 노드(예: handle_failure)로 보냅니다. 이 노드는 무엇이 실패했는지 서비스 안에 기록하고(write) 끝나므로 exits에 넣고, 다른 노드로 가는 연결선과 external_write 도구를 두지 않습니다. 여러 노드의 실패 길이 이 노드 하나로 모여도 됩니다.
+- 실패 길(on_failure=true)은 자기 자신이나 앞 단계로 돌리지 않습니다. 실패 길은 실패만 처리하는 code 노드(예: handle_failure)로 보냅니다. 이 노드는 실패를 서비스 안에 기록하고(write) 끝나므로 exits에 넣고, 다른 노드로 가는 연결선과 external_write 도구를 두지 않습니다. 이 노드의 inputs와 outputs는 비워 둡니다. 실패 정보는 포트나 state_fields로 넘기지 않습니다. 여러 노드의 실패 길이 이 노드 하나로 모여도 됩니다.
 - 다시 시도가 필요하면 연결선으로 그리지 않고 그 노드의 on_failure 설명에 몇 번 다시 시도하는지 씁니다.
 - 한 노드에서 연결선이 둘 이상 나가면 모든 연결선에 condition을 씁니다. LIMITS.routing이 model이나 model_with_subgraphs이면 다음 노드를 고르는 노드가 있어야 합니다.
 - 연결선으로 그리는 순환은 사람이 거절해 앞 단계로 돌아가는 길뿐입니다. 순환이 있으면 loop_limits에 그 노드들과 한도를 적고, on_exceeded는 실패 처리 노드로 둡니다. 예: draft → review → (거절) draft이면 node_ids는 [draft, review], on_exceeded는 handle_failure입니다.

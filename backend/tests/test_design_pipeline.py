@@ -694,17 +694,18 @@ def test_a_field_named_like_a_keyword_survives():
 
 @pytest.mark.parametrize("hitl", ["approval", "none"])
 def test_the_failure_pattern_the_prompt_asks_for_passes_the_validator(hitl):
-    """design-v7 tells the model to send every failure to one handler that only records it,
-    to loop only on a human rejection with that handler as the way out, and to keep sending in
-    its own node after approval. If the validator ever rejects that, the prompt must change."""
+    """design-v7.1 tells the model to send every failure to one handler that only records it and
+    has no inputs or outputs, to loop only on a human rejection with that handler as the way out,
+    and to keep sending in its own node after approval. If the validator ever rejects that, the
+    prompt must change."""
     from app.journey.design_generator import assemble_design, provenance_for
 
     state = journey(**{"agent.hitl": hitl})
     constraints = derive_design_constraints(state, REGISTRY)
-    handler = node("handle_failure", "code", ["error"], [])
+    handler = node("handle_failure", "code", [], [])
     handler["tools"] = [{"name": "failure_log", "access": "write", "reason": "실패 기록"}]
-    nodes = [node("search", "agent", ["question"], ["hits", "error"]),
-             node("answer", "agent", ["hits"], ["text", "error"]), handler]  # fmt: skip
+    nodes = [node("search", "agent", ["question"], ["hits"]),
+             node("answer", "agent", ["hits"], ["text"]), handler]  # fmt: skip
     edges = [
         {"source": "search", "target": "answer", "condition": "검색 성공"},
         {"source": "search", "target": "handle_failure", "condition": "검색 실패",
