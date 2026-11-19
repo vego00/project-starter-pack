@@ -37,3 +37,38 @@ def test_only_fix_hints_may_change_in_the_generator():
 
     assert improve.guard(improve.GENERATOR, GENERATOR, hints) == []
     assert improve.guard(improve.GENERATOR, GENERATOR, attempts) == ["MAX_ATTEMPTS"]
+
+
+loop_spec = importlib.util.spec_from_file_location("loop", ROOT / "benchmarks" / "loop.py")
+loop = importlib.util.module_from_spec(loop_spec)
+loop_spec.loader.exec_module(loop)
+
+
+def _m(model, rules=None):
+    return {"runs": 3, "model": model, "single": 0, "rules": rules or {}}
+
+
+def test_a_clear_gain_is_kept_and_small_differences_are_not():
+    best = {"A": _m(1), "B": _m(2)}
+
+    assert loop.decide(best, {"A": _m(2), "B": _m(3)})[0] is True
+    assert loop.decide(best, {"A": _m(2), "B": _m(2)})[0] is False
+
+
+def test_a_case_that_drops_by_two_reverts_even_with_a_total_gain():
+    best = {"A": _m(3), "B": _m(0), "C": _m(0)}
+
+    keep, why = loop.decide(best, {"A": _m(1), "B": _m(3), "C": _m(2)})
+
+    assert keep is False and "A" in why
+
+
+def test_more_sending_before_approval_always_reverts():
+    best = {"A": _m(1)}
+    worse = {"A": _m(3, {loop.CORE_RULE: 1})}
+
+    assert loop.decide(best, worse)[0] is False
+
+
+def test_a_failed_measurement_is_not_judged():
+    assert loop.decide({"A": _m(1)}, {"A": {"failed": True}})[0] is False
