@@ -19,6 +19,10 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from benchmarks.codex_settings import CODEX_MODEL, codex_model_args  # noqa: E402
+
 PROMPTS = "backend/app/journey/prompts.py"
 GENERATOR = "backend/app/journey/design_generator.py"
 NOTE = "CHANGE_NOTE.md"
@@ -113,6 +117,7 @@ def main(argv: list[str]) -> dict:
             "--ephemeral",
             "--ignore-user-config",
             "--ignore-rules",
+            *codex_model_args(),
         ],  # fmt: skip
         input=task,
         capture_output=True,
@@ -120,6 +125,7 @@ def main(argv: list[str]) -> dict:
         timeout=1800,
     )
     summary: dict = {"branch": branch, "folder": str(folder), "codex_exit": done.returncode}
+    summary["codex_model"] = CODEX_MODEL
     changed = git("diff", "--name-only", cwd=folder).splitlines()
     added = git("ls-files", "--others", "--exclude-standard", cwd=folder).splitlines()
     touched = sorted(set(changed) | set(added))
