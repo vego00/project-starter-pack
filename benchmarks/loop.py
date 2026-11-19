@@ -123,20 +123,33 @@ def metrics(measurement: dict) -> dict:
 
 
 def decide(best: dict, candidate: dict) -> tuple[bool, str]:
-    """Keep only a clear gain: 3 runs per case is noisy, so small differences do not count."""
+    """Keep a change only if drafts are rejected clearly less often and nothing else slips.
+
+    Designs that met the rules already sit at the ceiling (12/12 in round 0, 2026-11-19), so
+    they and single-draft passes are floors that must not drop. The gain is counted in
+    rejections (rule breaks plus contract breaks), and with 3 runs per case it must be at least
+    2 so noise alone does not keep a change. Sending before approval may never increase.
+    """
     if any(m.get("failed") for m in candidate.values()):
         return False, "측정 실패가 있어 판정하지 않음"
-    gain = sum(m["model"] for m in candidate.values()) - sum(m["model"] for m in best.values())
-    drops = [c for c in candidate if best[c]["model"] - candidate[c]["model"] >= 2]
+
+    def total(numbers: dict, key: str) -> int:
+        return sum(m[key] for m in numbers.values())
+
+    def rejections(numbers: dict) -> int:
+        return sum(sum(m["rules"].values()) for m in numbers.values())
+
     core_before = sum(m["rules"].get(CORE_RULE, 0) for m in best.values())
     core_after = sum(m["rules"].get(CORE_RULE, 0) for m in candidate.values())
     if core_after > core_before:
         return False, f"승인 전 외부 쓰기가 늘었음 ({core_before} → {core_after})"
-    if drops:
-        return False, f"2개 이상 떨어진 사례: {', '.join(drops)}"
-    if gain >= 2:
-        return True, f"맞춤 설계 +{gain}"
-    return False, f"맞춤 설계 차이 {gain:+d} (유지 기준 +2)"
+    for key, name in (("model", "맞춤 설계"), ("single", "첫 초안 통과")):
+        if total(candidate, key) < total(best, key):
+            return False, f"{name}가 줄었음 ({total(best, key)} → {total(candidate, key)})"
+    before, after = rejections(best), rejections(candidate)
+    if before - after >= 2:
+        return True, f"거절 {before} → {after}"
+    return False, f"거절 {before} → {after} (유지 기준 −2)"
 
 
 def problem_summary(measurement: dict, numbers: dict) -> str:
@@ -227,6 +240,10 @@ def main(argv: list[str] | None = None) -> list[dict]:
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--cases", default=",".join(DEV_CASES))
     parser.add_argument("--no-judge", action="store_true")
+    parser.add_argument(
+        "--baseline",
+        help="loop-report.json of an earlier round 0 for the same ref, cases and runs; reused",
+    )
     args = parser.parse_args(argv)
     work = Path(args.work)
     work.mkdir(parents=True, exist_ok=True)
@@ -234,11 +251,21 @@ def main(argv: list[str] | None = None) -> list[dict]:
     started = time.time()
 
     best_ref = git("rev-parse", "--short", args.base)
-    first = measure(work, best_ref, 0, cases, args.runs)
-    best = metrics(first)
-    rounds = [{"round": 0, "ref": best_ref, "metrics": best, "measurement": first}]
-    if not args.no_judge:
-        rounds[0]["judge"] = judge(work, first, 0)
+    if args.baseline:
+        earlier = json.loads(Path(args.baseline).read_text("utf-8"))[0]
+        same = earlier["ref"] == best_ref and set(earlier["metrics"]) == set(cases)
+        same = same and all(m.get("runs") == args.runs for m in earlier["metrics"].values())
+        if not same:
+            parser.error("--baseline was measured for another ref, cases or run count")
+        rounds = [earlier]
+        first, best = earlier["measurement"], earlier["metrics"]
+        log(work, f"round 0: reusing the measurement of {best_ref} from {args.baseline}")
+    else:
+        first = measure(work, best_ref, 0, cases, args.runs)
+        best = metrics(first)
+        rounds = [{"round": 0, "ref": best_ref, "metrics": best, "measurement": first}]
+        if not args.no_judge:
+            rounds[0]["judge"] = judge(work, first, 0)
     write_report(work, rounds)
     last, misses = first, 0
     for round_no in range(1, args.rounds + 1):

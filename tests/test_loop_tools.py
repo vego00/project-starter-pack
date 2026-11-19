@@ -44,27 +44,26 @@ loop = importlib.util.module_from_spec(loop_spec)
 loop_spec.loader.exec_module(loop)
 
 
-def _m(model, rules=None):
-    return {"runs": 3, "model": model, "single": 0, "rules": rules or {}}
+def _m(model, rules=None, single=0):
+    return {"runs": 3, "model": model, "single": single, "rules": rules or {}}
 
 
-def test_a_clear_gain_is_kept_and_small_differences_are_not():
-    best = {"A": _m(1), "B": _m(2)}
+def test_fewer_rejections_by_two_are_kept_and_one_is_not():
+    best = {"A": _m(3, {"io.unconnected": 2}), "B": _m(3, {"형식:state_fields.0": 1})}
 
-    assert loop.decide(best, {"A": _m(2), "B": _m(3)})[0] is True
-    assert loop.decide(best, {"A": _m(2), "B": _m(2)})[0] is False
+    assert loop.decide(best, {"A": _m(3), "B": _m(3, {"형식:state_fields.0": 1})})[0] is True
+    assert loop.decide(best, {"A": _m(3, {"io.unconnected": 1}), "B": _m(3, {"x": 1})})[0] is False
 
 
-def test_a_case_that_drops_by_two_reverts_even_with_a_total_gain():
-    best = {"A": _m(3), "B": _m(0), "C": _m(0)}
+def test_fewer_designs_or_single_passes_revert_even_with_fewer_rejections():
+    best = {"A": _m(3, {"io.unconnected": 3}, single=2)}
 
-    keep, why = loop.decide(best, {"A": _m(1), "B": _m(3), "C": _m(2)})
-
-    assert keep is False and "A" in why
+    assert loop.decide(best, {"A": _m(2, single=2)})[0] is False
+    assert loop.decide(best, {"A": _m(3, single=1)})[0] is False
 
 
 def test_more_sending_before_approval_always_reverts():
-    best = {"A": _m(1)}
+    best = {"A": _m(3, {"io.unconnected": 4})}
     worse = {"A": _m(3, {loop.CORE_RULE: 1})}
 
     assert loop.decide(best, worse)[0] is False
