@@ -32,7 +32,10 @@ sys.path.insert(0, str(ROOT))
 
 from benchmarks.rescore import rescore  # noqa: E402
 
-DEV_CASES = ["C1", "C4-design", "C6", "C8"]
+# Development set: improved against. C2 replaced C6 on 2026-11-20 because C6 never produced a
+# rejection to learn from. Held-out set: only checked, never shown to the improvement agent.
+DEV_CASES = ["C1", "C2", "C4-design", "C8"]
+HELD_OUT_CASES = ["C5", "C6"]
 AGY_MODEL = "gemini-3.8-flash-low"
 CORE_RULE = "permission.write_without_approval"
 
