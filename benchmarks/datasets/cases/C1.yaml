@@ -26,3 +26,12 @@ must_ask:
 - data.primary_db
 - data.vector_store
 may_skip: []
+# Copied from the case page's "핵심 요구" (2026-11-19) so every case has criteria for review.
+human_review:
+- 자연어 메모를 저장한다 (상태 수명이 run이면 미달)
+- 나중에 찾거나 다시 꺼낸다 (검색 단계)
+- 여러 아이디어 중 하나를 고른다
+- 고른 아이디어로 다른 사람이 읽을 기획서 초안을 만든다
+- 메모 위치, 기획서 양식과 독자, 검색 방식을 미확인으로 묻는다
+- Upstage(API)와 Ollama 서빙 충돌, 다시 꺼내기와 메모리 저장 충돌을 경고한다
+- Supervisor를 골랐으니 흐름에 라우팅 노드가 있다

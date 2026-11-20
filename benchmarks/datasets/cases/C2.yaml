@@ -1,0 +1,53 @@
+# Copy of a fixed evaluation case. The source is the Notion page in `notion`; change it there
+# first. `spec` was written by hand with the case (no source journey), so a run skips drafting.
+# The card choices were drafted by Claude and confirmed by the author on 2026-11-20.
+id: C2
+title: DiV 고도화 · 기획서 서비스 안정화
+status: 초안
+notion: https://app.notion.com/p/41096199efb3816892c9cce8e014750d
+copied_on: '2026-11-20'
+spec:
+  idea: 기획서를 만들고 고쳐 주는 AI 서비스를 운영하고 있습니다. 생성이 오래 걸리면 지금 진행 중인지 멈췄는지 알 수 없고, 도중에 실패하면
+    고치던 문서가 사라질까 걱정됩니다. 여러 사람이 쓰더라도 각자 자기 문서만 보이고, 한 부분을 고치면 다른 부분은 그대로 남았으면 합니다.
+    고치기 전과 후를 비교해서 결과가 실제로 좋아졌는지도 확인하고 싶습니다.
+  goal: 기획서 생성·수정 서비스의 사용자가 진행 상태를 보고, 실패해도 문서를 잃지 않으며, 자기 문서만 부분 수정하고 수정 전후를 비교할 수
+    있는 상태
+  context: 이미 운영 중인 기획서 생성·수정 AI 서비스에서 생성이 오래 걸리면 진행 여부를 알 수 없고, 도중 실패 시 문서가 사라질 수 있다는
+    걱정이 있습니다.
+  boundary: 사용자마다 자기 문서만 보여야 합니다. 한 부분을 고칠 때 다른 부분은 바뀌면 안 됩니다. 실패해도 고치던 문서는 남아야 합니다.
+selection:
+  product.surface: web
+  agent.topology: supervisor
+  agent.hitl: question
+  model.provider: gemini
+  data.primary_db: postgres
+  data.vector_store: none
+  data.checkpointer: postgres
+  backend.execution: queue
+  devops.orchestration: none
+  mlops.model_serving: external_api
+  cloud.target: gcp
+  ops.tracing: langsmith
+must_ask:
+- agent.hitl
+- data.primary_db
+- data.checkpointer
+- backend.execution
+may_skip:
+- mlops.model_serving
+- devops.orchestration
+family: C2
+evaluation: design
+human_review:
+- 진행 상태를 보여 준다 (대기·실행 중·실패를 구분)
+- 실패해도 기존 문서를 지킨다 (버전 보존)
+- 사용자별로 문서를 분리한다 (소유권 확인)
+- 부분 수정이 대상 밖을 바꾸지 않는다
+- 수정 전후를 비교하고 품질을 평가한다
+- 지금 서비스의 저장 방식, 동시에 쓰는 사람 수, 평가 기준을 미확인으로 묻는다
+design_checks:
+- node_references
+- validation
+- package_matches_revision
+- spec_snapshot
+- fixed_choices

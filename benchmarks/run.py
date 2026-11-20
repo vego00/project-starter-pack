@@ -112,6 +112,11 @@ class CountingDesigner:
         )
         fields = {name: getattr(attempt.draft, name) for name in DesignDraft.model_fields}
         issues = assemble_design(fields, constraints, provenance).validation or []
+        inner = self.inner
+        while not hasattr(inner, "last_call") and hasattr(inner, "inner"):
+            inner = inner.inner
+        if getattr(inner, "last_call", None):
+            entry["call_details"] = dict(inner.last_call)
         entry.update(
             outcome="rejected" if any(i.severity == "error" for i in issues) else "accepted",
             model_id=attempt.model_id,
@@ -261,8 +266,12 @@ def _choose(case: dict, card: dict, registry: Registry) -> str:
     return option if option in open_options else open_options[0]
 
 
-def run_flow(case: dict, deps: JourneyDeps, registry: Registry) -> dict[str, Any]:
-    service = JourneyService(registry, InMemorySaver(), deps)
+def run_flow(
+    case: dict, deps: JourneyDeps, registry: Registry, checkpointer=None
+) -> dict[str, Any]:
+    """Drives one journey with the case's fixed choices. A durable checkpointer keeps it so the
+    web app can open it later; by default it lives in memory."""
+    service = JourneyService(registry, checkpointer or InMemorySaver(), deps)
     view = service.start(ProjectSpec(**case["spec"]))
     asked: list[str] = []
     recommendations: dict[str, Any] = {}
@@ -638,11 +647,23 @@ def main(argv: list[str] | None = None) -> Path:
         "--allow-real", action="store_true", help="explicitly enable configured APIs"
     )
     parser.add_argument("--timeout", type=float, default=600, help="seconds per case (Linux/WSL)")
+    parser.add_argument(
+        "--designer",
+        choices=["gemini", "agy"],
+        default="gemini",
+        help="agy drafts designs through the Antigravity CLI; every other call stays mock",
+    )
+    parser.add_argument("--agy-model", default=None, help="agy model id for --designer agy")
+    parser.add_argument("--agy-effort", default=None, help="agy reasoning effort (low..max)")
     args = parser.parse_args(argv)
 
     overrides = {"gemini_design_model": args.design_model} if args.design_model else {}
     if args.mock:
         overrides.update(provider="mock", decider="mock")
+    elif args.designer == "agy":
+        # agy drafts on a subscription; card advice stays mock so Gemini is never called.
+        # The decider (Jev) follows .env and still needs --allow-real.
+        overrides.update(provider="mock")
     settings = Settings(**overrides)
     if not args.allow_real and (settings.provider != "mock" or settings.decider != "mock"):
         parser.error(
@@ -667,6 +688,12 @@ def main(argv: list[str] | None = None) -> Path:
         parser.error("No cases match the requested modes")
     registry = load_registry()
     deps = build_deps(settings, registry)
+    agy_model = None
+    if args.designer == "agy":
+        from benchmarks.agy_designer import DEFAULT_MODEL, AgyDesigner
+
+        agy_model = args.agy_model or DEFAULT_MODEL
+        deps = replace(deps, designer=AgyDesigner(registry, agy_model, args.agy_effort))
     start_counter = (
         CountingStartWriter(deps.start_writer, args.intake_budget) if deps.start_writer else None
     )
@@ -691,7 +718,7 @@ def main(argv: list[str] | None = None) -> Path:
         ),
         "provider": settings.provider,
         "decider": f"{settings.decider} ({settings.jev_route})",
-        "design_model": design_model(settings),
+        "design_model": f"agy:{agy_model}" if agy_model else design_model(settings),
         "prompt": DESIGN_VERSION,
         "runs": args.runs,
         "label": args.label or "-",
