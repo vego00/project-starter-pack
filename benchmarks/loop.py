@@ -152,6 +152,19 @@ def decide(best: dict, candidate: dict) -> tuple[bool, str]:
     return False, f"거절 {before} → {after} (유지 기준 −2)"
 
 
+def average(first: dict, second: dict) -> dict:
+    """Per case, the mean of two measurements of the same prompt: the baseline a kept change
+    leaves for the next round, so one lucky measurement does not set the bar."""
+    out: dict = {}
+    for case in first:
+        a, b = first[case], second[case]
+        rules = {r: (a["rules"].get(r, 0) + b["rules"].get(r, 0)) / 2
+                 for r in a["rules"].keys() | b["rules"].keys()}  # fmt: skip
+        out[case] = {"runs": a["runs"], "model": (a["model"] + b["model"]) / 2,
+                     "single": (a["single"] + b["single"]) / 2, "rules": rules}  # fmt: skip
+    return out
+
+
 def problem_summary(measurement: dict, numbers: dict) -> str:
     """What the improvement agent sees: rule counts and a few rejections, no case names."""
     rules: Counter = Counter()
@@ -226,6 +239,14 @@ def write_report(work: Path, rounds: list[dict]) -> None:
                 continue
             top = ", ".join(f"{k} {v}" for k, v in Counter(m["rules"]).most_common(4)) or "-"
             lines.append(f"- {case}: {m['model']}/{m['runs']}, 첫 초안 {m['single']} · {top}")
+        if entry.get("confirm_metrics"):
+            again = entry["confirm_metrics"]
+            ok = [m for m in again.values() if not m.get("failed")]
+            lines.append(
+                f"- 확인 측정(2차): 맞춤 설계 {sum(m['model'] for m in ok)}"
+                f"/{sum(m['runs'] for m in ok)}, 첫 초안 {sum(m['single'] for m in ok)}, "
+                f"거절 {sum(sum(m['rules'].values()) for m in ok)}"
+            )
         if entry.get("judge"):
             lines.append(f"- 채점(참고용): {entry['judge']}")
         lines.append("")
@@ -280,8 +301,20 @@ def main(argv: list[str] | None = None) -> list[dict]:
             numbers = metrics(measured)
             keep, why = decide(best, numbers)
             entry = {"round": round_no, "ref": change["commit"], "metrics": numbers,
-                     "measurement": measured, "note": change.get("note"),
-                     "verdict": ("유지 · " if keep else "되돌림 · ") + why}  # fmt: skip
+                     "measurement": measured, "note": change.get("note")}  # fmt: skip
+            if keep:
+                # The same prompt measured twice moved by about ±3 first drafts and ±6
+                # rejections (rounds 1 and 3, 2026-11-19), so a pass is measured again and
+                # kept only if the second measurement passes too.
+                log(work, f"round {round_no}: passed ({why}), measuring again to confirm")
+                again = measure(work, change["commit"], f"{round_no}b", cases, args.runs)
+                again_numbers = metrics(again)
+                keep, why_again = decide(best, again_numbers)
+                why = f"1차 {why} · 2차 {why_again}"
+                entry.update(confirm_metrics=again_numbers, confirm_measurement=again)
+                if keep:
+                    numbers = average(numbers, again_numbers)
+            entry["verdict"] = ("유지 · " if keep else "되돌림 · ") + why
             if not args.no_judge:
                 entry["judge"] = judge(work, measured, round_no)
             rounds.append(entry)

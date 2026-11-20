@@ -71,3 +71,13 @@ def test_more_sending_before_approval_always_reverts():
 
 def test_a_failed_measurement_is_not_judged():
     assert loop.decide({"A": _m(1)}, {"A": {"failed": True}})[0] is False
+
+
+def test_two_measurements_of_a_kept_prompt_are_averaged():
+    first = {"A": _m(3, {"io.unconnected": 2}, single=3)}
+    second = {"A": _m(2, {"io.unconnected": 4, "x": 1}, single=1)}
+
+    mean = loop.average(first, second)["A"]
+
+    assert mean["model"] == 2.5 and mean["single"] == 2
+    assert mean["rules"] == {"io.unconnected": 3, "x": 0.5}
