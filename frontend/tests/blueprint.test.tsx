@@ -944,6 +944,58 @@ describe("BlueprintPanel", () => {
       expect.stringContaining("design="),
     );
   });
+
+  it("shows the build bundle files once a design exists", async () => {
+    const user = userEvent.setup();
+    const fetch = vi.fn(() =>
+      Promise.resolve(
+        Response.json({
+          files: [
+            { path: "AGENTS.md", content: "# 에이전트 규칙" },
+            { path: "BUILD.md", content: "# 만드는 법" },
+          ],
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetch);
+    const design = {
+      status: "review_required",
+      source: "mock",
+      error: null,
+      nodes: [],
+      first_task: "",
+      first_task_check: "",
+      unknowns: [],
+      warnings: [],
+      files: ["AGENTS.md", "BUILD.md"],
+    };
+    render(
+      <BlueprintPanel
+        journey={journey({ design })}
+        busy={false}
+        act={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "빌드 묶음" }));
+
+    expect(await screen.findByText("# 만드는 법")).toBeVisible();
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/package"),
+      expect.anything(),
+    );
+    await user.click(screen.getByRole("button", { name: "AGENTS.md" }));
+    expect(screen.getByText("# 에이전트 규칙")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "시스템 구성" }));
+    expect(screen.queryByText("# 에이전트 규칙")).toBeNull();
+  });
+
+  it("has no build bundle tab before a design exists", () => {
+    render(<BlueprintPanel journey={journey()} busy={false} act={vi.fn()} />);
+
+    expect(screen.queryByRole("button", { name: "빌드 묶음" })).toBeNull();
+  });
 });
 
 describe("addRename", () => {

@@ -281,6 +281,11 @@ def create_app(
     def get_blueprint_examples(journeys: Journeys):
         return _guarded(None, journeys.blueprint_examples)
 
+    @app.get("/api/v1/journeys/{journey_id}/package", responses=ERROR_RESPONSES)
+    def get_package_files(journey_id: UUID, journeys: Journeys):
+        files = _guarded(journey_id, lambda: journeys.package_files(journey_id))
+        return {"files": [{"path": path, "content": files[path]} for path in sorted(files)]}
+
     @app.get("/api/v1/journeys/{journey_id}/package.zip", responses=ERROR_RESPONSES)
     def get_package(journey_id: UUID, journeys: Journeys):
         archive = _guarded(journey_id, lambda: journeys.package(journey_id))

@@ -2221,3 +2221,85 @@ button.danger {
     overflow-y: auto;
   }
 }
+
+/* Build bundle view beside the graphs */
+.blueprint [hidden] {
+  display: none;
+}
+.package-loading {
+  padding: 12px 20px;
+}
+.package-files {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
+  gap: 12px;
+  height: 520px;
+  padding: 0 20px 12px;
+}
+.package-files nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: auto;
+  border-right: 1px solid var(--line);
+  padding-right: 8px;
+}
+.package-files nav button {
+  min-height: 0;
+  padding-block: 5px;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85rem;
+}
+.package-files nav button.on {
+  background: var(--tint-pressed);
+  color: var(--text);
+  font-weight: 700;
+}
+.package-files nav .button {
+  margin-top: 8px;
+}
+.package-files section {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.package-files h3 {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+}
+.package-files pre {
+  flex: 1;
+  margin: 0;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  /* Korean falls back to the app font when the monospace font has no Hangul. */
+  font-family: ui-monospace, Consolas, "IBM Plex Sans KR", monospace;
+  font-size: 0.85rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 720px) {
+  .package-files {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+    height: auto;
+  }
+  .package-files nav {
+    max-height: 180px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    padding: 0 0 8px;
+  }
+  .package-files pre {
+    max-height: 60vh;
+  }
+}

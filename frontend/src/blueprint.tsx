@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent, PointerEvent, SVGProps } from "react";
 import { designViewUrl, getBlueprintExamples } from "./api";
+import { PackageFiles } from "./packageFiles";
 import { SERVICE_ICONS } from "./serviceIcons";
 import type {
   Action,
@@ -1494,6 +1495,8 @@ export function BlueprintPanel({
     }
     layerChanged.current?.(layer);
   }, [layer]);
+  // The build bundle is a view beside the graphs, not a graph layer, so Layer stays as it is.
+  const [showFiles, setShowFiles] = useState(false);
   const [showHint] = useState(firstVisit);
   const [lastChange, setLastChange] = useState("");
   const [changed, setChanged] = useState<Set<string>>(new Set());
@@ -1893,26 +1896,44 @@ export function BlueprintPanel({
       <div className="blueprint-bar">
         <div className="segment" role="group" aria-label="그래프 종류">
           <button
-            className={layer === "agent" ? "on" : ""}
-            aria-pressed={layer === "agent"}
-            onClick={() => setLayer("agent")}
+            className={!showFiles && layer === "agent" ? "on" : ""}
+            aria-pressed={!showFiles && layer === "agent"}
+            onClick={() => {
+              setShowFiles(false);
+              setLayer("agent");
+            }}
           >
             에이전트 흐름
           </button>
           <button
-            className={layer === "system" ? "on" : ""}
-            aria-pressed={layer === "system"}
-            onClick={() => setLayer("system")}
+            className={!showFiles && layer === "system" ? "on" : ""}
+            aria-pressed={!showFiles && layer === "system"}
+            onClick={() => {
+              setShowFiles(false);
+              setLayer("system");
+            }}
           >
             시스템 구성
           </button>
           {modules.length > 0 && (
             <button
-              className={layer === "order" ? "on" : ""}
-              aria-pressed={layer === "order"}
-              onClick={() => setLayer("order")}
+              className={!showFiles && layer === "order" ? "on" : ""}
+              aria-pressed={!showFiles && layer === "order"}
+              onClick={() => {
+                setShowFiles(false);
+                setLayer("order");
+              }}
             >
               만드는 순서
+            </button>
+          )}
+          {journey.design && !example && (
+            <button
+              className={showFiles ? "on" : ""}
+              aria-pressed={showFiles}
+              onClick={() => setShowFiles(true)}
+            >
+              빌드 묶음
             </button>
           )}
         </div>
@@ -1968,7 +1989,10 @@ export function BlueprintPanel({
           {failure}
         </p>
       )}
-      <p className="blueprint-note">
+      {showFiles && journey.design && !example && (
+        <PackageFiles journeyId={journey.journey_id} />
+      )}
+      <p className="blueprint-note" hidden={showFiles}>
         {example
           ? `완성 예시예요. ${example.note}`
           : layer === "agent" && blueprint.agent_is_draft
@@ -1982,6 +2006,8 @@ export function BlueprintPanel({
       <div
         ref={canvasRef}
         className={`blueprint-canvas${zoom === null ? " fit" : ""}`}
+        // Kept mounted while the bundle shows, so its zoom and pan listeners stay attached.
+        style={showFiles ? { display: "none" } : undefined}
         onPointerDown={startPan}
         onPointerMove={movePan}
         onPointerUp={endPan}
@@ -2099,7 +2125,7 @@ export function BlueprintPanel({
             })}
         </svg>
       </div>
-      {isOrder && selected?.includes(":") && (
+      {!showFiles && isOrder && selected?.includes(":") && (
         <ModuleDetail
           modules={modules}
           open={selected}
@@ -2112,7 +2138,7 @@ export function BlueprintPanel({
           }}
         />
       )}
-      {isAgent && current?.step && (
+      {!showFiles && isAgent && current?.step && (
         <StepDetail
           node={current}
           isDraft={blueprint.agent_is_draft}
@@ -2123,7 +2149,7 @@ export function BlueprintPanel({
           onClose={() => setSelected(null)}
         />
       )}
-      {notes.length > 0 && (
+      {!showFiles && notes.length > 0 && (
         <div className="bp-notes" role="group" aria-label="칸이 없는 결정">
           {SERVICE_GROUPS.filter((group) =>
             notes.some((note) => note.group === group.id),
@@ -2153,7 +2179,7 @@ export function BlueprintPanel({
           ))}
         </div>
       )}
-      <div className="blueprint-detail">
+      <div className="blueprint-detail" hidden={showFiles}>
         {lastChange && !example ? (
           <span>
             <strong>방금 반영:</strong> {lastChange}
