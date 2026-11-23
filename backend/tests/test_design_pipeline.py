@@ -380,6 +380,7 @@ def test_the_package_has_files_for_both_kinds_of_agent(design):
         "BUILD.md",
         "CLAUDE.md",
         "AGENTS.md",
+        "docs/build-notes.md",
         ".claude/settings.json",
         ".claude/skills/build-service/SKILL.md",
         ".claude/skills/verify-design/SKILL.md",
@@ -392,6 +393,19 @@ def test_the_package_has_files_for_both_kinds_of_agent(design):
     } == set(files)
 
 
+def test_agents_md_holds_the_rules_and_claude_md_imports_it(design):
+    files = build_package(design, REGISTRY, IDEA)
+
+    assert files["AGENTS.md"].startswith("# AGENTS.md\n")
+    assert "## 이 프로젝트" in files["AGENTS.md"]
+    assert "Think Before Coding" in files["AGENTS.md"]
+    assert files["CLAUDE.md"].splitlines()[2] == "@AGENTS.md"
+    assert "Think Before Coding" not in files["CLAUDE.md"]
+    assert "1. `AGENTS.md`와 `docs/lessons.md`를 읽는다." in files["BUILD.md"]
+    assert "docs/build-notes.md" in files["BUILD.md"]
+    assert "## 막힌 곳" in files["docs/build-notes.md"]
+
+
 def test_the_build_order_lists_modules_with_their_start_conditions(design):
     files = build_package(design, REGISTRY, IDEA)
     build = files["BUILD.md"]
@@ -401,7 +415,7 @@ def test_the_build_order_lists_modules_with_their_start_conditions(design):
     assert "## 만드는 순서" in build
     assert "핵심 요구사항마다 평가 사례를 먼저 쓰고" in build
     assert "답변 응답 시간: 목표치를 시작 전에 사용자에게 묻는다" in build
-    assert "docs/gates.md" in files["CLAUDE.md"]
+    assert "docs/gates.md" in files["AGENTS.md"]
 
 
 def test_every_start_condition_gets_a_line_to_record_it(design):
