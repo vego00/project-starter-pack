@@ -264,6 +264,36 @@ def _skipped(design: ServiceDesign) -> set[str]:
     return {ref.card_id for ref in design.provenance.decisions if ref.by == "skipped"}
 
 
+def _containers(chosen: Mapping[str, str]) -> list[str]:
+    """The containers the card choices call for, so a build needs only Docker on the computer."""
+    found = ["앱: 서비스 코드와 언어 런타임. 이 컴퓨터에 설치하지 않고 이미지 안에서 실행한다."]
+    if "postgres" in (chosen.get("data.primary_db"), chosen.get("data.checkpointer")) or (
+        chosen.get("data.vector_store") == "pgvector"
+    ):
+        extension = " pgvector 확장이 든 이미지를 쓴다." if chosen.get(
+            "data.vector_store") == "pgvector" else ""  # fmt: skip
+        kept = [name for name, on in (
+            ("데이터", chosen.get("data.primary_db") == "postgres"),
+            ("검색 색인", chosen.get("data.vector_store") == "pgvector"),
+            ("실행 상태", chosen.get("data.checkpointer") == "postgres")) if on]  # fmt: skip
+        found.append(f"PostgreSQL: {', '.join(kept)}를 볼륨에 저장한다.{extension}")
+    if chosen.get("data.primary_db") == "sqlite":
+        found.append("SQLite: 별도 컨테이너 없이 앱 컨테이너의 볼륨에 파일로 둔다.")
+    if chosen.get("data.vector_store") == "qdrant":
+        found.append("Qdrant: 검색 색인을 볼륨에 저장한다.")
+    if chosen.get("data.vector_store") == "chroma":
+        found.append("Chroma: 검색 색인을 볼륨에 저장한다.")
+    if chosen.get("backend.execution") == "queue":
+        found.append(
+            "작업 큐와 워커: 큐 브로커 컨테이너와, 앱 이미지로 띄우는 워커 컨테이너를 둔다."
+        )
+    if "ollama" in (chosen.get("model.provider"), chosen.get("mlops.model_serving")):
+        found.append("Ollama: 모델 파일은 볼륨에 두고, 받기 전에 용량을 사용자에게 확인한다.")
+    if chosen.get("mlops.model_serving") == "vllm":
+        found.append("vLLM: GPU가 필요하다. 장비를 먼저 확인한다.")
+    return found
+
+
 def _infrastructure_doc(design: ServiceDesign, registry: Registry) -> str:
     chosen = _chosen(design, registry)
     skipped = _skipped(design)
@@ -294,8 +324,13 @@ def _infrastructure_doc(design: ServiceDesign, registry: Registry) -> str:
             *[f"- 감수할 점: {con}" for con in option.cons],
             "",
         ]
+    lines += ["## 컨테이너 목록", "",
+              "모두 `docker compose`로 띄운다. 이미지 버전은 받을 때 공식 문서에서 정해 고정한다.", "",
+              *_bullets(_containers(chosen)), ""]  # fmt: skip
     lines += ["## 사람이 직접 할 일", ""]
-    steps = ["필요한 도구의 설치 방법과 버전을 공식 문서에서 확인한다."]
+    steps = [
+        "Docker와 Docker Compose를 설치하고 실행 중인지 확인한다. 다른 도구는 컨테이너 안에 둔다."
+    ]
     if chosen.get("model.provider") in EXTERNAL_KEY_PROVIDERS:
         steps.append(
             "모델 제공자의 API 키를 발급받아 커밋하지 않는 `.env`에 넣는다. 키를 대화에 붙여넣지 않는다."
@@ -328,6 +363,12 @@ def _build_doc(design: ServiceDesign, idea: str, modules: list[ModulePlan]) -> s
             "",
             "## 진행 방법",
             "",
+            "0. 개발 환경을 준비한다. 이 컴퓨터에 필요한 것은 Docker와 Docker Compose뿐이다. "
+            "앱, 데이터베이스, 모델 서버는 `docs/infrastructure.md`의 컨테이너 목록대로 모두 "
+            "`docker compose`로 띄우고 이미지 버전을 고정한다. Docker가 없거나 꺼져 있으면 사용자에게 "
+            "알리고 멈춘다. 이 컴퓨터에 언어나 도구가 없다는 이유로 설계를 줄이지 말고 컨테이너 안에서 "
+            "해결한다. 큰 이미지나 모델 파일은 용량을 알리고 사용자가 확인한 뒤 받는다. "
+            "`docker compose up` 뒤 서비스마다 상태를 확인하면 이 단계가 끝난다.",
             "1. `AGENTS.md`와 `docs/lessons.md`를 읽는다.",
             "2. `docs/multi-agent-design.md`를 읽고 미확인 사항을 사용자에게 먼저 묻는다.",
             "3. `docs/infrastructure.md`에서 사람이 할 일을 사용자에게 알리고 끝났는지 확인한다.",
