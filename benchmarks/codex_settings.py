@@ -1,12 +1,16 @@
-"""The Codex model both loop roles use (judge and improvement agent), set once.
+"""The Codex models the loop roles use, set once.
 
---ignore-user-config drops ~/.codex/config.toml, so the model has to be named here.
-Chosen by the author on 2026-11-20: Astra 6.2 at low reasoning effort.
+--ignore-user-config drops ~/.codex/config.toml, so the models have to be named here.
+Improvement agent: Astra 6.2 at low reasoning effort (author, 2026-11-20).
+Judge: GPT-6.2 Sol without reasoning (author, 2026-11-23). Astra 6.2 low allowed only about 30
+judge calls per usage window on the author's plan, so a loop run stopped halfway.
 """
 
 CODEX_MODEL = "gpt-6.2-astra"
 CODEX_EFFORT = "low"
+JUDGE_MODEL = "gpt-6.2-sol"
+JUDGE_EFFORT = "none"
 
 
-def codex_model_args() -> list[str]:
-    return ["-m", CODEX_MODEL, "-c", f"model_reasoning_effort={CODEX_EFFORT}"]
+def codex_model_args(model: str = CODEX_MODEL, effort: str = CODEX_EFFORT) -> list[str]:
+    return ["-m", model, "-c", f"model_reasoning_effort={effort}"]

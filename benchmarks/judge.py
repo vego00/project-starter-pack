@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 sys.path.insert(0, str(ROOT))
 
-from benchmarks.codex_settings import CODEX_EFFORT, CODEX_MODEL, codex_model_args  # noqa: E402
+from benchmarks.codex_settings import JUDGE_EFFORT, JUDGE_MODEL, codex_model_args  # noqa: E402
 from benchmarks.design_view import render_design  # noqa: E402
 from benchmarks.replay_to_app import saved_design  # noqa: E402
 from benchmarks.run import load_cases  # noqa: E402
@@ -97,7 +97,7 @@ def judge_one(prompt: str, timeout_s: int = 900) -> dict:
                 str(schema),
                 "-o",
                 str(answer),
-                *codex_model_args(),
+                *codex_model_args(JUDGE_MODEL, JUDGE_EFFORT),
             ],  # fmt: skip
             input=prompt,
             cwd=folder,
@@ -135,7 +135,7 @@ def main(argv: list[str] | None = None) -> None:
     def run(job):
         jid, case_id, prompt = job
         print(f"start: {jid}", flush=True)
-        result = {"id": jid, "case": case_id, "model": CODEX_MODEL, "effort": CODEX_EFFORT}
+        result = {"id": jid, "case": case_id, "model": JUDGE_MODEL, "effort": JUDGE_EFFORT}
         result.update(prompt=prompt, **judge_one(prompt))
         (out / f"judge-{jid}.json").write_text(
             json.dumps(result, ensure_ascii=False, indent=1), "utf-8"
