@@ -558,6 +558,20 @@ def test_pain_point_to_downloadable_package():
     assert "starter-pack/BUILD.md" in names
 
 
+def test_the_bundle_can_be_read_as_files_matching_the_zip():
+    with make_client(ScriptedDesigner(draft())) as client:
+        view = run_journey(client)
+        files = client.get(f"/api/v1/journeys/{view['journey_id']}/package").json()["files"]
+        archive = client.get(f"/api/v1/journeys/{view['journey_id']}/package.zip")
+
+    zipped = zipfile.ZipFile(io.BytesIO(archive.content))
+    paths = [f["path"] for f in files]
+    assert paths == sorted(paths) and "BUILD.md" in paths
+    assert {f"starter-pack/{f['path']}": f["content"] for f in files} == {
+        name: zipped.read(name).decode("utf-8") for name in zipped.namelist()
+    }
+
+
 def test_without_a_model_the_journey_still_ends_with_a_labelled_template():
     with make_client() as client:
         view = run_journey(client)
@@ -664,10 +678,14 @@ def test_no_design_before_the_journey_ends():
 def test_no_package_before_the_journey_ends():
     with make_client() as client:
         view = client.post("/api/v1/journeys", json={"idea": IDEA}).json()
-        response = client.get(f"/api/v1/journeys/{view['journey_id']}/package.zip")
+        responses = [
+            client.get(f"/api/v1/journeys/{view['journey_id']}/{name}")
+            for name in ("package.zip", "package")
+        ]
 
-    assert response.status_code == 409
-    assert response.json()["error"]["code"] == "package_unavailable"
+    for response in responses:
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "package_unavailable"
 
 
 def test_the_schema_sent_to_the_model_drops_only_what_the_provider_rejects():

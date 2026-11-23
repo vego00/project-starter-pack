@@ -474,6 +474,20 @@ export function designViewUrl(id: string): string {
   return `/?design=${id}`;
 }
 
+const packageFilesSchema = z.object({
+  files: z.array(z.object({ path: z.string(), content: z.string() })),
+});
+
+export type PackageFile = z.infer<typeof packageFilesSchema>["files"][number];
+
+export async function getPackageFiles(id: string): Promise<PackageFile[]> {
+  const body = await request(
+    `/api/v1/journeys/${id}/package`,
+    packageFilesSchema,
+  );
+  return body.files;
+}
+
 export function packageUrl(id: string): string {
   return `/api/v1/journeys/${id}/package.zip`;
 }

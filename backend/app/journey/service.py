@@ -314,14 +314,17 @@ class JourneyService:
         return blueprint_examples(self._registry)
 
     def package(self, journey_id: UUID) -> bytes:
+        return package_zip(self.package_files(journey_id))
+
+    def package_files(self, journey_id: UUID) -> dict[str, str]:
+        """The build bundle as path to content: what package.zip holds, for viewing."""
         with self._lock(journey_id):
             state = JourneyState.model_validate(self._snapshot(journey_id).values)
         if state.design.current is None:
             raise JourneyError(409, "package_unavailable", "결정을 모두 마치면 받을 수 있어요.")
-        files = build_package(
+        return build_package(
             state.design.current, self._registry, state.project_spec.idea, state.module_notes
         )
-        return package_zip(files)
 
     def _design_view(self, state: JourneyState) -> DesignView | None:
         design: ServiceDesign | None = state.design.current
