@@ -2,7 +2,7 @@
 
 Usage: uv run --locked python benchmarks/improve.py <base ref> <round> <problems.md> <work dir>
 
-Makes branch loop/round-<round> from <base ref> in a sparse worktree that holds only the two
+Makes branch loop/<work dir name>/round-<round> from <base ref> in a sparse worktree that holds only the two
 files the agent may edit: backend/app/journey/prompts.py and design_generator.py. Cases,
 review criteria, the validator and reports are not checked out, so the agent cannot read them.
 Codex gets the problem summary and runs with workspace-write inside that folder, without saved
@@ -92,7 +92,8 @@ def version_of(source: str) -> str | None:
 def main(argv: list[str]) -> dict:
     base, round_no, problems_file, work = argv
     version = f"design-loop-r{round_no}"
-    branch = f"loop/round-{round_no}"
+    # Named after the work dir, so a second loop run does not collide with the first one's branches.
+    branch = f"loop/{Path(work).name}/round-{round_no}"
     folder = Path(work) / f"improve-r{round_no}"
     git("worktree", "add", "--no-checkout", "-b", branch, str(folder), base)
     git("sparse-checkout", "set", "--no-cone", f"/{PROMPTS}", f"/{GENERATOR}", cwd=folder)
