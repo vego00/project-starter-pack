@@ -81,3 +81,60 @@ def test_two_measurements_of_a_kept_prompt_are_averaged():
 
     assert mean["model"] == 2.5 and mean["single"] == 2
     assert mean["rules"] == {"io.unconnected": 3, "x": 0.5}
+
+
+def _j(score, model=3, single=3, rules=None):
+    return {**_m(model, rules, single), "judge": score}
+
+
+def test_a_judge_gain_of_five_points_is_kept_and_less_is_not():
+    best = {"A": _j(0.60), "B": _j(0.70)}
+
+    assert loop.decide(best, {"A": _j(0.66), "B": _j(0.74)})[0]
+    assert not loop.decide(best, {"A": _j(0.62), "B": _j(0.72)})[0]
+
+
+def test_with_judge_scores_floors_still_revert():
+    best = {"A": _j(0.5, single=3), "B": _j(0.5, single=3)}
+
+    assert not loop.decide(best, {"A": _j(0.9, model=2), "B": _j(0.9)})[0]
+    assert not loop.decide(best, {"A": _j(0.9, rules={loop.CORE_RULE: 1}), "B": _j(0.9)})[0]
+    assert loop.decide(best, {"A": _j(0.9, single=2), "B": _j(0.9, single=2)})[0]
+    assert not loop.decide(best, {"A": _j(0.9, single=1), "B": _j(0.9, single=2)})[0]
+
+
+def test_a_case_the_judge_could_not_score_is_not_decided():
+    best = {"A": _j(0.5), "B": _j(0.5)}
+
+    keep, why = loop.decide(best, {"A": _j(0.9), "B": _j(None)})
+
+    assert not keep and "채점" in why
+
+
+def test_judge_scores_average_per_case_and_keep_notes_below_full_marks(tmp_path):
+    import json
+
+    def score(*points):
+        return {"result": {"scores": [
+            {"criterion": i, "score": p, "quote": "", "reason": f"이유{i}"}
+            for i, p in enumerate(points, 1)]}}  # fmt: skip
+
+    key = {"J-1": "r0-C1-1", "J-2": "r0-C1-2", "J-3": "r0-C4-design-1", "J-4": "r0-C8-1"}
+    (tmp_path / "judge-key.json").write_text(json.dumps(key))
+    (tmp_path / "judge-J-1.json").write_text(json.dumps(score(2, 2)))
+    (tmp_path / "judge-J-2.json").write_text(json.dumps(score(2, 0)))
+    (tmp_path / "judge-J-3.json").write_text(json.dumps(score(1, 1)))
+    (tmp_path / "judge-J-4.json").write_text(json.dumps({"error": "exit 1"}))
+
+    scored = loop.judge_scores(tmp_path)
+
+    assert scored["C1"]["score"] == 0.75
+    assert scored["C4-design"]["score"] == 0.5
+    assert "C8" not in scored
+    assert scored["C1"]["notes"] == ["기준 2 (0/2): 이유2"]
+
+
+def test_averaging_keeps_the_judge_score():
+    mean = loop.average({"A": _j(0.6)}, {"A": _j(0.8)})["A"]
+
+    assert abs(mean["judge"] - 0.7) < 1e-9

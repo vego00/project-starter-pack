@@ -38,6 +38,12 @@ DEV_CASES = ["C1", "C2", "C4-design", "C8"]
 HELD_OUT_CASES = ["C5", "C6"]
 AGY_MODEL = "gemini-3.8-flash-low"
 CORE_RULE = "permission.write_without_approval"
+# Rule counts reached their ceiling (11/12 first drafts, 1 rejection on 2026-11-20), so since
+# 2026-11-23 the judge's score decides. A change must raise the mean by this much on both the
+# measurement and its confirmation. Judge noise is not measured yet; the confirmation guards it.
+JUDGE_GAIN = 0.05
+# Same prompt measured twice moved first-draft passes by about 3 (2026-11-19).
+SINGLE_SLACK = 2
 
 
 def log(work: Path, text: str) -> None:
@@ -126,7 +132,14 @@ def metrics(measurement: dict) -> dict:
 
 
 def decide(best: dict, candidate: dict) -> tuple[bool, str]:
-    """Keep a change only if drafts are rejected clearly less often and nothing else slips.
+    """Keep a change if the judge scores it clearly higher and nothing else slips.
+
+    With judge scores on both sides (the default since 2026-11-23): sending before approval may
+    never increase, designs that met the rules may not drop, first-draft passes may drop by at
+    most SINGLE_SLACK, and the mean judge score must rise by JUDGE_GAIN. Without them (--no-judge)
+    the older rejection rule below applies.
+
+    Older rule: keep a change only if drafts are rejected clearly less often and nothing else slips.
 
     Designs that met the rules already sit at the ceiling (12/12 in round 0, 2026-11-19), so
     they and single-draft passes are floors that must not drop. The gain is counted in
@@ -146,9 +159,23 @@ def decide(best: dict, candidate: dict) -> tuple[bool, str]:
     core_after = sum(m["rules"].get(CORE_RULE, 0) for m in candidate.values())
     if core_after > core_before:
         return False, f"승인 전 외부 쓰기가 늘었음 ({core_before} → {core_after})"
-    for key, name in (("model", "맞춤 설계"), ("single", "첫 초안 통과")):
-        if total(candidate, key) < total(best, key):
-            return False, f"{name}가 줄었음 ({total(best, key)} → {total(candidate, key)})"
+    if total(candidate, "model") < total(best, "model"):
+        return False, f"맞춤 설계가 줄었음 ({total(best, 'model')} → {total(candidate, 'model')})"
+    if judge_mean(best) is not None and judge_mean(candidate) is not None:
+        if total(candidate, "single") < total(best, "single") - SINGLE_SLACK:
+            return False, (f"첫 초안 통과가 {SINGLE_SLACK}개 넘게 줄었음 "
+                           f"({total(best, 'single')} → {total(candidate, 'single')})")  # fmt: skip
+        before_score, after_score = judge_mean(best), judge_mean(candidate)
+        if after_score - before_score >= JUDGE_GAIN - 1e-9:
+            return True, f"채점 {before_score:.2f} → {after_score:.2f}"
+        return False, f"채점 {before_score:.2f} → {after_score:.2f} (유지 기준 +{JUDGE_GAIN})"
+    if any("judge" in m for m in candidate.values()):
+        return False, "채점이 빠진 사례가 있어 판정하지 않음"
+    if total(candidate, "single") < total(best, "single"):
+        return (
+            False,
+            f"첫 초안 통과가 줄었음 ({total(best, 'single')} → {total(candidate, 'single')})",
+        )
     before, after = rejections(best), rejections(candidate)
     if before - after >= 2:
         return True, f"거절 {before} → {after}"
@@ -165,11 +192,44 @@ def average(first: dict, second: dict) -> dict:
                  for r in a["rules"].keys() | b["rules"].keys()}  # fmt: skip
         out[case] = {"runs": a["runs"], "model": (a["model"] + b["model"]) / 2,
                      "single": (a["single"] + b["single"]) / 2, "rules": rules}  # fmt: skip
+        if a.get("judge") is not None and b.get("judge") is not None:
+            out[case]["judge"] = (a["judge"] + b["judge"]) / 2
     return out
 
 
-def problem_summary(measurement: dict, numbers: dict) -> str:
-    """What the improvement agent sees: rule counts and a few rejections, no case names."""
+def judge_mean(numbers: dict) -> float | None:
+    """Mean of the per-case judge scores, each case weighted alike; None if any case lacks one."""
+    scores = [m.get("judge") for m in numbers.values()]
+    if not scores or any(s is None for s in scores):
+        return None
+    return sum(scores) / len(scores)
+
+
+def judge_scores(out: Path) -> dict:
+    """Per case from a judge run: mean score (0..1, criteria scored 0-2) and the judge's notes on
+    criteria below full marks. Designs the judge failed on are left out of the mean."""
+    key = json.loads((out / "judge-key.json").read_text("utf-8"))
+    per: dict[str, dict] = {}
+    for jid, label in key.items():
+        path = out / f"judge-{jid}.json"
+        if not path.exists():
+            continue
+        found = json.loads(path.read_text("utf-8"))
+        if "result" not in found:
+            continue
+        case = label.split("-", 1)[1].rsplit("-", 1)[0]
+        scores = found["result"]["scores"]
+        entry = per.setdefault(case, {"scores": [], "notes": []})
+        entry["scores"].append(sum(s["score"] for s in scores) / (2 * len(scores)))
+        entry["notes"] += [f"기준 {s['criterion']} ({s['score']}/2): {s['reason']}"
+                           for s in scores if s["score"] < 2]  # fmt: skip
+    return {case: {"score": sum(e["scores"]) / len(e["scores"]), "notes": e["notes"]}
+            for case, e in per.items() if e["scores"]}  # fmt: skip
+
+
+def problem_summary(measurement: dict, numbers: dict, notes: list[str] | None = None) -> str:
+    """What the improvement agent sees: rule counts, a few rejections and the judge's notes on
+    criteria below full marks, without case names."""
     rules: Counter = Counter()
     for case_metrics in numbers.values():
         rules.update(case_metrics.get("rules", {}))
@@ -185,6 +245,10 @@ def problem_summary(measurement: dict, numbers: dict) -> str:
         body = [ln for ln in rescore(results["results"]) if not ln.startswith("## ")]
         examples += [ln for ln in body if ln.startswith(("- `", "  - ")) and "고칠 점" not in ln]
     lines += ["", "거절 예시(노드 이름은 예시일 뿐 프롬프트에 넣지 않는다):", *examples[:20]]
+    if notes:
+        mean = judge_mean(numbers)
+        lines += ["", f"채점 평균 {mean:.2f} (0~1). 채점자가 만점을 주지 않은 이유(사례 내용은 예시일 뿐 "
+                  "프롬프트에 넣지 않는다):", *[f"- {n}" for n in notes[:30]]]  # fmt: skip
     return "\n".join(lines)
 
 
@@ -203,12 +267,26 @@ def judge(work: Path, measurement: dict, round_no: int) -> str | None:
     picks_file = work / f"judge-r{round_no}-picks.json"
     picks_file.write_text(json.dumps(picks, ensure_ascii=False, indent=1), "utf-8")
     out = work / f"judge-r{round_no}"
-    log(work, f"round {round_no}: judging {len(picks)} designs (recorded only)")
+    log(work, f"round {round_no}: judging {len(picks)} designs")
     with open(work / "logs" / f"r{round_no}-judge.log", "w", encoding="utf-8") as handle:
         subprocess.run(["uv", "run", "--locked", "python", "benchmarks/judge.py",
                         str(picks_file), str(out)], cwd=ROOT, stdout=handle,
                        stderr=subprocess.STDOUT)  # fmt: skip
     return str(out)
+
+
+def add_judge(work: Path, measurement: dict, numbers: dict, round_no) -> tuple[str | None, list]:
+    """Judge the measurement's designs and put each case's mean score into numbers."""
+    out = judge(work, measurement, round_no)
+    if out is None:
+        return None, []
+    scored = judge_scores(Path(out))
+    notes: list[str] = []
+    for case, m in numbers.items():
+        if not m.get("failed"):
+            m["judge"] = scored.get(case, {}).get("score")
+            notes += scored.get(case, {}).get("notes", [])
+    return out, notes
 
 
 def improve(work: Path, base: str, round_no: int, summary: str) -> dict:
@@ -241,7 +319,10 @@ def write_report(work: Path, rounds: list[dict]) -> None:
                 lines.append(f"- {case}: 측정 실패")
                 continue
             top = ", ".join(f"{k} {v}" for k, v in Counter(m["rules"]).most_common(4)) or "-"
-            lines.append(f"- {case}: {m['model']}/{m['runs']}, 첫 초안 {m['single']} · {top}")
+            score = f", 채점 {m['judge']:.2f}" if m.get("judge") is not None else ""
+            lines.append(
+                f"- {case}: {m['model']}/{m['runs']}, 첫 초안 {m['single']}{score} · {top}"
+            )
         if entry.get("confirm_metrics"):
             again = entry["confirm_metrics"]
             ok = [m for m in again.values() if not m.get("failed")]
@@ -250,8 +331,10 @@ def write_report(work: Path, rounds: list[dict]) -> None:
                 f"/{sum(m['runs'] for m in ok)}, 첫 초안 {sum(m['single'] for m in ok)}, "
                 f"거절 {sum(sum(m['rules'].values()) for m in ok)}"
             )
-        if entry.get("judge"):
-            lines.append(f"- 채점(참고용): {entry['judge']}")
+        if judge_mean(numbers) is not None:
+            lines.append(f"- 채점 평균 {judge_mean(numbers):.2f} · {entry.get('judge')}")
+        if entry.get("confirm_metrics") and judge_mean(entry["confirm_metrics"]) is not None:
+            lines.append(f"- 확인 측정 채점 평균 {judge_mean(entry['confirm_metrics']):.2f}")
         lines.append("")
     (work / "loop-report.md").write_text("\n".join(lines), "utf-8")
 
@@ -288,12 +371,16 @@ def main(argv: list[str] | None = None) -> list[dict]:
         first = measure(work, best_ref, 0, cases, args.runs)
         best = metrics(first)
         rounds = [{"round": 0, "ref": best_ref, "metrics": best, "measurement": first}]
+        notes: list[str] = []
         if not args.no_judge:
-            rounds[0]["judge"] = judge(work, first, 0)
+            rounds[0]["judge"], notes = add_judge(work, first, best, 0)
     write_report(work, rounds)
     last, misses = first, 0
+    if args.baseline:
+        notes = rounds[0].get("judge_notes", [])
+    rounds[0]["judge_notes"] = notes
     for round_no in range(1, args.rounds + 1):
-        change = improve(work, best_ref, round_no, problem_summary(last, best))
+        change = improve(work, best_ref, round_no, problem_summary(last, best, notes))
         if change.get("problems") or not change.get("commit"):
             entry = {"round": round_no, "ref": "-", "metrics": {}, "verdict": "변경 무효",
                      "note": "; ".join(change.get("problems", [])), "change": change}  # fmt: skip
@@ -302,6 +389,8 @@ def main(argv: list[str] | None = None) -> list[dict]:
         else:
             measured = measure(work, change["commit"], round_no, cases, args.runs)
             numbers = metrics(measured)
+            judged, new_notes = (None, []) if args.no_judge else add_judge(
+                work, measured, numbers, round_no)  # fmt: skip
             keep, why = decide(best, numbers)
             entry = {"round": round_no, "ref": change["commit"], "metrics": numbers,
                      "measurement": measured, "note": change.get("note")}  # fmt: skip
@@ -312,17 +401,21 @@ def main(argv: list[str] | None = None) -> list[dict]:
                 log(work, f"round {round_no}: passed ({why}), measuring again to confirm")
                 again = measure(work, change["commit"], f"{round_no}b", cases, args.runs)
                 again_numbers = metrics(again)
+                if not args.no_judge:
+                    entry["confirm_judge"], _ = add_judge(
+                        work, again, again_numbers, f"{round_no}b"
+                    )
                 keep, why_again = decide(best, again_numbers)
                 why = f"1차 {why} · 2차 {why_again}"
                 entry.update(confirm_metrics=again_numbers, confirm_measurement=again)
                 if keep:
                     numbers = average(numbers, again_numbers)
             entry["verdict"] = ("유지 · " if keep else "되돌림 · ") + why
-            if not args.no_judge:
-                entry["judge"] = judge(work, measured, round_no)
+            entry.update(judge=judged, judge_notes=new_notes)
             rounds.append(entry)
             if keep:
                 best_ref, best, last, misses = change["commit"], numbers, measured, 0
+                notes = new_notes
             else:
                 misses += 1
         log(work, f"round {round_no}: {entry['verdict']}")
