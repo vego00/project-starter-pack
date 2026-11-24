@@ -13,7 +13,7 @@
   min-height: 44px;
   padding: 8px;
   border: 1px solid var(--control-line);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--surface);
 }
 .studio-body {
@@ -37,7 +37,6 @@
 }
 .studio-canvas {
   border: 1px solid var(--line);
-  border-radius: 8px;
   background: var(--surface);
   overflow: hidden;
 }
@@ -48,7 +47,12 @@
   padding: 11px 0;
   cursor: pointer;
 }
+/* The library default (#999 on a half-white box) reads below 4.5:1 in both themes. */
+.studio-canvas .react-flow__attribution {
+  background: var(--surface);
+}
 .studio-canvas .react-flow__attribution a {
+  color: var(--muted);
   display: inline-flex;
   align-items: center;
   min-height: 44px;
@@ -91,7 +95,7 @@
   min-height: 44px;
   padding: 8px 10px;
   border: 1px solid var(--control-line);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--surface);
 }
 .studio .field.grow {

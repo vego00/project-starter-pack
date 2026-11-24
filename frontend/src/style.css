@@ -6,6 +6,9 @@
   font-synthesis: none;
   font-size: 87.5%;
   line-height: 1.6;
+  /* Korean breaks between words, not inside them ("12개" stays whole); long codes still wrap. */
+  word-break: keep-all;
+  overflow-wrap: break-word;
   --bg: #ffffff;
   --surface: #ffffff;
   --raised: #ffffff;
@@ -1138,9 +1141,6 @@ button.danger {
   border-top: 1px solid var(--line);
   border-radius: 4px;
 }
-.start-field.rule + .start-field:not(.rule) {
-  border-top: 2px solid var(--control-line);
-}
 .start-field.focused {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
@@ -1281,6 +1281,10 @@ button.danger {
 .start-fresh {
   font-size: 0.86rem;
 }
+.start-reference {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
 .start-asked {
   color: var(--accent);
   font-size: 0.86rem;
@@ -1376,11 +1380,25 @@ button.danger {
   font-size: 1.25rem;
   margin-bottom: 2px;
 }
+.sample-scroll {
+  overflow-x: auto;
+  margin: 16px 0;
+}
+.sample-scroll:focus-visible {
+  outline: 3px solid var(--primary);
+  outline-offset: 2px;
+}
 .sample-preview {
   display: block;
   width: 100%;
   max-height: 56vh;
-  margin: 16px 0;
+}
+.scroll-cue {
+  margin: 0;
+  font-size: 0.9rem;
+}
+.blueprint .scroll-cue {
+  padding: 6px 20px 0;
 }
 .brief-page {
   max-width: 1080px;
@@ -1632,9 +1650,10 @@ button.danger {
   stroke-width: 2.5;
   stroke-dasharray: 3 3;
 }
-.bp-node.changed rect {
-  stroke: var(--accent);
-  stroke-width: 2;
+/* Changed, not current: the accent stays on the one place being decided (DESIGN.md). */
+.bp-node.changed:not(.current) rect {
+  stroke: var(--text);
+  stroke-width: 2.5;
 }
 .bp-node.editable:hover rect {
   stroke: var(--text);
@@ -1987,9 +2006,9 @@ button.danger {
   stroke-width: 2.5;
   stroke-dasharray: 3 3;
 }
-.bp-service.changed .bp-tile {
-  stroke: var(--accent);
-  stroke-width: 2;
+.bp-service.changed:not(.current) .bp-tile {
+  stroke: var(--text);
+  stroke-width: 2.5;
 }
 .bp-service.editable:hover .bp-tile {
   stroke: var(--text);
@@ -2018,8 +2037,8 @@ button.danger {
   pointer-events: none;
 }
 .bp-stack.changed .bp-stack-frame {
-  stroke: var(--accent);
-  stroke-width: 2;
+  stroke: var(--text);
+  stroke-width: 2.5;
 }
 .bp-stack-head {
   cursor: grab;
@@ -2054,8 +2073,8 @@ button.danger {
   stroke-dasharray: 3 3;
 }
 .bp-row.changed rect {
-  stroke: var(--accent);
-  stroke-width: 2;
+  stroke: var(--text);
+  stroke-width: 2.5;
 }
 .bp-row.current rect {
   fill: var(--accent-tint);
@@ -2169,6 +2188,15 @@ button.danger {
   .workspace-card {
     border-left: 0;
     border-bottom: 1px solid var(--line);
+  }
+  /* Stacked, the page scrolls, so the graph takes its own height instead of floating in a fixed box. */
+  .blueprint-canvas {
+    height: auto;
+  }
+  .blueprint-canvas.fit svg {
+    position: static;
+    width: 100%;
+    height: auto;
   }
 }
 /* The page itself never scrolls here, so the graph stays put while the card scrolls alone. */

@@ -503,7 +503,9 @@ describe("decision card", () => {
   it("sends the current revision when the recommended option is taken", async () => {
     const { user, mock } = await startWith(journey());
 
-    await user.click(await screen.findByRole("button", { name: "없음 선택" }));
+    await user.click(
+      await screen.findByRole("button", { name: "없음 이걸로 정하기" }),
+    );
 
     expect(bodyOf(mock.mock.calls[1])).toEqual({
       revision: 7,
@@ -672,7 +674,9 @@ describe("decision card", () => {
     await waitFor(() => expect(mock).toHaveBeenCalledTimes(2));
     expect(bodyOf(mock.mock.calls[1]).action).toEqual({ action: "defer" });
 
-    await user.click(screen.getByRole("button", { name: "없음 선택" }));
+    await user.click(
+      screen.getByRole("button", { name: "없음 이걸로 정하기" }),
+    );
     await waitFor(() => expect(mock).toHaveBeenCalledTimes(3));
     expect(bodyOf(mock.mock.calls[2]).action).toEqual({
       action: "accept_recommendation",
@@ -681,7 +685,9 @@ describe("decision card", () => {
 
   it("ignores a second click while a request is in flight", async () => {
     const { user, mock } = await startWith(journey());
-    const button = await screen.findByRole("button", { name: "없음 선택" });
+    const button = await screen.findByRole("button", {
+      name: "없음 이걸로 정하기",
+    });
     let release = (_: Response) => {};
     mock.mockImplementation(
       () => new Promise<Response>((resolve) => (release = resolve)),
@@ -708,7 +714,9 @@ describe("decision card", () => {
         : Response.json(newer),
     );
 
-    await user.click(await screen.findByRole("button", { name: "없음 선택" }));
+    await user.click(
+      await screen.findByRole("button", { name: "없음 이걸로 정하기" }),
+    );
 
     expect(
       await screen.findByRole("heading", { name: "최신 카드 질문" }),
@@ -1074,6 +1082,14 @@ describe("start screen", () => {
     expect(
       screen.queryByRole("group", { name: "has_gpu 이름 고르기" }),
     ).toBeNull();
+  });
+
+  it("marks the signal fields no rule reads as reference only", async () => {
+    await open(atStart(), () => Response.json(atStart()));
+
+    const marks = screen.getAllByText("참고만");
+    expect(marks).toHaveLength(1);
+    expect(marks[0].previousElementSibling).toHaveTextContent("budget 이름");
   });
 
   it("picks choices in a panel, one or several", async () => {
@@ -1586,7 +1602,9 @@ describe("screen changes and the main action", () => {
 
   it("makes the recommended option the one primary action", async () => {
     await startWith(journey());
-    const accept = await screen.findByRole("button", { name: "없음 선택" });
+    const accept = await screen.findByRole("button", {
+      name: "없음 이걸로 정하기",
+    });
 
     expect(accept).toHaveClass("primary");
     expect(accept).toHaveTextContent("이걸로 정하기");
@@ -1598,7 +1616,7 @@ describe("screen changes and the main action", () => {
   it("does not show the internal problem codes", async () => {
     await startWith(journey());
 
-    await screen.findByRole("button", { name: "없음 선택" });
+    await screen.findByRole("button", { name: "없음 이걸로 정하기" });
     expect(screen.queryByText(/DiV/)).not.toBeInTheDocument();
   });
 });

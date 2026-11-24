@@ -156,6 +156,7 @@ function byCard(fields: StartField[]): [string | null, StartField[]][] {
 
 function FieldRow({
   field,
+  reference,
   focused,
   asked,
   fresh,
@@ -164,6 +165,8 @@ function FieldRow({
   edit,
 }: {
   field: StartField;
+  /** No code rule reads it: it informs the recommendation but never changes the options. */
+  reference: boolean;
   focused: boolean;
   asked: boolean;
   fresh: boolean;
@@ -206,10 +209,11 @@ function FieldRow({
 
   return (
     <div
-      className={`start-field${field.rule_read ? " rule" : ""}${focused ? " focused" : ""}${asked && !focused ? " asked" : ""}${fresh ? " fresh" : ""}`}
+      className={`start-field${focused ? " focused" : ""}${asked && !focused ? " asked" : ""}${fresh ? " fresh" : ""}`}
     >
       <div className="start-field-head">
         <span className="start-field-label">{field.label}</span>
+        {reference && <span className="start-reference">참고만</span>}
         {fresh && <span className="start-fresh">방금 채움</span>}
         {asked && !focused && <span className="start-asked">지금 묻는 칸</span>}
         {field.source && (
@@ -469,6 +473,7 @@ export function StartChat({
       <FieldRow
         key={field.name}
         field={field}
+        reference={side === "right" && !field.rule_read}
         focused={focus === field.name}
         asked={asked?.name === field.name}
         fresh={fresh.includes(field.name)}
@@ -779,7 +784,8 @@ export function StartChat({
             </div>
             <p className="muted">
               적어 두면 카드에서 다시 묻지 않아요. 비워 둔 칸은 그 카드에서
-              물어요.
+              물어요. "참고만" 칸은 추천에 참고만 하고 고를 수 있는 선택지는
+              바꾸지 않아요.
             </p>
             {byCard(info).map(([card, list]) =>
               card ? (

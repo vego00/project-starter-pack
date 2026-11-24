@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { getDesign, getJourney, saveDesign } from "../api";
 import {
   applyNodeChanges,
-  Background,
   Controls,
   Handle,
   Position,
@@ -57,7 +56,16 @@ type Selection =
   | { type: "edge"; source: string; target: string }
   | null;
 
-const FIT_OPTIONS = { padding: 0.08, maxZoom: 1 };
+// Room for the zoom buttons (left) and the attribution (bottom), so a fitted node never sits under them.
+const FIT_OPTIONS = {
+  padding: {
+    top: "16px",
+    right: "16px",
+    bottom: "56px",
+    left: "72px",
+  } as const,
+  maxZoom: 1,
+};
 
 const ARIA_LABELS = {
   "controls.ariaLabel": "그래프 보기 조작",
@@ -809,7 +817,6 @@ function Studio({ item, onSave }: { item: DesignCase; onSave?: SaveDesign }) {
             minZoom={0.3}
           >
             <RefitOnChange signal={`${design.nodes.length}/${moved.size}`} />
-            <Background gap={24} color="var(--line)" />
             <Controls showInteractive={false} />
           </ReactFlow>
         </div>
