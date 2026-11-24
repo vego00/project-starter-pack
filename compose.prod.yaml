@@ -1,6 +1,10 @@
 # 운영 VM용 덮어쓰기. 프런트를 Vite 개발 서버 대신 Nginx 정적 이미지로 바꾼다.
-# docker compose -f compose.yaml -f compose.prod.yaml up -d --build
+# 로컬: docker compose -f compose.yaml -f compose.prod.yaml up --build   (IMAGE_TAG 없이 local로 빌드)
+# VM: scripts/deploy.sh가 IMAGE_TAG=<커밋 SHA>로 GHCR 이미지를 받아 실행한다.
 services:
+  backend:
+    image: ghcr.io/vego00/project-starter-pack/backend:${IMAGE_TAG:-local}
   frontend:
+    image: ghcr.io/vego00/project-starter-pack/frontend:${IMAGE_TAG:-local}
     build:
       dockerfile: infrastructure/docker/frontend.prod.Dockerfile
