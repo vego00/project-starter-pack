@@ -91,6 +91,7 @@ main에 머지되면 CI가 이미지를 `ghcr.io/vego00/project-starter-pack/{ba
 - VM의 저장소는 배포한 커밋에 detached 상태로 머문다. VM에서 직접 `git pull`하지 않는다. `.env`는 그대로 유지된다.
 - 현재·직전 배포 SHA는 VM의 `.deploy/current`, `.deploy/previous`에 남는다. 직전 버전으로 돌아가려면 `.deploy/previous`의 SHA로 Deploy를 다시 실행한다.
 - 첫 배포에는 되돌아갈 직전 배포가 없다. 실패하면 VM에서 `docker compose -f compose.yaml -f compose.prod.yaml up -d --build`로 다시 빌드한다.
+- HTTPS: 주소는 `https://pjstarter.duckdns.org`(DuckDNS, VM이 5분마다 IP 갱신)다. VM의 `.env`에 `HTTPS_PUBLISH=0.0.0.0:443`을 두고 `scripts/cert.sh`로 Let's Encrypt 인증서를 받는다. cron으로 하루 두 번 실행하면 만료 30일 전부터 갱신한다. 인증서가 없으면 Nginx는 HTTP로만 뜬다.
 - VM 접속: `gcloud compute ssh instance-20261123-032325 --zone=asia-northeast3-c --project=project-starter-pack --tunnel-through-iap` 후 `sudo -iu p141`.
 
 ## 산출물

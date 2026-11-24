@@ -10,5 +10,6 @@
 !frontend/tsconfig.json
 !frontend/vite.config.ts
 !frontend/src/**
-!infrastructure/docker/nginx.conf
+!infrastructure/docker/nginx*.conf
+!infrastructure/docker/40-use-https-when-cert-exists.sh
 **/__pycache__
