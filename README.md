@@ -39,6 +39,7 @@
 | --- | --- |
 | pyproject.toml, uv.lock | uv 워크스페이스, 공통 개발 도구, 의존성 잠금 |
 | compose.yaml | FE·BE·PostgreSQL 로컬 컨테이너 실행 |
+| compose.prod.yaml | 운영 VM용 덮어쓰기. FE를 Nginx 정적 이미지로 바꾼다 |
 | frontend/ | 사용자 웹 UI (npm) |
 | backend/ | API와 서비스 로직 (워크스페이스 멤버) |
 | agents/ | 재사용 가능한 에이전트 구성 (추후 멤버 추가) |
@@ -72,6 +73,9 @@ docker compose up -d postgres # 여정 저장에 필요하다
 
 # 또는 컨테이너
 docker compose up --build
+
+# 운영용 프런트(Nginx가 빌드한 정적 파일 제공)로 실행
+docker compose -f compose.yaml -f compose.prod.yaml up --build
 ```
 
 웹 UI는 http://127.0.0.1:5173, API 문서는 http://127.0.0.1:8000/docs 에서 확인한다.
