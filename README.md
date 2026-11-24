@@ -76,6 +76,8 @@ docker compose up --build
 
 웹 UI는 http://127.0.0.1:5173, API 문서는 http://127.0.0.1:8000/docs 에서 확인한다.
 
+기존 VM에서 프런트엔드를 HTTP 80번 포트로 제공하려면 Compose가 읽는 기존 `.env`에 `FRONTEND_PUBLISH=0.0.0.0:80`을 지정한다. 이 값을 생략하면 로컬에서는 `127.0.0.1:5173`으로만 접속할 수 있다.
+
 새 Python 멤버를 추가할 때는 해당 폴더에 pyproject.toml을 만들고 루트 pyproject.toml의 `tool.uv.workspace.members`에 등록한 뒤 `uv lock`을 실행한다.
 
 ## 산출물
