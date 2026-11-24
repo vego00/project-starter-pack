@@ -294,6 +294,23 @@ def _containers(chosen: Mapping[str, str]) -> list[str]:
     return found
 
 
+def _stack(chosen: Mapping[str, str | None]) -> list[str]:
+    """The languages and frameworks, fixed by the bundle so the builder does not pick them. Two
+    build trials (2026-11-05, 2026-11-23) found none named; the first builder chose these."""
+    found = [
+        "언어: Python 3.12. 의존성은 uv로 잠가 고정한다.",
+        "API 서버: FastAPI.",
+        "에이전트 흐름: LangGraph. `docs/multi-agent-design.md`의 노드, 흐름, 상태 필드를 "
+        "그래프의 노드, 간선, 상태로 그대로 옮긴다.",
+        "상태와 입출력 타입: Pydantic 모델.",
+    ]
+    if chosen.get("product.surface") == "web":
+        found.append("웹 화면: React, Vite, TypeScript.")
+    if chosen.get("product.surface") == "messenger":
+        found.append("메신저 연결: 메신저가 제공하는 공식 봇 SDK나 웹훅으로 API 서버에 붙인다.")
+    return found
+
+
 def _infrastructure_doc(design: ServiceDesign, registry: Registry) -> str:
     chosen = _chosen(design, registry)
     skipped = _skipped(design)
@@ -324,6 +341,10 @@ def _infrastructure_doc(design: ServiceDesign, registry: Registry) -> str:
             *[f"- 감수할 점: {con}" for con in option.cons],
             "",
         ]
+    lines += ["## 기술 스택", "",
+              "묶음이 정한 구성이다. 바꿔야 하면 구현 전에 사용자와 정하고 `docs/build-notes.md`에 "
+              "적는다. 라이브러리 버전은 설치할 때 안정 버전으로 정해 고정한다.", "",
+              *_bullets(_stack(chosen)), ""]  # fmt: skip
     lines += ["## 컨테이너 목록", "",
               "모두 `docker compose`로 띄운다. 이미지 버전은 받을 때 공식 문서에서 정해 고정한다.", "",
               *_bullets(_containers(chosen)), ""]  # fmt: skip
@@ -365,7 +386,8 @@ def _build_doc(design: ServiceDesign, idea: str, modules: list[ModulePlan]) -> s
             "",
             "0. 개발 환경을 준비한다. 이 컴퓨터에 필요한 것은 Docker와 Docker Compose뿐이다. "
             "앱, 데이터베이스, 모델 서버는 `docs/infrastructure.md`의 컨테이너 목록대로 모두 "
-            "`docker compose`로 띄우고 이미지 버전을 고정한다. Docker가 없거나 꺼져 있으면 사용자에게 "
+            "`docker compose`로 띄우고 이미지 버전을 고정한다. 언어와 프레임워크는 "
+            "`docs/infrastructure.md`의 기술 스택을 따른다. Docker가 없거나 꺼져 있으면 사용자에게 "
             "알리고 멈춘다. 이 컴퓨터에 언어나 도구가 없다는 이유로 설계를 줄이지 말고 컨테이너 안에서 "
             "해결한다. 큰 이미지나 모델 파일은 용량을 알리고 사용자가 확인한 뒤 받는다. "
             "`docker compose up` 뒤 서비스마다 상태를 확인하면 이 단계가 끝난다.",

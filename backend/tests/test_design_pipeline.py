@@ -475,6 +475,23 @@ def test_the_build_starts_by_setting_up_docker_and_lists_containers(design):
     assert "Docker와 Docker Compose를 설치하고" in infra
 
 
+def test_the_bundle_names_the_tech_stack(design):
+    files = build_package(design, REGISTRY, IDEA)
+    infra = files["docs/infrastructure.md"]
+
+    assert infra.index("## 기술 스택") < infra.index("## 컨테이너 목록")
+    assert "- 에이전트 흐름: LangGraph." in infra and "- API 서버: FastAPI." in infra
+    assert "`docs/infrastructure.md`의 기술 스택을 따른다" in files["BUILD.md"]
+
+
+def test_the_screen_stack_follows_the_surface_card():
+    from app.journey.package import _stack
+
+    assert "웹 화면: React, Vite, TypeScript." in _stack({"product.surface": "web"})
+    assert any(line.startswith("메신저 연결") for line in _stack({"product.surface": "messenger"}))
+    assert not any(line.startswith(("웹 화면", "메신저")) for line in _stack({}))
+
+
 def test_containers_follow_the_card_choices():
     from app.journey.package import _containers
 
