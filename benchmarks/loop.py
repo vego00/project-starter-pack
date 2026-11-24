@@ -223,6 +223,9 @@ def judge_scores(out: Path) -> dict:
         entry["scores"].append(sum(s["score"] for s in scores) / (2 * len(scores)))
         entry["notes"] += [f"기준 {s['criterion']} ({s['score']}/2): {s['reason']}"
                            for s in scores if s["score"] < 2]  # fmt: skip
+        entry["notes"] += [f"빌더가 물을 질문: {q['question']}"
+                           for q in found["result"].get("builder_questions", [])
+                           if q["kind"] == "decide_before_build"]  # fmt: skip
     return {case: {"score": sum(e["scores"]) / len(e["scores"]), "notes": e["notes"]}
             for case, e in per.items() if e["scores"]}  # fmt: skip
 

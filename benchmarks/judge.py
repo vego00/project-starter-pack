@@ -36,7 +36,7 @@ from benchmarks.run import load_cases  # noqa: E402
 SCHEMA = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["scores", "overall"],
+    "required": ["scores", "builder_questions", "overall"],
     "properties": {
         "scores": {
             "type": "array",
@@ -52,18 +52,31 @@ SCHEMA = {
                 },
             },
         },
+        "builder_questions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["question", "kind"],
+                "properties": {
+                    "question": {"type": "string"},
+                    "kind": {"type": "string", "enum": ["human_only", "decide_before_build"]},
+                },
+            },
+        },
         "overall": {"type": "string"},
     },
 }
 
 INSTRUCTIONS = """당신은 서비스 설계를 채점하는 평가자다. 아래의 사용자 요구, 카드 선택, 채점 기준, 설계, 빌드 파일만 보고 채점한다.
-빌드 파일은 설계와 카드 선택으로 만든, 코딩 에이전트가 받는 파일이다.
+빌드 파일은 설계와 카드 선택으로 만든, 코딩 에이전트가 받는 파일이다. 여기 보이지 않는 AGENTS.md, docs/lessons.md, build-service skill과 위 설계를 담은 docs/multi-agent-design.md도 묶음에 함께 들어 있다.
 
 규칙:
 - 기준마다 0(없음), 1(일부 충족), 2(충족) 중 하나를 준다. criterion에는 기준 번호를 쓴다.
 - quote에는 근거가 된 설계나 빌드 파일 문장을 그대로 옮긴다. 근거가 없으면 빈 문자열로 둔다.
 - reason에는 왜 그 점수인지 한 문장으로 쓴다.
 - 설계에 적히지 않은 것을 있다고 가정하지 않는다.
+- builder_questions에는 빌드 파일을 받은 코딩 에이전트가 되어, 구현을 시작하기 전이나 도중에 사용자에게 물어야 할 질문을 모두 적는다. 기술 스택·버전·모델·저장소·출력 양식처럼 정해지지 않았거나 파일끼리 맞지 않아 멈추게 되는 곳도 질문으로 적는다. kind는 비밀값 입력, 계정 발급, 결제·비용 한도 설정처럼 사람만 할 수 있는 일이면 human_only, 사용자 요구·카드 선택·설계 단계에서 정했어야 할 것이면 decide_before_build다. 물을 것이 없으면 빈 배열로 둔다.
 - overall에는 이 설계를 실제로 쓸 수 있을지와 가장 큰 문제를 한두 문장으로 쓴다.
 - 이 설계를 만든 방법이나 버전은 알려 주지 않는다. 파일을 읽거나 명령을 실행하지 말고 바로 답한다.
 """
@@ -75,6 +88,10 @@ COMMON_CRITERIA = [
     "미확인으로 남긴 사항을 다른 곳에서 정해진 것처럼 쓰지 않는다",
     "모델 제공자와 모델 서빙을 둘 다 골랐으면 각각 무엇에 쓰는지 정하거나 사용자에게 고를 질문을 "
     "남긴다 (하나만 골랐으면 충족)",
+    # Author goal (2026-11-24): the user should only have to handle secrets; the C1 builder still
+    # asked about the draft format, search method, model serving and data-use scope.
+    "코딩 에이전트가 사용자에게 물어야 할 것이 사람만 할 수 있는 일뿐이다 (builder_questions의 "
+    "decide_before_build가 0개면 2, 1~2개면 1, 3개 이상이면 0)",
 ]
 # The files built from the design and the cards. AGENTS.md, CLAUDE.md, settings and the
 # templates are the same for every design, and the design document repeats the design text.
