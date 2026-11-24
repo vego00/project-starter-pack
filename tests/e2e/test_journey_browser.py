@@ -88,9 +88,16 @@ def skip_clarify(page: Page) -> None:
     expect(page.locator(".option").first).to_be_visible()
 
 
+def option_button(page: Page, option: str):
+    """The name is the option plus the words on the button, which differ for the recommended one."""
+    return page.get_by_role(
+        "button", name=re.compile(rf"^{re.escape(option)} (선택|이걸로 정하기|바꾸기)$")
+    )
+
+
 def choose(page: Page, heading: str, option: str) -> None:
     expect(page.get_by_role("heading", name=heading)).to_be_visible()
-    page.get_by_role("button", name=f"{option} 선택").click()
+    option_button(page, option).click()
     expect(page.get_by_role("heading", name=heading)).to_be_hidden()
 
 
@@ -159,7 +166,7 @@ def test_all_cards_to_completion_with_reload_and_restart(page: Page):
     choose(page, "모델을 어떻게 서빙할까요?", "외부 API만")
 
     # Approval + memory rules out the cloud: the rule from an earlier card reaches this one.
-    expect(page.get_by_role("button", name="GCP 선택")).to_be_disabled()
+    expect(option_button(page, "GCP")).to_be_disabled()
     expect(page.get_by_text("재시작해도 남는 체크포인터가 필요합니다").first).to_be_visible()
     shot(page, "4-blocked")
     choose(page, "어디에 배포할까요?", "로컬만")
@@ -245,7 +252,7 @@ def test_questions_defer_and_reopen(page: Page):
     expect(page.get_by_text("Ollama 컨테이너 · 자동 확정")).to_be_visible()
     page.keyboard.press("Escape")
 
-    page.get_by_role("button", name="Gemini 선택").click()
+    option_button(page, "Gemini").click()
     expect(page.get_by_text("자동 확정")).to_be_hidden()
 
 
@@ -383,7 +390,7 @@ def test_a_system_card_shows_the_system_graph_and_what_changed(page: Page):
 
     system_tab = page.get_by_role("button", name="시스템 구성", exact=True)
     expect(system_tab).to_have_attribute("aria-pressed", "true")
-    page.get_by_role("button", name="Gemini 선택").click()
+    option_button(page, "Gemini").click()
 
     expect(page.get_by_text("방금 반영:")).to_be_visible()
     expect(page.locator(".bp-service.changed")).not_to_have_count(0)
@@ -395,12 +402,12 @@ def test_stale_tab_cannot_answer_the_wrong_card(browser: Browser, page: Page):
     choose_surface(page)
     other = page.context.new_page()
     other.goto(page.url)
-    expect(other.get_by_role("button", name="Supervisor 라우팅 선택")).to_be_visible()
+    expect(option_button(other, "Supervisor 라우팅")).to_be_visible()
 
-    page.get_by_role("button", name="Supervisor 라우팅 선택").click()
+    option_button(page, "Supervisor 라우팅").click()
     expect(page.get_by_role("heading", name="에이전트가 실행 중간에")).to_be_visible()
 
-    other.get_by_role("button", name="Supervisor 라우팅 선택").click()
+    option_button(other, "Supervisor 라우팅").click()
     expect(other.get_by_role("alert").first).to_contain_text("최신 상태가 아니에요")
     expect(other.get_by_role("heading", name="에이전트가 실행 중간에")).to_be_visible()
     expect(other.get_by_text("2 / 12")).to_be_visible()
