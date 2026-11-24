@@ -309,6 +309,8 @@ function OptionCard({
   const { option } = view;
   const blocked = view.blocked_reason !== null;
   const primary = recommended && !changing;
+  // Voice control users say the words they see, so the name has to contain them.
+  const chooseLabel = primary ? "이걸로 정하기" : changing ? "바꾸기" : "선택";
   return (
     <article
       className={`option${blocked ? " blocked" : ""}${primary ? " recommended" : ""}${held ? " held" : ""}`}
@@ -374,7 +376,7 @@ function OptionCard({
         <button
           className={primary ? "primary choose" : "choose"}
           disabled={blocked || busy}
-          aria-label={`${option.name} 선택`}
+          aria-label={`${option.name} ${chooseLabel}`}
           onClick={() =>
             act(
               primary
@@ -383,7 +385,7 @@ function OptionCard({
             )
           }
         >
-          {primary ? "이걸로 정하기" : changing ? "바꾸기" : "선택"}
+          {chooseLabel}
         </button>
       )}
     </article>

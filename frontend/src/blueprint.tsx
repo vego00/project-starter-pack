@@ -1391,22 +1391,53 @@ const SAMPLE_GRAPH: BlueprintGraph = {
   ],
 };
 
+/** True while the element is wider than its box, so the screen can say there is more to the side. */
+function useOverflowsX(ref: { current: HTMLElement | null }): boolean {
+  const [overflows, setOverflows] = useState(false);
+  useLayoutEffect(() => {
+    const check = () => {
+      const el = ref.current;
+      setOverflows(!!el && el.scrollWidth > el.clientWidth + 1);
+    };
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  });
+  return overflows;
+}
+
+const SCROLL_CUE = "구성도가 화면보다 넓어요. 옆으로 밀어 나머지를 보세요.";
+
 export function SamplePreview() {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const overflows = useOverflowsX(scrollRef);
   const layout = layoutSystem(SAMPLE_GRAPH);
   const points = Object.values(layout);
   const width = Math.max(...points.map((p) => p.x)) + SERVICE_W + PAD + BOX_PAD;
   const height =
     Math.max(...points.map((p) => p.y)) + SERVICE_H + PAD + BOX_PAD;
   return (
-    <svg
-      className="sample-preview"
-      viewBox={`0 0 ${width} ${height}`}
-      role="img"
-      aria-label="완성된 시스템 구성도 예시"
-    >
-      <ArrowMarker />
-      <ServiceDiagram graph={SAMPLE_GRAPH} point={(id) => layout[id]} />
-    </svg>
+    <>
+      <div
+        ref={scrollRef}
+        className="sample-scroll"
+        // A scroller with nothing focusable inside needs its own Tab stop to be scrolled by keys.
+        tabIndex={overflows ? 0 : undefined}
+      >
+        <svg
+          className="sample-preview"
+          viewBox={`0 0 ${width} ${height}`}
+          // Below MIN_SCALE the labels cannot be read, so a narrow screen scrolls instead.
+          style={{ minWidth: width * MIN_SCALE }}
+          role="img"
+          aria-label="완성된 시스템 구성도 예시"
+        >
+          <ArrowMarker />
+          <ServiceDiagram graph={SAMPLE_GRAPH} point={(id) => layout[id]} />
+        </svg>
+      </div>
+      {overflows && <p className="muted scroll-cue">{SCROLL_CUE}</p>}
+    </>
   );
 }
 
@@ -1549,6 +1580,7 @@ export function BlueprintPanel({
   const seen = useRef(new Map<string, Set<string>>());
   const svgRef = useRef<SVGSVGElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
+  const canvasOverflows = useOverflowsX(canvasRef);
   const pan = useRef<{
     x: number;
     y: number;
@@ -2125,6 +2157,9 @@ export function BlueprintPanel({
             })}
         </svg>
       </div>
+      {!showFiles && zoom === null && canvasOverflows && (
+        <p className="muted scroll-cue">{SCROLL_CUE}</p>
+      )}
       {!showFiles && isOrder && selected?.includes(":") && (
         <ModuleDetail
           modules={modules}
