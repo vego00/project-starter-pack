@@ -465,6 +465,33 @@ def test_service_agents_stay_out_of_the_coding_tool_folder(design):
     assert files["agents/search.md"].startswith("---\nname: search\n")
 
 
+def test_the_build_starts_by_setting_up_docker_and_lists_containers(design):
+    files = build_package(design, REGISTRY, IDEA)
+    build, infra = files["BUILD.md"], files["docs/infrastructure.md"]
+
+    assert build.index("0. 개발 환경을 준비한다.") < build.index("1. `AGENTS.md`")
+    assert "설계를 줄이지 말고 컨테이너 안에서" in build
+    assert "## 컨테이너 목록" in infra and "- 앱:" in infra
+    assert "Docker와 Docker Compose를 설치하고" in infra
+
+
+def test_containers_follow_the_card_choices():
+    from app.journey.package import _containers
+
+    rich = _containers(
+        {"data.primary_db": "postgres", "data.vector_store": "pgvector",
+         "backend.execution": "queue", "mlops.model_serving": "ollama"}
+    )  # fmt: skip
+    plain = _containers({"data.primary_db": "sqlite", "backend.execution": "sync"})
+
+    assert any("pgvector" in line for line in rich)
+    assert any(line.startswith("작업 큐와 워커") for line in rich)
+    assert any(line.startswith("Ollama") for line in rich)
+    assert [line.split(":")[0] for line in plain] == ["앱", "SQLite"]
+    memory_state = _containers({"data.primary_db": "postgres", "data.checkpointer": "memory"})
+    assert "PostgreSQL: 데이터를 볼륨에" in memory_state[1]
+
+
 def test_infrastructure_stays_out_of_the_agent_design(design):
     files = build_package(design, REGISTRY, IDEA)
 
