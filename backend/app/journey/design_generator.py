@@ -266,6 +266,10 @@ FIX_HINTS = {
     "owner.reader_has_no_input": "readers에는 그 이름을 inputs로 받는 노드만 넣으세요",
     "owner.unlisted_writer": "그 이름을 내보내는 노드를 모두 state_fields의 writers에 넣으세요",
     "io.unconnected": "앞선 노드의 outputs에 그 이름을 넣거나 그 입력을 빼세요",
+    "decision.vector_store_not_chosen": (
+        "키워드·태그 검색으로 바꾸세요. 의미 검색이 꼭 필요하면 검색 저장소를 다시 고를지 "
+        "unknowns에 질문으로 남기세요"
+    ),
 }
 
 

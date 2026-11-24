@@ -321,6 +321,30 @@ def _check_tracing(design: ServiceDesign, issues: _Issues) -> None:
         earlier.add(task.id)
 
 
+# Words that mean semantic search. Only tools and tasks are read, since they are what gets built;
+# a responsibility may say what the node does without, such as "벡터 검색 없이".
+VECTOR_WORDS = ("pgvector", "qdrant", "chroma", "embedding", "vector", "임베딩", "벡터")
+
+
+def _check_stores(design: ServiceDesign, constraints: DesignConstraints, issues: _Issues) -> None:
+    if constraints.target.vector_store != "none":
+        return
+    places = [
+        (f"노드 {node.id}의 도구 {tool.name}", f"{tool.name} {tool.reason}")
+        for node in design.nodes
+        for tool in node.tools
+    ] + [
+        (f"개발 작업 {task.id}", f"{task.title} {task.inputs} {task.produces} {task.verify_by}")
+        for task in design.tasks
+    ]
+    for where, text in places:
+        if word := next((w for w in VECTOR_WORDS if w in text.lower()), None):
+            issues.error(
+                "decision.vector_store_not_chosen",
+                f"검색 저장소를 '없음'으로 골랐는데 {where}가 벡터 검색을 써요: {word}",
+            )
+
+
 def validate_design(design: ServiceDesign, constraints: DesignConstraints) -> list[ValidationIssue]:
     issues = _Issues()
     graph = _flow_graph(design, {node.id for node in design.nodes})
@@ -331,6 +355,7 @@ def validate_design(design: ServiceDesign, constraints: DesignConstraints) -> li
     _check_data_flow(design, graph, issues)
     _check_owners(design, issues)
     _check_decisions(design, constraints, graph, issues)
+    _check_stores(design, constraints, issues)
     _check_branches(design, constraints, issues)
     _check_tracing(design, issues)
     return list(issues)
