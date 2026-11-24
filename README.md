@@ -84,6 +84,15 @@ docker compose -f compose.yaml -f compose.prod.yaml up --build
 
 새 Python 멤버를 추가할 때는 해당 폴더에 pyproject.toml을 만들고 루트 pyproject.toml의 `tool.uv.workspace.members`에 등록한 뒤 `uv lock`을 실행한다.
 
+## VM 배포
+
+main에 머지되면 CI가 이미지를 `ghcr.io/vego00/project-starter-pack/{backend,frontend}:<커밋 SHA>`로 올린다. 배포는 Actions → **Deploy** → Run workflow에 그 SHA를 넣어 시작한다. 버튼을 누르는 것이 승인이다. GitHub가 IAP로 VM에 접속해 `scripts/deploy.sh`를 실행한다. 이 스크립트는 이미지를 받아 교체하고 `/health`를 확인하며, 실패하면 직전 배포로 되돌린다.
+
+- VM의 저장소는 배포한 커밋에 detached 상태로 머문다. VM에서 직접 `git pull`하지 않는다. `.env`는 그대로 유지된다.
+- 현재·직전 배포 SHA는 VM의 `.deploy/current`, `.deploy/previous`에 남는다. 직전 버전으로 돌아가려면 `.deploy/previous`의 SHA로 Deploy를 다시 실행한다.
+- 첫 배포에는 되돌아갈 직전 배포가 없다. 실패하면 VM에서 `docker compose -f compose.yaml -f compose.prod.yaml up -d --build`로 다시 빌드한다.
+- VM 접속: `gcloud compute ssh instance-20261123-032325 --zone=asia-northeast3-c --project=project-starter-pack --tunnel-through-iap` 후 `sudo -iu p141`.
+
 ## 산출물
 
 지금은 프로젝트 GCB, 카드별 결정과 이유, 확인할 점을 담은 결정 요약 Markdown을 제공한다. 설계 문서·ADR(R-006)과 실행 골격(S4)은 후속 작업이다.

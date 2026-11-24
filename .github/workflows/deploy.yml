@@ -1,0 +1,63 @@
+name: Deploy
+# Actions 화면의 Run workflow 버튼으로만 시작한다. 버튼을 누르는 것이 배포 승인이다.
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 배포할 main 커밋 SHA (40자). images job이 GHCR에 올린 커밋이어야 한다.
+        required: true
+permissions:
+  contents: read
+  id-token: write # Workload Identity Federation으로 GCP 임시 출입증을 받는다.
+  packages: read # VM이 private GHCR 이미지를 받는다.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+env:
+  PROJECT: project-starter-pack
+  ZONE: asia-northeast3-c
+  VM: instance-20261123-032325
+  WORKLOAD_IDENTITY_PROVIDER: projects/220742908799/locations/global/workloadIdentityPools/github/providers/project-starter-pack
+  SERVICE_ACCOUNT: starter-deployer@project-starter-pack.iam.gserviceaccount.com
+jobs:
+  deploy:
+    # WIF 조건도 main만 허용한다. 여기서 먼저 막아 다른 브랜치 실행을 일찍 끝낸다.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check the commit and its images
+        env:
+          SHA: ${{ inputs.sha }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::40자 커밋 SHA를 입력한다"; exit 1; }
+          git merge-base --is-ancestor "$SHA" origin/main || { echo "::error::$SHA는 main에 없다"; exit 1; }
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          for name in backend frontend; do
+            docker manifest inspect "ghcr.io/${{ github.repository }}/$name:$SHA" > /dev/null ||
+              { echo "::error::GHCR에 $name:$SHA 이미지가 없다"; exit 1; }
+          done
+          docker logout ghcr.io
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Deploy on the VM
+        env:
+          SHA: ${{ inputs.sha }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 토큰은 표준 입력으로만 넘겨 VM의 명령 기록과 프로세스 목록에 남지 않게 한다.
+          echo "$GHCR_TOKEN" | gcloud compute ssh "$VM" --zone "$ZONE" --project "$PROJECT" \
+            --tunnel-through-iap --quiet \
+            --command "sudo -iu p141 bash -c 'cd ~/project-starter-pack && git fetch --quiet origin && git checkout --quiet --detach $SHA && scripts/deploy.sh $SHA ${{ github.actor }}'"
+          {
+            echo "| VM | commit |"
+            echo "| --- | --- |"
+            echo "| $VM | $SHA |"
+          } >> "$GITHUB_STEP_SUMMARY"
