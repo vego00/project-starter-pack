@@ -403,6 +403,15 @@ async function request<T>(
       headers: { "Content-Type": "application/json" },
       signal: controller.signal,
     });
+    if (response.status === 401) {
+      // The oauth2-proxy session expired: sign in again and come back here.
+      const back = window.location.pathname + window.location.search;
+      window.location.assign(`/oauth2/start?rd=${encodeURIComponent(back)}`);
+      throw new ApiError(
+        "로그인이 필요해요. 로그인 화면으로 이동할게요.",
+        "login_required",
+      );
+    }
     const body: unknown = await response.json().catch(() => null);
     if (!response.ok) {
       const detail = z

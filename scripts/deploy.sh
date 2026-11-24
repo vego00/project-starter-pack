@@ -28,7 +28,8 @@ DOCKER_CONFIG="$(mktemp -d)"
 export DOCKER_CONFIG
 trap 'rm -rf "$DOCKER_CONFIG"' EXIT
 docker login ghcr.io -u "$registry_user" --password-stdin > /dev/null
-compose "$tag" pull --quiet backend frontend
+# 켜진 프로필(oauth2-proxy 등)의 이미지까지 받는다.
+compose "$tag" pull --quiet
 compose "$tag" up -d --no-build --pull never
 
 if healthy "$tag"; then

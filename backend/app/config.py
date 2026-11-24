@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     evidence_scope: Literal["none", "owner"] = "none"
     # ADR-018: the decider leaves out cards this project does not need. False asks every card.
     card_selection: bool = True
+    # proxy: oauth2-proxy behind Nginx sends the signed-in email as X-User-Email; requests without
+    # it get 401. local: every request is the same local user, for development and tests.
+    auth: Literal["local", "proxy"] = "local"
 
     @field_validator(
         "gemini_api_key",

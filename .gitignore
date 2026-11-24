@@ -15,3 +15,4 @@ frontend/dist/
 anti-slop/
 
 data/.deploy/
+allowed-emails.txt

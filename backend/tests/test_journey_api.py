@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from threading import Barrier
 from uuid import uuid4
 
@@ -8,6 +9,7 @@ from app.journey.deciders.base import DeciderResult
 from app.journey.services import JourneyDeps, MockResponder
 from app.journey.state import Advice
 from app.main import create_app
+from app.owners import MemoryOwners
 from app.registry.loader import Registry, load_registry
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import InMemorySaver
@@ -157,10 +159,12 @@ def test_get_returns_the_same_prompt_without_advancing(client):
 
 def test_journey_survives_a_new_service_with_the_same_checkpointer():
     saver = InMemorySaver()
+    owners = MemoryOwners()  # Both live in the same database in production.
     settings = Settings(_env_file=None)
-    with TestClient(create_app(settings, checkpointer=saver, registry=REGISTRY)) as first:
+    app = partial(create_app, settings, checkpointer=saver, owners=owners, registry=REGISTRY)
+    with TestClient(app()) as first:
         view = select(first, start(first), "question")
-    with TestClient(create_app(settings, checkpointer=saver, registry=REGISTRY)) as second:
+    with TestClient(app()) as second:
         resumed = second.get(f"{JOURNEYS}/{view['journey_id']}").json()
 
     assert resumed == view

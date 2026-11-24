@@ -80,8 +80,6 @@ jobs:
     env:
       PUSH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       REGISTRY: ghcr.io/${{ github.repository }}
-    concurrency:
-      group: images-${{ github.ref }}
     steps:
       - uses: actions/checkout@v4
       - name: Build images
