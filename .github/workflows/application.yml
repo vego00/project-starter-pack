@@ -89,7 +89,8 @@ jobs:
           for name in backend frontend; do
             dockerfile=infrastructure/docker/$name.Dockerfile
             [ "$name" = frontend ] && dockerfile=infrastructure/docker/frontend.prod.Dockerfile
-            docker build -f "$dockerfile" \
+            # 출처 정보(attestation)를 붙이면 GHCR에 버전이 3개씩 생겨 보관 개수 계산이 틀어진다.
+            docker build --provenance=false -f "$dockerfile" \
               --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
               --label "org.opencontainers.image.revision=$GITHUB_SHA" \
               -t "$REGISTRY/$name:$GITHUB_SHA" .
