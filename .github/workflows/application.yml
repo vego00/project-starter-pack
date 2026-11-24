@@ -32,7 +32,29 @@ jobs:
       - run: uv sync --locked
       - run: uv run --locked ruff check .
       - run: uv run --locked ruff format --check .
-      - run: uv run --locked pytest -q
+      - run: uv run --locked pytest -q --ignore=tests/e2e
+      - if: github.event_name == 'pull_request'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Run browser tests against the mock app
+        if: github.event_name == 'pull_request'
+        timeout-minutes: 10
+        env:
+          APP_PROVIDER: mock
+          APP_DECIDER: mock
+          APP_EVIDENCE_SCOPE: none
+          BACKEND_URL: http://127.0.0.1:18631
+          E2E_BASE_URL: http://127.0.0.1:18632
+          E2E_CHROMIUM_PATH: /usr/bin/google-chrome
+        run: |
+          npm --prefix frontend ci
+          APP_DATABASE_URL="$TEST_DATABASE_URL" uv run --locked uvicorn app.main:app --app-dir backend --port 18631 &
+          npm --prefix frontend run dev -- --port 18632 &
+          curl --fail --silent --show-error --retry 30 --retry-all-errors --retry-delay 1 "$E2E_BASE_URL/health" > /dev/null
+          uv run --locked pytest -q tests/e2e
   frontend:
     runs-on: ubuntu-latest
     defaults:
