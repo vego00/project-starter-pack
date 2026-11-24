@@ -70,3 +70,53 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+  images:
+    # PR에서는 빌드만 확인하고, main push에서만 GHCR에 올린다.
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      PUSH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      REGISTRY: ghcr.io/${{ github.repository }}
+    concurrency:
+      group: images-${{ github.ref }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build images
+        run: |
+          for name in backend frontend; do
+            dockerfile=infrastructure/docker/$name.Dockerfile
+            [ "$name" = frontend ] && dockerfile=infrastructure/docker/frontend.prod.Dockerfile
+            docker build -f "$dockerfile" \
+              --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
+              --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+              -t "$REGISTRY/$name:$GITHUB_SHA" .
+          done
+      - name: Push images
+        if: env.PUSH == 'true'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          echo "| image | commit | digest |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+          for name in backend frontend; do
+            docker push "$REGISTRY/$name:$GITHUB_SHA"
+            digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$REGISTRY/$name:$GITHUB_SHA")"
+            echo "| $name | $GITHUB_SHA | ${digest#*@} |" >> "$GITHUB_STEP_SUMMARY"
+          done
+      # 무료 저장 한도(500MB) 안에 두려고 현재와 직전 복귀용 2개만 남긴다.
+      - name: Keep the latest two backend images
+        if: env.PUSH == 'true'
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: project-starter-pack/backend
+          package-type: container
+          min-versions-to-keep: 2
+      - name: Keep the latest two frontend images
+        if: env.PUSH == 'true'
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: project-starter-pack/frontend
+          package-type: container
+          min-versions-to-keep: 2
