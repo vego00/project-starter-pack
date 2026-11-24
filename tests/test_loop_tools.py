@@ -138,3 +138,34 @@ def test_averaging_keeps_the_judge_score():
     mean = loop.average({"A": _j(0.6)}, {"A": _j(0.8)})["A"]
 
     assert abs(mean["judge"] - 0.7) < 1e-9
+
+
+def _judge_module():
+    found = importlib.util.spec_from_file_location("judge", ROOT / "benchmarks" / "judge.py")
+    module = importlib.util.module_from_spec(found)
+    found.loader.exec_module(module)
+    return module
+
+
+def _validator_fixture():
+    path = ROOT / "backend" / "tests" / "test_design_validator.py"
+    found = importlib.util.spec_from_file_location("validator_fixture", path)
+    module = importlib.util.module_from_spec(found)
+    found.loader.exec_module(module)
+    return module
+
+
+def test_the_judge_sees_common_criteria_after_the_case_and_the_build_files():
+    judge = _judge_module()
+    design = _validator_fixture().valid_design()
+    design["provenance"]["generated_at"] = design["provenance"]["generated_at"].isoformat()
+    case = {"spec": {"idea": "강의 자료에서 답을 찾는다"}, "selection": {},
+            "human_review": ["출처를 붙인다"]}  # fmt: skip
+
+    prompt = judge.build_prompt(case, design)
+
+    assert "1. 출처를 붙인다" in prompt
+    assert f"2. {judge.COMMON_CRITERIA[0]}" in prompt
+    for name in judge.BUILD_FILES:
+        assert f"### {name}\n\n~~~~\n" in prompt
+    assert "design-v1" not in prompt and "test-model" not in prompt
