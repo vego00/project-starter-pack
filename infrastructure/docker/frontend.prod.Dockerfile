@@ -8,7 +8,11 @@ COPY frontend/src src
 RUN npm run build
 
 FROM nginxinc/nginx-unprivileged:1.28.2-alpine
-COPY infrastructure/docker/nginx.conf /etc/nginx/conf.d/default.conf
+COPY infrastructure/docker/nginx-app.conf /etc/nginx/app.conf
+COPY infrastructure/docker/nginx-https.conf /etc/nginx/https.conf
+# 시작 스크립트가 인증서를 찾으면 이 파일을 HTTPS 설정으로 덮어쓴다.
+COPY --chown=nginx:nginx infrastructure/docker/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --chmod=755 infrastructure/docker/40-use-https-when-cert-exists.sh /docker-entrypoint.d/
 COPY --from=build /app/dist /usr/share/nginx/html
-# 개발 서버와 같은 포트를 써서 compose.yaml의 포트 연결을 그대로 쓴다.
-EXPOSE 5173
+# HTTP는 개발 서버와 같은 포트를 써서 compose.yaml의 포트 연결을 그대로 쓴다.
+EXPOSE 5173 8443

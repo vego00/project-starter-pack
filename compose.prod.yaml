@@ -8,3 +8,19 @@ services:
     image: ghcr.io/vego00/project-starter-pack/frontend:${IMAGE_TAG:-local}
     build:
       dockerfile: infrastructure/docker/frontend.prod.Dockerfile
+    ports:
+      - "${HTTPS_PUBLISH:-127.0.0.1:8443}:8443"
+    volumes:
+      - letsencrypt:/etc/letsencrypt:ro
+      - certbot-www:/var/www/certbot:ro
+  # 인증서 발급·갱신 전용. 평소에는 뜨지 않고 scripts/cert.sh가 run으로만 쓴다.
+  certbot:
+    image: certbot/certbot:v5.10.0
+    profiles: [certbot]
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - certbot-www:/var/www/certbot
+
+volumes:
+  letsencrypt:
+  certbot-www:
