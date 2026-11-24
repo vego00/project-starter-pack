@@ -578,3 +578,36 @@ def test_validation_errors_block_confirmation_and_warnings_do_not():
     design = ServiceDesign(**changed(give_write_tool))
     design = design.model_copy(update={"validation": validate_design(design, constraints())})
     assert design.confirm_blockers == []
+
+
+def add_vector_tool(d):
+    by_id(d, "answer")["tools"] = [
+        {"name": "search_idea", "access": "read", "reason": "pgvector로 비슷한 메모를 찾는다"}
+    ]
+
+
+def add_embedding_task(d):
+    d["tasks"][0]["produces"] = "메모 임베딩 테이블"
+
+
+@pytest.mark.parametrize("change", [add_vector_tool, add_embedding_task])
+def test_semantic_search_without_a_chosen_vector_store_is_an_error(change):
+    found = issues(changed(change), constraints(vector_store="none"))
+
+    assert [(i.rule_id, i.severity) for i in found] == [
+        ("decision.vector_store_not_chosen", "error")
+    ]
+
+
+def test_semantic_search_is_fine_when_a_vector_store_was_chosen_or_not_asked():
+    fields = changed(add_vector_tool)
+
+    assert issues(fields, constraints(vector_store="pgvector")) == []
+    assert issues(fields) == []
+
+
+def test_a_responsibility_that_mentions_vectors_is_not_read():
+    fields = valid_design()
+    by_id(fields, "answer")["responsibility"] = "벡터 검색 없이 태그로 메모를 찾는다"
+
+    assert issues(fields, constraints(vector_store="none")) == []
