@@ -58,7 +58,7 @@ services:
     environment:
       BACKEND_URL: http://backend:8000
     ports:
-      - "127.0.0.1:5173:5173"
+      - "${FRONTEND_PUBLISH:-127.0.0.1:5173}:5173"
     depends_on:
       backend:
         condition: service_healthy
