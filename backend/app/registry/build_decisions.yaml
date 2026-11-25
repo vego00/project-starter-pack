@@ -1,0 +1,171 @@
+# 빌드 결정 목록 (ADR-026). 묶음에 필요한 결정과 그 출처를 여기서만 정한다. 모델이 항목을 늘리거나 뺄 수 없다.
+# source: card는 카드 결정, default는 묶음 기본값, design은 설계가 채운 값, ask는 사용자에게 물을 값이다.
+# ask 항목은 빌드 준비 단계(ADR-026 ③)가 생기기 전까지 BUILD.md의 "남은 결정"에 적는다.
+# when은 모두 맞아야 하고, when_any는 하나만 맞으면 된다. 정하지 않은 카드는 어느 조건에도 맞지 않는다.
+version: 1
+items:
+  # 카드에서 오는 값. infrastructure는 인프라 문서의 "고른 항목"에, deploy는 "배포 (나중)"에 보인다.
+  - {id: implementation, title: 구현 방식, source: card, card: backend.implementation, fallback: code}
+  - {id: model_provider, title: 모델 제공자, source: card, card: model.provider, infrastructure: true}
+  - {id: primary_db, title: 데이터 저장소, source: card, card: data.primary_db, infrastructure: true}
+  - {id: vector_store, title: 검색 저장소, source: card, card: data.vector_store, infrastructure: true}
+  - {id: checkpointer, title: 실행 상태 저장, source: card, card: data.checkpointer, infrastructure: true}
+  - {id: execution, title: 작업 실행, source: card, card: backend.execution, infrastructure: true}
+  - {id: model_serving, title: 모델 서빙, source: card, card: mlops.model_serving, infrastructure: true}
+  - {id: tracing, title: 실행 기록, source: card, card: ops.tracing, infrastructure: true}
+  - {id: surface, title: 사용 위치, source: card, card: product.surface, infrastructure: true}
+  - {id: orchestration, title: 오케스트레이션, source: card, card: devops.orchestration, deploy: true}
+  - {id: cloud_target, title: 배포 위치, source: card, card: cloud.target, deploy: true}
+
+  # 묶음 기본값. 코드가 정하므로 빌더가 묻지 않는다.
+  - {id: tech_stack, title: 기술 스택, source: default, compute: stack}
+  - {id: containers, title: 컨테이너 목록, source: default, compute: containers}
+  - id: ports
+    title: 컨테이너 포트
+    source: default
+    lines:
+      containers:
+        - 컨테이너 포트는 127.0.0.1에만 연다(`127.0.0.1:호스트 포트:컨테이너 포트`). 데이터베이스처럼 흔한 포트는 호스트 쪽 번호를 바꿔 다른 프로그램과 겹치지 않게 한다(예 PostgreSQL 55432).
+  - id: test_database
+    title: 테스트 데이터베이스
+    source: default
+    when_any:
+      - {card: data.primary_db, not_in: [none]}
+      - {card: data.vector_store, not_in: [none]}
+      - {card: data.checkpointer, in: [postgres, other]}
+    lines:
+      rules:
+        - 테스트는 서비스가 쓰는 데이터베이스에 쓰지 않는다. 같은 DB 컨테이너 안에 테스트용 데이터베이스를 따로 만들어 쓰고, 테스트가 끝나면 비운다.
+  - id: no_key_mode
+    title: 키 없이 확인하는 모드
+    source: default
+    when:
+      - {card: backend.implementation, in: [code]}
+    design_has: agent
+    lines:
+      rules:
+        - 모델 API 키가 없어도 핵심 흐름을 끝까지 돌려 볼 수 있게 가짜 모델 모드를 둔다. 환경 변수 하나(예 `MODEL_MODE=fake`)로 켜고, 정해진 입력에 정해진 답을 돌려준다. 키가 있으면 실제 모델을 쓰고, 실행 기록에 어느 모드였는지 남긴다.
+      verify:
+        - 키가 없으면 가짜 모델 모드로 평가 사례를 먼저 끝까지 돌린다. 실제 모델 결과로 보고하지 않는다.
+  - id: search_floor
+    title: 검색 관련도 하한과 결과 없음
+    source: default
+    design_has: search
+    lines:
+      rules:
+        - 검색은 관련도 하한을 둔다. 하한보다 낮은 결과만 있으면 억지로 고르지 않고 찾지 못했다고 답한다. 하한 값은 예시 데이터로 정하고 그 근거를 `docs/build-notes.md`에 적는다.
+      verify:
+        - 찾을 것이 없는 입력에 찾지 못했다고 답하는지 평가 사례로 확인한다.
+  - id: sample_data
+    title: 예시 데이터
+    source: default
+    when_any:
+      - {card: data.primary_db, not_in: [none]}
+      - {card: data.vector_store, not_in: [none]}
+    lines:
+      rules:
+        - 예시 데이터는 가상으로 만들고, 같은 내용을 두 번 넣지 않는다. 적재할 때 중복을 검사하고, 예시라는 표시를 남긴다.
+  - id: markdown_render
+    title: Markdown 출력 표시
+    source: default
+    when:
+      - {card: product.surface, in: [web]}
+      - {card: backend.implementation, in: [code]}
+    lines:
+      rules:
+        - 화면에 보이는 Markdown(모델이 쓴 글 포함)은 원문 그대로 두지 않고 렌더링해서 보여 준다. 렌더링 전에 HTML을 정제해 스크립트가 실행되지 않게 한다.
+  - id: ui_rules
+    title: 화면 규칙 skill
+    source: default
+    when:
+      - {card: product.surface, in: [web]}
+      - {card: backend.implementation, in: [code]}
+    compute: antislop
+    lines:
+      rules:
+        - 화면을 만들거나 고칠 때 `.claude/skills/antislop/`의 규칙을 during 모드로 따른다. 이 문장이 모드 선택이므로 사용자에게 모드를 묻지 않는다. Claude Code가 아니면 그 폴더의 `SKILL.md`를 직접 읽는다.
+  - id: local_first
+    title: 첫 빌드 위치
+    source: default
+    when:
+      - {card: cloud.target, not_in: [local]}
+    lines:
+      rules:
+        - 첫 빌드는 이 컴퓨터에서 `docker compose`로 끝낸다. 배포는 첫 빌드를 확인한 뒤 `docs/infrastructure.md`의 "배포 (나중)"을 따른다.
+  - {id: human_tasks, title: 사람이 직접 할 일, source: default, compute: human_tasks}
+
+  # 설계에서 오는 값. 설계 문서와 skill에 그대로 들어간다.
+  - {id: requirements, title: 요구사항, source: design}
+  - {id: eval_cases, title: 평가 사례, source: design}
+  - {id: state_fields, title: 상태 필드, source: design}
+  - {id: unknowns, title: 설계의 미확인 사항, source: design, compute: unknowns}
+
+  # 사용자에게 물을 값. 빌드 준비 단계 전까지는 BUILD.md "남은 결정"에 추천과 함께 적는다.
+  - id: model_ids
+    title: 역할별 모델 ID
+    source: ask
+    design_has: agent
+    when:
+      - {card: backend.implementation, in: [code]}
+    compute: model_ids
+    question: 에이전트 노드마다 쓸 모델 ID를 무엇으로 할까요?
+    recommendation: 고른 제공자의 공식 문서에서 지금 쓸 수 있는 모델을 확인하고, 노드의 필요한 모델 능력에 맞춰 고릅니다.
+  # 둘 다 고른 경우. 추천은 의미 검색이 있는지에 따라 달라서 항목을 둘로 나눈다.
+  - id: provider_serving_roles
+    title: 모델 제공자와 모델 서빙의 역할
+    source: ask
+    when:
+      - {card: model.provider, in: [gemini, openai, upstage, exaone, openrouter]}
+      - {card: mlops.model_serving, in: [ollama, vllm]}
+      - {card: data.vector_store, not_in: [none]}
+    question: 외부 모델 제공자와 직접 띄우는 모델 서빙을 각각 무엇에 쓸까요?
+    recommendation: 대화와 글 생성은 모델 제공자, 임베딩은 직접 띄우는 모델 서빙에 맡깁니다.
+  - id: provider_serving_roles_no_search
+    title: 모델 제공자와 모델 서빙의 역할
+    source: ask
+    when:
+      - {card: model.provider, in: [gemini, openai, upstage, exaone, openrouter]}
+      - {card: mlops.model_serving, in: [ollama, vllm]}
+      - {card: data.vector_store, in: [none]}
+    question: 외부 모델 제공자와 직접 띄우는 모델 서빙을 각각 무엇에 쓸까요?
+    recommendation: 대화와 글 생성은 모델 제공자에 맡기고, 직접 띄우는 모델 서빙은 맡길 역할이 따로 있을 때만 둡니다.
+  - id: embedding_model
+    title: 임베딩 모델과 차원
+    source: ask
+    when:
+      - {card: data.vector_store, not_in: [none]}
+    compute: embedding
+    question: 의미 검색에 쓸 임베딩 모델과 벡터 차원을 무엇으로 할까요?
+    recommendation: 모델 서빙이 Ollama면 Ollama의 임베딩 모델, 아니면 모델 제공자의 임베딩 모델을 쓰고, 차원은 그 모델 문서의 값을 씁니다.
+  - id: data_scope
+    title: 데이터 사용 범위
+    source: ask
+    when_any:
+      - {card: data.primary_db, not_in: [none]}
+      - {card: data.vector_store, not_in: [none]}
+      - {card: model.provider, in: [gemini, openai, upstage, exaone, openrouter]}
+    question: 다루는 데이터를 써도 되는 범위(저작권, 개인정보, 외부 모델 API로 보내도 되는지)는 어디까지인가요?
+    recommendation: 개발과 확인은 가상 예시 데이터로 하고, 실제 데이터는 사용자가 허락한 범위에서만 씁니다.
+  - id: screen_layout
+    title: 화면 구성
+    source: ask
+    when:
+      - {card: product.surface, in: [web]}
+      - {card: backend.implementation, in: [code]}
+    question: 화면은 몇 개이고 각 화면에 무엇을 보여 줄까요?
+    recommendation: 요구사항마다 화면이나 탭 하나를 두고, 결과와 근거를 같은 화면에 보여 줍니다.
+  - {id: open_targets, title: 정할 목표치, source: ask, compute: open_targets}
+  - id: n8n_trigger
+    title: n8n 시작 방식
+    source: ask
+    when:
+      - {card: backend.implementation, in: [n8n]}
+    question: workflow를 무엇으로 시작할까요?
+    recommendation: 외부 요청이면 Webhook, 정해진 시간이면 Schedule Trigger, 메일이나 메신저가 오면 그 서비스의 트리거 노드로 시작합니다.
+  - id: n8n_service_nodes
+    title: n8n 서비스 연동 노드
+    source: ask
+    when:
+      - {card: backend.implementation, in: [n8n]}
+    question: 외부 서비스를 부르는 노드를 어떤 n8n 노드로 바꿀까요?
+    recommendation: n8n에 그 서비스 전용 노드가 있으면 그 노드를, 없으면 HTTP Request 노드를 씁니다.

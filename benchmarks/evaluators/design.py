@@ -5,6 +5,7 @@ import io
 import json
 import zipfile
 
+from app.journey.build_plan import plan_build
 from app.journey.package import build_package
 from app.journey.state import ProjectSpec
 
@@ -40,7 +41,8 @@ def design_checks(
                 name.removeprefix("starter-pack/"): archive.read(name).decode()
                 for name in archive.namelist()
             }
-        status = "pass" if actual == build_package(design, registry, idea) else "fail"
+        expected = build_package(plan_build(design, registry, idea, project=final_spec))
+        status = "pass" if actual == expected else "fail"
     checks.append(
         {
             "id": "package_matches_revision",

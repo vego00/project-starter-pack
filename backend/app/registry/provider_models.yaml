@@ -1,0 +1,47 @@
+# 제공자별 기본 모델 (ADR-026 결정 7). 묶음은 이 값을 추천으로만 적고, 사용자가 확정한다.
+# 갱신은 하위 세션이 공식 문서를 웹에서 확인해 PR로 한다. 확인일에서 stale_after_days가 지나면 묶음에 경고가 붙는다.
+# 문서에 없던 값은 적지 않는다. 비어 있으면 묶음은 "공식 문서에서 확인"으로 둔다.
+version: 1
+stale_after_days: 60
+providers:
+  gemini:
+    chat: gemini-4-hydrogen
+    light: gemini-3.5-flash-lite
+    embedding: gemini-embedding-2
+    embedding_dimensions: 3072
+    source: https://aistudio.google.com/docs/models
+    checked_at: 2026-11-25
+    note: 모델 문서가 새 프로젝트에 Gemini 4 Hydrogen이나 3.5 Flash-Lite를 권한다. Gemini 4 카드에는 안정·미리보기 표시가 없다.
+  openai:
+    chat: gpt-6.2-astra
+    light: gpt-6-luna
+    embedding: text-embedding-3-small
+    embedding_dimensions: 1536
+    source: https://developers.openai.com/api/docs/models
+    checked_at: 2026-11-25
+  upstage:
+    chat: solar-pro-4
+    light: solar-mini-4
+    embedding: solar-embedding-2-passage
+    embedding_dimensions: 1024
+    source: https://console.upstage.ai/docs/models
+    checked_at: 2026-11-25
+    note: solar-pro-4-contributor는 요청을 1년 보관해 학습에 쓰므로 기본으로 고르지 않는다.
+    embedding_note: 검색어 임베딩은 solar-embedding-2-query를 쓴다.
+  exaone:
+    chat: k-exaone_v2.5
+    source: https://docs.exaone.ai/ko/docs/k-exaone-2.5
+    checked_at: 2026-11-25
+    note: 기본 URL은 https://api.exaone.ai이고 OpenAI 호환 API다. 문서에 무료 기간은 적혀 있지 않다.
+  openrouter:
+    chat: openrouter/auto
+    source: https://openrouter.ai/docs/guides/routing/auto-model-selection
+    checked_at: 2026-11-25
+    note: openrouter/auto는 요청마다 모델을 고른다. 결과를 고정하려면 provider/model 형식의 모델 ID를 정한다.
+  ollama:
+    chat: llama3.1
+    embedding: nomic-embed-text
+    source: https://ollama.com/library
+    checked_at: 2026-11-25
+    note: 라이브러리에서 가장 많이 받은 모델이다. 장비에 맞는 크기 태그를 고르고, 장비와 용도에 따라 더 최신 모델을 고려한다.
+    embedding_note: 차원은 라이브러리 페이지에 적혀 있지 않아 모델 문서에서 확인한다.

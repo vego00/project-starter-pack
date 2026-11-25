@@ -10,6 +10,7 @@ from langgraph.types import Checkpointer, StateSnapshot
 from pydantic import BaseModel
 
 from app.journey.blueprint import Blueprint, BlueprintExample, blueprint_examples, build_blueprint
+from app.journey.build_plan import plan_build
 from app.journey.composers.summary import ARTIFACT_KEY
 from app.journey.controller import AGENT_STAGE
 from app.journey.design import DesignState, ServiceDesign
@@ -376,18 +377,39 @@ class JourneyService:
     def package_files(self, journey_id: UUID) -> dict[str, str]:
         """The build bundle as path to content: what package.zip holds, for viewing."""
         with self._lock(journey_id):
-            state = JourneyState.model_validate(self._snapshot(journey_id).values)
+            snapshot = self._snapshot(journey_id)
+            state = JourneyState.model_validate(snapshot.values)
+            prompt = _pending_prompt(snapshot)
+        # While a new design is being made, the saved one belongs to the decisions before it.
+        if prompt is not None and prompt["type"] == "designing":
+            raise JourneyError(
+                409, "designing", "설계를 만드는 중이에요. 끝나면 묶음을 받을 수 있어요."
+            )
         if state.design.current is None:
             raise JourneyError(409, "package_unavailable", "결정을 모두 마치면 받을 수 있어요.")
         return build_package(
-            state.design.current, self._registry, state.project_spec.idea, state.module_notes
+            plan_build(
+                state.design.current,
+                self._registry,
+                state.project_spec.idea,
+                state.module_notes,
+                project=state.project_spec,
+            )
         )
 
     def _design_view(self, state: JourneyState) -> DesignView | None:
         design: ServiceDesign | None = state.design.current
         if design is None:
             return None
-        files = build_package(design, self._registry, state.project_spec.idea, state.module_notes)
+        files = build_package(
+            plan_build(
+                design,
+                self._registry,
+                state.project_spec.idea,
+                state.module_notes,
+                project=state.project_spec,
+            )
+        )
         issues = [i.message for i in design.validation or [] if i.severity == "warning"]
         return DesignView(
             status=state.design.status,
