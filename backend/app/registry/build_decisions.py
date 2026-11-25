@@ -32,7 +32,7 @@ class BuildItem(_Strict):
     deploy: bool = False
     when: tuple[Condition, ...] = ()
     when_any: tuple[Condition, ...] = ()
-    design_has: Literal["agent"] | None = None
+    design_has: Literal["agent", "search"] | None = None
     compute: Compute | None = None
     lines: dict[Section, tuple[str, ...]] = {}
     question: str | None = None

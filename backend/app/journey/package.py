@@ -279,6 +279,12 @@ def _infrastructure_doc(spec: BuildSpec) -> str:
     return "\n".join(lines)
 
 
+def _issue_lines(spec: BuildSpec) -> list[str]:
+    if not spec.issues:
+        return []
+    return ["## 확인할 점", "", *[f"- {_inline(issue.message)}" for issue in spec.issues], ""]
+
+
 def _open_lines(spec: BuildSpec) -> list[str]:
     if not spec.open:
         return ["## 남은 결정", "", "- 없음", ""]
@@ -333,6 +339,7 @@ def _build_doc(spec: BuildSpec) -> str:
             "막힌 곳을 그때그때 적는다. 끝나면 사용자에게 이 파일을 알린다.",
             "",
             *_open_lines(spec),
+            *_issue_lines(spec),
             *_build_order(list(spec.modules)),
             "## 첫 작업",
             "",

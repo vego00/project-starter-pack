@@ -382,7 +382,11 @@ class JourneyService:
             raise JourneyError(409, "package_unavailable", "결정을 모두 마치면 받을 수 있어요.")
         return build_package(
             plan_build(
-                state.design.current, self._registry, state.project_spec.idea, state.module_notes
+                state.design.current,
+                self._registry,
+                state.project_spec.idea,
+                state.module_notes,
+                project=state.project_spec,
             )
         )
 
@@ -391,7 +395,13 @@ class JourneyService:
         if design is None:
             return None
         files = build_package(
-            plan_build(design, self._registry, state.project_spec.idea, state.module_notes)
+            plan_build(
+                design,
+                self._registry,
+                state.project_spec.idea,
+                state.module_notes,
+                project=state.project_spec,
+            )
         )
         issues = [i.message for i in design.validation or [] if i.severity == "warning"]
         return DesignView(

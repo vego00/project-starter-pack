@@ -47,6 +47,15 @@ items:
         - 모델 API 키가 없어도 핵심 흐름을 끝까지 돌려 볼 수 있게 가짜 모델 모드를 둔다. 환경 변수 하나(예 `MODEL_MODE=fake`)로 켜고, 정해진 입력에 정해진 답을 돌려준다. 키가 있으면 실제 모델을 쓰고, 실행 기록에 어느 모드였는지 남긴다.
       verify:
         - 키가 없으면 가짜 모델 모드로 평가 사례를 먼저 끝까지 돌린다. 실제 모델 결과로 보고하지 않는다.
+  - id: search_floor
+    title: 검색 관련도 하한과 결과 없음
+    source: default
+    design_has: search
+    lines:
+      rules:
+        - 검색은 관련도 하한을 둔다. 하한보다 낮은 결과만 있으면 억지로 고르지 않고 찾지 못했다고 답한다. 하한 값은 예시 데이터로 정하고 그 근거를 `docs/build-notes.md`에 적는다.
+      verify:
+        - 찾을 것이 없는 입력에 찾지 못했다고 답하는지 평가 사례로 확인한다.
   - id: sample_data
     title: 예시 데이터
     source: default

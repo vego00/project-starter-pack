@@ -12,9 +12,11 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from app.journey.build_checks import SEARCH_WORDS, BuildIssue, build_issues
 from app.journey.design import ServiceDesign
 from app.journey.modules import ModuleNote, ModulePlan, build_module_plan
 from app.journey.n8n import N8N_IMAGE, WORKFLOW_PATH
+from app.journey.state import ProjectSpec
 from app.registry.build_decisions import BuildDecisions, BuildItem, default_build_decisions
 from app.registry.loader import Registry
 from app.registry.modules import default_module_rules
@@ -73,6 +75,7 @@ class BuildSpec(_Spec):
     antislop: bool
     decided: tuple[Decided, ...]
     open: tuple[OpenDecision, ...]
+    issues: tuple[BuildIssue, ...] = ()
 
 
 def _stack(chosen: Mapping[str, str | None]) -> list[str]:
@@ -121,7 +124,8 @@ def _containers(chosen: Mapping[str, str | None]) -> list[str]:
         found.append("Qdrant: 검색 색인을 볼륨에 저장한다.")
     if chosen.get("data.vector_store") == "chroma":
         found.append("Chroma: 검색 색인을 볼륨에 저장한다.")
-    if chosen.get("backend.execution") == "queue":
+    # n8n runs its own executions, so the execution card adds no queue (ADR-026, n8n.own_executions).
+    if chosen.get("backend.execution") == "queue" and chosen.get("backend.implementation") != "n8n":
         found.append(
             "작업 큐와 워커: 큐 브로커 컨테이너와, 앱 이미지로 띄우는 워커 컨테이너를 둔다."
         )
@@ -156,6 +160,16 @@ def _applies(item: BuildItem, chosen: Mapping[str, str | None], design: ServiceD
         return False
     if item.design_has == "agent" and not any(node.kind == "agent" for node in design.nodes):
         return False
+    if item.design_has == "search" and not (
+        chosen.get("data.vector_store") not in (None, "none")
+        or any(
+            word in f"{tool.name} {tool.reason}".lower()
+            for node in design.nodes
+            for tool in node.tools
+            for word in SEARCH_WORDS
+        )
+    ):
+        return False
     return True
 
 
@@ -179,6 +193,7 @@ def plan_build(
     idea: str,
     notes: Mapping[str, ModuleNote] | None = None,
     decisions: BuildDecisions | None = None,
+    project: ProjectSpec | None = None,
 ) -> BuildSpec:
     items = (decisions or default_build_decisions()).items
     chosen: dict[str, str | None] = {
@@ -258,6 +273,14 @@ def plan_build(
         else:
             decided.append(Decided(id=item.id, title=item.title, source=item.source))
 
+    issues = build_issues(design, chosen, project)
+    for number, issue in enumerate(issues, 1):
+        if issue.severity == "error":
+            # A design rule still broken here (a design saved before the rule) becomes a question.
+            open_items.append(OpenDecision(id=f"issue-{number}", title="설계와 결정이 맞지 않는 곳",
+                                           source="ask" if issue.route == "ask" else "design",
+                                           question=issue.message,
+                                           recommendation=issue.recommendation))  # fmt: skip
     return BuildSpec(
         design=design,
         idea=idea,
@@ -276,4 +299,5 @@ def plan_build(
         antislop=antislop,
         decided=tuple(decided),
         open=tuple(open_items),
+        issues=tuple(issue for issue in issues if issue.severity == "warning"),
     )

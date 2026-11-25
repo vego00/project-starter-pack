@@ -82,7 +82,10 @@ def valid_design():
             {"name": "clean", "type": "str", "writers": ["intake"], "readers": ["answer"],
              "lifetime": "run"},
         ],
-        "eval_cases": [{"id": "E-1", "given": "강의 질문", "expect": "출처가 있다"}],
+        "eval_cases": [
+            {"id": "E-1", "given": "강의 질문", "expect": "출처가 있다"},
+            {"id": "E-2", "given": "자료에 없는 질문", "expect": "찾지 못했다고 답한다"},
+        ],
         "tasks": [
             {"id": "T-1", "title": "답변 노드", "inputs": "예시 질문", "produces": "함수",
              "verify_by": "예시 질문에 출처가 붙는다"},

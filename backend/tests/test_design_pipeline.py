@@ -109,7 +109,10 @@ def draft(**overrides):
             "edges": [{"source": "search", "target": "answer"}],
             "max_model_calls": 4,
         },
-        "eval_cases": [{"id": "E-1", "given": "강의 질문", "expect": "출처가 있다"}],
+        "eval_cases": [
+            {"id": "E-1", "given": "강의 질문", "expect": "출처가 있다"},
+            {"id": "E-2", "given": "강의에 없는 질문", "expect": "찾지 못했다고 답한다"},
+        ],
         "tasks": [
             {"id": "T-1", "title": "검색 노드", "inputs": "질문", "produces": "함수",
              "verify_by": "결과가 나온다"}
