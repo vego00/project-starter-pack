@@ -16,6 +16,7 @@ from app.main import create_app
 from app.registry.loader import load_registry
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import InMemorySaver
+from tests.screen import prepared
 
 JOURNEYS = "/api/v1/journeys"
 SPEC = {
@@ -44,14 +45,15 @@ def client():
 def start(client):
     response = client.post(JOURNEYS, json=SPEC)
     assert response.status_code == 201
-    return response.json()
+    return prepared(client, response).json()
 
 
 def act(client, view, **action):
-    return client.post(
+    response = client.post(
         f"{JOURNEYS}/{view['journey_id']}/decisions",
         json={"revision": view["revision"], "action": action},
     )
+    return prepared(client, response)
 
 
 def ok(client, view, **action):

@@ -126,11 +126,10 @@ def _after_engine_for(registry: Registry):
     return route
 
 
-def _after_controller(state: JourneyState) -> str | list[str]:
-    return "present" if state.saved_brief else list(PREPARERS)
-
-
-def _after_decision(state: JourneyState) -> str:
+def _after_decision(state: JourneyState) -> str | list[str]:
+    if state.gate_outcome == "prepare":
+        # Nothing the card reads changed, so the engine and controller are not run again.
+        return list(PREPARERS)
     return {"ask": "qa", "invalid": "decision_gate", "keep": "decision_gate"}.get(
         state.gate_outcome, "constraint_engine"
     )
@@ -174,11 +173,12 @@ def build_graph(registry: Registry, *, checkpointer: Checkpointer, deps: Journey
         ["controller", "fork_gate", "reviewer", "done_gate"],
     )
     graph.add_conditional_edges("fork_gate", _after_fork, ["fork_gate", "constraint_engine"])
-    graph.add_conditional_edges("controller", _after_controller, [*PREPARERS, "present"])
+    # A card without a usable brief is shown with its options first; `prepare` asks the models.
+    graph.add_edge("controller", "present")
     graph.add_edge(["advisor", "recommender", "retriever"], "present")
     graph.add_edge("present", "decision_gate")
     graph.add_conditional_edges(
-        "decision_gate", _after_decision, ["qa", "decision_gate", "constraint_engine"]
+        "decision_gate", _after_decision, ["qa", "decision_gate", "constraint_engine", *PREPARERS]
     )
     graph.add_edge("qa", "decision_gate")
     graph.add_conditional_edges("reviewer", _after_review, ["issue_gate", "composer"])

@@ -61,6 +61,7 @@ from app.journey.state import (
     KeepAction,
     OptionView,
     PlanDeployAction,
+    PrepareAction,
     ProjectSpec,
     Recommendation,
     ReopenAction,
@@ -501,12 +502,16 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
 
     def present(state: JourneyState) -> dict[str, Any]:
         card = registry.card(state.current_card_id)
-        brief = state.saved_brief or CardBrief(
-            advice=state.advice,
-            recommendation=state.recommendation,
-            evidence=state.evidence,
-            inputs=state.brief_inputs(card.card_id),
-        )
+        brief = state.saved_brief
+        if brief is None and state.gate_outcome == "prepare":
+            brief = CardBrief(
+                advice=state.advice,
+                recommendation=state.recommendation,
+                evidence=state.evidence,
+                inputs=state.brief_inputs(card.card_id),
+            )
+        # Without a brief the options go out now; advice and recommendation come on `prepare`.
+        preparing = brief is None
         chosen = {
             card_id: d.option_id
             for card_id, d in state.decisions.items()
@@ -527,7 +532,7 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
             views.append(
                 OptionView(
                     option=option,
-                    note=brief.advice.notes.get(option.id, ""),
+                    note="" if preparing else brief.advice.notes.get(option.id, ""),
                     blocked_reason=blocked.get(option.id),
                     icon=OPTION_ICONS.get((card.card_id, option.id)),
                     implies={k: v.option_id for k, v in impact.implied.items()},
@@ -537,17 +542,19 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
                     artifacts=list(card.artifacts.get(option.id, ())),
                 )
             )
+        briefs = state.card_briefs if preparing else {**state.card_briefs, card.card_id: brief}
         return {
-            "card_briefs": {**state.card_briefs, card.card_id: brief},
+            "card_briefs": briefs,
             "current_card": CardPresentation(
                 card_id=card.card_id,
                 version=card.version,
                 layer=card.layer,
                 question=card.question,
                 options=views,
-                recommendation=brief.recommendation,
-                evidence=brief.evidence,
-                advice_source=brief.advice.source,
+                recommendation=None if preparing else brief.recommendation,
+                evidence=[] if preparing else brief.evidence,
+                advice_source="card_text" if preparing else brief.advice.source,
+                preparing=preparing,
                 to_review=(
                     [
                         _answer_label(registry, later, state.decisions[later].option_id)
@@ -593,6 +600,10 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
         except ValidationError:
             return _reject("요청 형식을 확인하지 못했습니다. 선택지를 다시 골라 주세요.")
 
+        if isinstance(action, PrepareAction):
+            if not current.preparing:
+                return _reject("이미 추천까지 준비된 카드예요.")
+            return {"gate_outcome": "prepare", "gate_error": None}
         if isinstance(action, AskAction):
             asked = sum(qa.card_id == current.card_id for qa in state.qa_history)
             if asked >= MAX_QUESTIONS_PER_CARD:
@@ -632,6 +643,8 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
         if isinstance(action, SignalAction):
             return _change_signal(state, action)
         if isinstance(action, AcceptRecommendationAction):
+            if current.recommendation is None:
+                return _reject("추천을 준비하는 중이에요. 선택지를 직접 골라도 돼요.")
             option_id = current.recommendation.option_id
             by, rationale = "recommended", current.recommendation.reason
             if option_id is None:

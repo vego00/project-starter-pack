@@ -165,9 +165,11 @@ class CardPresentation(BaseModel):
     layer: str
     question: str
     options: list[OptionView]
-    recommendation: Recommendation
+    # None while preparing: the card shows its options before the models have answered.
+    recommendation: Recommendation | None
     evidence: list[Evidence] = []
     advice_source: str
+    preparing: bool = False
     # While changing a decision: later decisions that get marked for another look.
     to_review: list[str] = []
     learning_refs: list[str] = []
@@ -252,7 +254,7 @@ class JourneyState(BaseModel):
     evidence: list[Evidence] = []
     current_card: CardPresentation | None = None
     card_briefs: dict[CardId, CardBrief] = {}
-    gate_outcome: Literal["advance", "ask", "invalid", "keep", "unchanged"] | None = None
+    gate_outcome: Literal["advance", "ask", "invalid", "keep", "unchanged", "prepare"] | None = None
     gate_error: str | None = None
     pending_question: str | None = None
     qa_history: list[CardQA] = []
@@ -320,6 +322,12 @@ class AcceptRecommendationAction(_Action):
 
 class DeferAction(_Action):
     action: Literal["defer"]
+
+
+class PrepareAction(_Action):
+    """Asks the models about a card that was shown with its options only."""
+
+    action: Literal["prepare"]
 
 
 class AskAction(_Action):
@@ -393,7 +401,8 @@ GateAction = Annotated[
     | ReviseAction
     | FocusAction
     | KeepAction
-    | SignalAction,
+    | SignalAction
+    | PrepareAction,
     Field(discriminator="action"),
 ]
 JourneyAction = Annotated[
@@ -406,6 +415,7 @@ JourneyAction = Annotated[
     | FocusAction
     | KeepAction
     | SignalAction
+    | PrepareAction
     | EndHereAction
     | PlanDeployAction
     | ClarifyAction

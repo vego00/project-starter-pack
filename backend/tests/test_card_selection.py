@@ -56,7 +56,16 @@ class Run:
 
     def __init__(self, deps=None):
         self.service = JourneyService(REGISTRY, InMemorySaver(), deps)
-        self.view = self.service.start(SPEC)
+        self.view = self._prepared(self.service.start(SPEC))
+
+    def _prepared(self, view):
+        """A card shown with its options only is prepared at once, as the screen does."""
+        prompt = view.prompt
+        if prompt and prompt["type"] == "decision" and prompt["card"]["preparing"]:
+            return self.service.act(
+                view.journey_id, view.revision, ACTION.validate_python({"action": "prepare"})
+            )
+        return view
 
     @property
     def id(self):
@@ -73,7 +82,8 @@ class Run:
         return JourneyState.model_validate(values)
 
     def send(self, **action):
-        self.view = self.service.act(self.id, self.view.revision, ACTION.validate_python(action))
+        view = self.service.act(self.id, self.view.revision, ACTION.validate_python(action))
+        self.view = self._prepared(view)
         return self
 
     def answer_all(self, choices=None):

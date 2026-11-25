@@ -51,6 +51,7 @@ from app.journey.start import (
     to_spec,
 )
 from app.journey.state import (
+    AcceptRecommendationAction,
     ClarifyAction,
     Decision,
     EndHereAction,
@@ -60,6 +61,7 @@ from app.journey.state import (
     KeepAction,
     NodeEvent,
     PlanDeployAction,
+    PrepareAction,
     ProjectSpec,
     ReopenAction,
     ReviseAction,
@@ -187,6 +189,26 @@ def _pending_prompt(snapshot: StateSnapshot) -> dict[str, Any] | None:
     return None
 
 
+# What one `prepare` adds to the trace after the gate: the card's models, then the card.
+PREPARED_NODES = {"advisor", "recommender", "retriever", "present"}
+
+
+def _answers_prepared_card(
+    trace: list[dict[str, Any]], revision: int, action: JourneyAction
+) -> bool:
+    """A choice made while the card was being prepared still answers that card, as long as only
+    the preparation happened since. A recommendation the sender never saw is not accepted."""
+    if isinstance(action, PrepareAction | AcceptRecommendationAction) or revision < 0:
+        return False
+    nodes = [event["node"] for event in trace[revision:]]
+    return (
+        len(nodes) > 1
+        and nodes[0] == "decision_gate"
+        and set(nodes[1:]) <= PREPARED_NODES
+        and nodes[-1] == "present"
+    )
+
+
 def _resume_payload(action: JourneyAction) -> Any:
     if isinstance(action, ClarifyAction):
         return action.answers
@@ -226,13 +248,23 @@ class JourneyService:
             return self._view(journey_id, self._snapshot(journey_id))
 
     def get(self, journey_id: UUID) -> JourneyView:
-        with self._lock(journey_id):
-            return self._view(journey_id, self._snapshot(journey_id))
+        """Read-only, so it does not wait for a running action: it shows the last stop."""
+        snapshot = self._read(journey_id)
+        if snapshot.next and _pending_prompt(snapshot) is None:
+            lock = self._lock(journey_id)
+            if lock.locked():
+                snapshot = self._last_stop(journey_id)
+            else:
+                # No run holds it, so an earlier one failed midway and is continued here.
+                with lock:
+                    snapshot = self._snapshot(journey_id)
+        return self._view(journey_id, snapshot)
 
     def act(self, journey_id: UUID, revision: int, action: JourneyAction) -> JourneyView:
         with self._lock(journey_id):
             snapshot = self._snapshot(journey_id)
-            if len(snapshot.values.get("trace", [])) != revision:
+            trace = snapshot.values.get("trace", [])
+            if len(trace) != revision and not _answers_prepared_card(trace, revision, action):
                 raise JourneyError(
                     409, "stale_revision", "화면이 최신 상태가 아니에요. 최신 내용을 불러왔어요."
                 )
@@ -382,11 +414,22 @@ class JourneyService:
                 self._locks[journey_id] = lock
             return lock
 
-    def _snapshot(self, journey_id: UUID) -> StateSnapshot:
-        config = journey_config(journey_id)
-        snapshot = self._graph.get_state(config)
+    def _read(self, journey_id: UUID) -> StateSnapshot:
+        snapshot = self._graph.get_state(journey_config(journey_id))
         if not snapshot.values:
             raise JourneyError(404, "journey_not_found", "여정을 찾을 수 없어요.")
+        return snapshot
+
+    def _last_stop(self, journey_id: UUID) -> StateSnapshot:
+        """The newest checkpoint that waits for the user, before the run in progress."""
+        for snapshot in self._graph.get_state_history(journey_config(journey_id)):
+            if _pending_prompt(snapshot) is not None:
+                return snapshot
+        return self._read(journey_id)
+
+    def _snapshot(self, journey_id: UUID) -> StateSnapshot:
+        config = journey_config(journey_id)
+        snapshot = self._read(journey_id)
         if snapshot.next and _pending_prompt(snapshot) is None:
             # A run failed between two interrupts: continue from the last saved step.
             self._graph.invoke(None, config)

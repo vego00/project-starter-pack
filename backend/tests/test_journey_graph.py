@@ -40,11 +40,13 @@ COMPLETE_SPEC = {
 
 class Journey:
     """Drives a journey the way an API would: start once, then answer each interrupt.
-    By default the fork after the agent design goes on to the deployment cards."""
+    By default the fork after the agent design goes on to the deployment cards, and a card
+    shown with its options only is prepared at once, as the screen does."""
 
-    def __init__(self, spec=None, deps=None, checkpointer=None, at_fork="plan"):
+    def __init__(self, spec=None, deps=None, checkpointer=None, at_fork="plan", prepare=True):
         self.id = uuid4()
         self.at_fork = at_fork
+        self.auto_prepare = prepare
         self.saver = checkpointer or InMemorySaver()
         self.graph = build_graph(REGISTRY, checkpointer=self.saver, deps=deps)
         self.config = journey_config(self.id)
@@ -56,6 +58,10 @@ class Journey:
         waiting = self.waiting
         if self.at_fork == "plan" and waiting is not None and waiting["type"] == "fork":
             self.result = self.graph.invoke(resume_command({"action": "plan_deploy"}), self.config)
+        waiting = self.waiting
+        if self.auto_prepare and waiting and waiting["type"] == "decision":
+            if waiting["card"]["preparing"]:
+                self.result = self.graph.invoke(resume_command({"action": "prepare"}), self.config)
 
     @property
     def waiting(self):
@@ -579,8 +585,11 @@ def test_shipped_registry_starts_at_the_earliest_stage_and_completes():
     result = graph.invoke(journey_input(journey_id, ProjectSpec(**COMPLETE_SPEC)), config)
     assert result["__interrupt__"][0].value["card"]["card_id"] == "product.surface"
 
-    while (kind := result["__interrupt__"][0].value["type"]) != "done":
-        action = "plan_deploy" if kind == "fork" else "accept_recommendation"
+    while (prompt := result["__interrupt__"][0].value)["type"] != "done":
+        if prompt["type"] == "fork":
+            action = "plan_deploy"
+        else:
+            action = "prepare" if prompt["card"]["preparing"] else "accept_recommendation"
         result = graph.invoke(resume_command({"action": action}), config)
 
     state = JourneyState.model_validate(graph.get_state(config).values)
@@ -983,6 +992,35 @@ def test_a_brief_saved_without_its_inputs_keeps_the_old_rule():
     journey.send({"action": "revise", "card_id": "model.provider"})
 
     assert calls() == before
+
+
+def test_a_card_with_a_usable_brief_comes_whole():
+    journey, calls = counted()
+    journey.choose_defaults()
+    journey.auto_prepare = False
+    before = calls()
+
+    journey.send({"action": "revise", "card_id": "model.provider"})
+
+    assert journey.prompt["card"]["preparing"] is False
+    assert journey.prompt["card"]["recommendation"]["option_id"]
+    assert calls() == before
+
+
+def test_changed_info_shows_the_options_then_prepares():
+    journey, calls = counted()
+    journey.choose_defaults()
+    journey.send({"action": "revise", "card_id": "model.provider"})
+    journey.auto_prepare = False
+    before = calls()
+
+    journey.send({"action": "signal", "field": "has_gpu", "value": "yes"})
+    assert journey.prompt["card"]["preparing"] is True
+    assert calls() == before
+    journey.send({"action": "prepare"})
+
+    assert journey.prompt["card"]["preparing"] is False
+    assert calls() == before + 2
 
 
 def test_signal_in_revise_mode_stays_editing():
