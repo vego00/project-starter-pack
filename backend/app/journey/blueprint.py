@@ -284,6 +284,8 @@ def _system(canvas: _Canvas) -> None:
     canvas.edge(users, surface)
     canvas.edge(surface, api, "요청")
 
+    if canvas.choice("backend.implementation"):
+        canvas.note("backend.implementation", "app")
     execution = canvas.choice("backend.execution")
     if not canvas.in_play("backend.execution") or execution == "sync":
         canvas.edge(api, runner, "실행")

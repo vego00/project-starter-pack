@@ -28,6 +28,7 @@ AGENT_PATH = {
     "data.vector_store": "pgvector",
     "data.checkpointer": "postgres",
     "backend.execution": "sync",
+    "backend.implementation": "code",
     "devops.orchestration": "none",
     "mlops.model_serving": "external_api",
     "cloud.target": "gcp",
@@ -245,6 +246,7 @@ def test_a_completed_journey_saved_on_old_cards_still_derives():
     assert [(u.text, u.blocks_confirmation) for u in result.unknowns] == [
         ("아직 정하지 않은 결정: 데이터 저장소", False),
         ("아직 정하지 않은 결정: 검색 저장소", False),
+        ("아직 정하지 않은 결정: 구현 방식", False),
     ]
     changed = {"Agent 구조"}
     assert {w.split(" 카드가")[0] for w in result.warnings if "바뀌었어요" in w} == changed

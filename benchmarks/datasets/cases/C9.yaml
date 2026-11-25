@@ -1,0 +1,58 @@
+# Copy of a fixed evaluation case. The source is the Notion page in `notion`; change it there
+# first. `spec` was written by hand for the n8n implementation card (no source journey), so a run
+# skips drafting. Facts the input does not give (budget, GPU) are left blank on purpose.
+id: C9
+title: 쇼핑몰 문의 메일 · 분류와 승인 뒤 답장 (n8n)
+status: 초안
+notion: https://app.notion.com/p/42396199efb381dd82eee3dea08fb56b
+copied_on: '2026-11-25'
+spec:
+  idea: 작은 온라인 쇼핑몰을 둘이서 운영합니다. 고객 문의가 하루 30~50통 Gmail로 들어오는데, 배송·교환·환불·기타 문의를 하나씩 읽고 분류해
+    답장을 쓰느라 오후가 다 갑니다. 들어온 메일을 문의 종류별로 나누고, 저희가 자주 쓰는 안내문을 바탕으로 답장 초안을 만들어 주면 좋겠습니다.
+    답장은 제가 Slack에서 확인하고 승인한 것만 고객에게 보내야 합니다. 환불처럼 급한 문의는 승인과 상관없이 바로 Slack으로 알려 주세요. 코드는
+    잘 몰라서 n8n 화면에서 흐름을 보며 고치고 싶습니다.
+  goal: 들어온 고객 문의 메일이 종류별로 나뉘고, 안내문을 바탕으로 만든 답장 초안을 운영자가 Slack에서 승인한 뒤에만 고객에게 보내지는 상태
+  context: 둘이 운영하는 쇼핑몰에 하루 30~50통의 문의 메일이 Gmail로 들어옵니다. 문의를 하나씩 읽고 분류해 답장을 쓰는 데 오후가 다 갑니다.
+  boundary: 운영자가 Slack에서 승인한 답장만 고객에게 보냅니다. 환불처럼 급한 문의는 승인과 별도로 바로 Slack에 알립니다. 운영자가 n8n 화면에서
+    흐름을 보고 고칠 수 있어야 합니다.
+  team_size: 2
+  data_traits:
+  - 고객 문의 메일
+  - 자주 쓰는 안내문
+  deployment_target: local_demo
+selection:
+  product.surface: messenger
+  agent.topology: single
+  agent.hitl: approval
+  model.provider: openai
+  data.primary_db: none
+  data.vector_store: none
+  data.checkpointer: memory
+  backend.execution: sync
+  backend.implementation: n8n
+  devops.orchestration: none
+  mlops.model_serving: external_api
+  cloud.target: local
+  ops.tracing: logs
+must_ask:
+- backend.implementation
+- agent.hitl
+may_skip:
+- mlops.model_serving
+- devops.orchestration
+family: C9
+evaluation: design
+human_review:
+- 새 메일을 받는 시작과 문의 종류를 나누는 단계가 있다
+- 자주 쓰는 안내문을 바탕으로 답장 초안을 만든다
+- 담당자 승인 전에는 고객에게 메일을 보내지 않는다(발송이 사람 확인 뒤에 있다)
+- 급한 문의(환불)는 승인과 별도로 바로 알린다
+- 분류가 애매하거나 초안을 만들지 못하면 담당자에게 넘기는 길이 있다
+- 노드가 n8n 노드 하나씩(메일 받기, AI 분류, Slack 알림, 대기, 메일 발송)으로 옮길 수 있게 나뉘어 있다
+- 안내문이 어디 있는지, Gmail·Slack 계정 연결을 미확인이나 사람이 할 일로 남긴다
+design_checks:
+- node_references
+- validation
+- package_matches_revision
+- spec_snapshot
+- fixed_choices

@@ -32,6 +32,7 @@ selection:
   data.vector_store: pgvector
   data.checkpointer: memory
   backend.execution: sync
+  backend.implementation: code
   devops.orchestration: none
   mlops.model_serving: external_api
   cloud.target: gcp
