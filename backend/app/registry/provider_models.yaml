@@ -43,5 +43,5 @@ providers:
     embedding: nomic-embed-text
     source: https://ollama.com/library
     checked_at: 2026-11-25
-    note: 라이브러리에서 가장 많이 받은 모델이다. 장비에 맞는 크기 태그를 고른다.
+    note: 라이브러리에서 가장 많이 받은 모델이다. 장비에 맞는 크기 태그를 고르고, 장비와 용도에 따라 더 최신 모델을 고려한다.
     embedding_note: 차원은 라이브러리 페이지에 적혀 있지 않아 모델 문서에서 확인한다.
