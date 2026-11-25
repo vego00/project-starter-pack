@@ -73,7 +73,7 @@ def test_journey_continues_across_processes_until_completed():
     for option_id in walk:
         result = step(journey_id, "resume", select(option_id))
     assert result["card_id"] == "cloud.target"
-    assert len(result["decisions"]) == 10
+    assert len(result["decisions"]) == 11
 
     assert step(journey_id, "resume", select("local"))["card_id"] == "ops.tracing"
     final = step(journey_id, "resume", select("none"))
