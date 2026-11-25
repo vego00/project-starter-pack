@@ -153,7 +153,7 @@ def test_all_cards_to_completion_with_reload_and_restart(page: Page):
 
     page.reload()
     expect(page.get_by_role("heading", name="에이전트 실행 상태를 어디에")).to_be_visible()
-    expect(page.get_by_text("6 / 12")).to_be_visible()
+    expect(page.get_by_text("6 / 13")).to_be_visible()
 
     if RESTART_CMD:
         subprocess.run(RESTART_CMD, shell=True, check=True, timeout=120)
@@ -161,6 +161,7 @@ def test_all_cards_to_completion_with_reload_and_restart(page: Page):
         expect(page.get_by_role("heading", name="에이전트 실행 상태를 어디에")).to_be_visible()
 
     choose(page, "에이전트 실행 상태를 어디에 저장할까요?", "메모리")
+    choose(page, "서비스의 흐름을 무엇으로 만들까요?", "코드로 구현 (FastAPI·LangGraph)")
     choose(page, "에이전트 작업을 어떻게 실행할까요?", "요청 내 동기 실행")
     choose(page, "컨테이너 오케스트레이션이 필요한가요?", "불필요 (Compose 유지)")
     choose(page, "모델을 어떻게 서빙할까요?", "외부 API만")
@@ -173,7 +174,7 @@ def test_all_cards_to_completion_with_reload_and_restart(page: Page):
     choose(page, "완성된 서비스의 실행 기록을 어떻게 볼까요?", "자체 실행 기록")
 
     expect(page.get_by_role("heading", name="설계가 준비됐어요")).to_be_visible()
-    expect(page.get_by_text("12 / 12")).to_be_visible()
+    expect(page.get_by_text("13 / 13")).to_be_visible()
     assert page.locator(".blueprint-canvas").bounding_box()["height"] > 300
     shot(page, "5-completed")
 
@@ -287,7 +288,7 @@ def test_pressing_a_decided_icon_keeps_the_decision_until_changed(page: Page):
 
     expect(page.get_by_role("heading", name=SURFACE)).to_be_visible()
     expect(page.get_by_role("button", name="시스템 웹 화면")).to_be_visible()
-    expect(page.get_by_text("1 / 12")).to_be_visible()
+    expect(page.get_by_text("1 / 13")).to_be_visible()
 
     page.get_by_role("button", name="웹 화면 그대로 두기").click()
     expect(page.get_by_role("heading", name=SURFACE)).to_be_hidden()
@@ -410,7 +411,7 @@ def test_stale_tab_cannot_answer_the_wrong_card(browser: Browser, page: Page):
     option_button(other, "Supervisor 라우팅").click()
     expect(other.get_by_role("alert").first).to_contain_text("최신 상태가 아니에요")
     expect(other.get_by_role("heading", name="에이전트가 실행 중간에")).to_be_visible()
-    expect(other.get_by_text("2 / 12")).to_be_visible()
+    expect(other.get_by_text("2 / 13")).to_be_visible()
 
 
 def test_the_system_diagram_fits_a_wide_panel(browser: Browser):
