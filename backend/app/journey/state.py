@@ -175,12 +175,28 @@ class CardPresentation(BaseModel):
     signals: list[CardSignal] = []
 
 
+class BriefInputs(BaseModel):
+    """What the models read when they wrote a brief (`prompts.project_context`), minus the
+    card's own answer, which says nothing about how to answer it."""
+
+    project: dict[str, Any]
+    decided: dict[CardId, str]
+
+    def still_hold(self, now: "BriefInputs") -> bool:
+        """Nothing the brief saw has changed. Values that appeared since are not compared."""
+        return all(now.project.get(k) == v for k, v in self.project.items()) and all(
+            now.decided.get(k) == v for k, v in self.decided.items()
+        )
+
+
 class CardBrief(BaseModel):
     """What the models said about a card, kept so reopening it costs no call."""
 
     advice: Advice
     recommendation: Recommendation
     evidence: list[Evidence] = []
+    # None on briefs saved before the inputs were kept.
+    inputs: BriefInputs | None = None
 
 
 class CardQA(BaseModel):
@@ -257,13 +273,26 @@ class JourneyState(BaseModel):
     start_revision: int = 0
     trace: Annotated[list[NodeEvent], operator.add] = []
 
+    def brief_inputs(self, card_id: CardId) -> BriefInputs:
+        return BriefInputs(
+            project=self.project_spec.model_dump(mode="json", exclude_none=True),
+            decided={c: d.option_id for c, d in self.all_decisions.items() if c != card_id},
+        )
+
     @property
     def saved_brief(self) -> CardBrief | None:
-        """Looking at a decision costs nothing, unless an earlier change made it out of date."""
+        """Opening a card again costs nothing, unless something its brief read has changed."""
         card_id = self.current_card_id
-        if card_id != self.editing_card or card_id in self.needs_review:
+        brief = self.card_briefs.get(card_id)
+        if brief is None:
             return None
-        return self.card_briefs.get(card_id)
+        if brief.inputs is None:
+            # Without the inputs, only a decision no earlier change touched is known to hold.
+            editing = card_id == self.editing_card and card_id not in self.needs_review
+            return brief if editing else None
+        if brief.recommendation.option_id in self.blocked_options.get(card_id, {}):
+            return None
+        return brief if brief.inputs.still_hold(self.brief_inputs(card_id)) else None
 
     @property
     def all_decisions(self) -> dict[CardId, Decision]:

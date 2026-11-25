@@ -502,7 +502,10 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
     def present(state: JourneyState) -> dict[str, Any]:
         card = registry.card(state.current_card_id)
         brief = state.saved_brief or CardBrief(
-            advice=state.advice, recommendation=state.recommendation, evidence=state.evidence
+            advice=state.advice,
+            recommendation=state.recommendation,
+            evidence=state.evidence,
+            inputs=state.brief_inputs(card.card_id),
         )
         chosen = {
             card_id: d.option_id
@@ -689,6 +692,9 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
             # Free text such as "0" people fits the field but not the spec.
             name = FIELDS[action.field].name_in_text
             return _reject(f"{name}: 고를 수 있는 값이 아니라 그대로 뒀어요.")
+        if moved["project_spec"] == state.project_spec:
+            # The value it already had: nothing to explain again or rebuild.
+            return {**moved, "gate_outcome": "advance", "gate_error": None}
         return {
             **moved,
             # Every card that read this info explains and recommends it again.
