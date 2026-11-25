@@ -63,7 +63,9 @@ const promptSchema = z.discriminatedUnion("type", [
       layer: z.string(),
       question: z.string(),
       options: z.array(optionViewSchema),
-      recommendation: recommendationSchema,
+      // Null while the card waits for `prepare`: its options come first.
+      recommendation: recommendationSchema.nullable(),
+      preparing: z.boolean().default(false),
       advice_source: z.string(),
       to_review: z.array(z.string()).default([]), // As with must_change.
       evidence: z.array(
@@ -358,6 +360,7 @@ export type BlueprintExample = z.infer<typeof blueprintExamplesSchema>[number];
 export type Action =
   | { action: "select"; option_id: string; rationale?: string }
   | { action: "accept_recommendation" }
+  | { action: "prepare" }
   | { action: "defer" }
   | { action: "ask"; question: string }
   | { action: "reopen"; card_id: string }

@@ -81,6 +81,15 @@ function useStacked(): boolean {
   );
 }
 
+// Another tab or request is preparing the card: look again at this pace, not faster.
+export const PREPARE_POLL_MS = 3000;
+const PREPARE_POLLS = 60;
+
+const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
+const keyOf = (journey: Journey) => `${journey.journey_id}:${journey.revision}`;
+const isPreparing = (journey: Journey) =>
+  journey.prompt?.type === "decision" && journey.prompt.card.preparing;
+
 export default function App() {
   const [journey, setJourney] = useState<Journey | null>(null);
   const [error, setError] = useState("");
@@ -97,13 +106,68 @@ export default function App() {
   const account = useAccount();
   const stacked = useStacked();
   const inFlight = useRef(false);
+  // The card whose `prepare` is running, and the one whose `prepare` failed.
+  const preparing = useRef<string | null>(null);
+  const [prepareFailed, setPrepareFailed] = useState<string | null>(null);
+  // A choice sent while its card was still being prepared (작성자 결정 2026-11-25 (i)).
+  const [choosingEarly, setChoosingEarly] = useState(false);
+  const shown = useRef<Journey | null>(null);
 
   function show(next: Journey) {
+    const current = shown.current;
+    // A choice made during `prepare` can answer after it; the older view must not win.
+    if (
+      current?.journey_id === next.journey_id &&
+      current.revision > next.revision
+    )
+      return;
+    shown.current = next;
     setMissingLink(null);
     setJourney(next);
     rememberJourney(next.journey_id);
     recordProject(next);
   }
+
+  async function prepare(current: Journey) {
+    const key = keyOf(current);
+    preparing.current = key;
+    setPrepareFailed(null);
+    try {
+      show(await sendAction(current, { action: "prepare" }));
+    } catch (failure) {
+      if (failure instanceof ApiError && failure.code === "stale_revision")
+        await waitForPrepared(current);
+      else setPrepareFailed(key);
+    } finally {
+      if (preparing.current === key) preparing.current = null;
+    }
+  }
+
+  /** Someone else is preparing this card: read it until that is done. */
+  async function waitForPrepared(current: Journey) {
+    for (let poll = 0; poll < PREPARE_POLLS; poll++) {
+      await sleep(PREPARE_POLL_MS);
+      if (shown.current?.journey_id !== current.journey_id) return;
+      if (shown.current.revision !== current.revision) return;
+      try {
+        const next = await getJourney(current.journey_id);
+        if (next.revision !== current.revision || !isPreparing(next)) {
+          show(next);
+          return;
+        }
+      } catch {
+        break;
+      }
+    }
+    setPrepareFailed(keyOf(current));
+  }
+
+  useEffect(() => {
+    if (!journey || !isPreparing(journey)) return;
+    const key = keyOf(journey);
+    if (preparing.current === key || prepareFailed === key) return;
+    void prepare(journey);
+  }, [journey, prepareFailed]);
 
   async function run(work: () => Promise<void>) {
     if (inFlight.current) return;
@@ -160,6 +224,8 @@ export default function App() {
     if (!journey) return;
     setLastAction(action.action);
     const current = journey;
+    // The server holds this choice until the preparation ends, then applies it.
+    setChoosingEarly(isPreparing(current) && action.action === "select");
     void run(async () => {
       try {
         show(await sendAction(current, action));
@@ -303,7 +369,13 @@ export default function App() {
       aria-busy={busy}
     >
       {prompt?.type === "decision" && (
-        <DecisionView prompt={prompt} busy={busy} act={act} />
+        <DecisionView
+          prompt={prompt}
+          busy={busy}
+          act={act}
+          prepareFailed={prepareFailed === keyOf(journey)}
+          onRetryPrepare={() => void prepare(journey)}
+        />
       )}
       {prompt?.type === "fork" && (
         <ForkView prompt={prompt} busy={busy} act={act} />
@@ -388,7 +460,9 @@ export default function App() {
         {busy
           ? makingDesign
             ? "결정을 반영해 설계를 만들고 있어요. 시간이 조금 걸려요."
-            : "처리하는 중이에요. 모델을 쓸 때는 시간이 조금 걸려요."
+            : choosingEarly
+              ? "고른 답을 저장하고 있어요. 추천 준비가 끝나면 바로 다음 카드로 넘어가요."
+              : "처리하는 중이에요. 모델을 쓸 때는 시간이 조금 걸려요."
           : ""}
       </p>
       {restoring ? (

@@ -289,6 +289,9 @@ def run_flow(
             action = {"action": "plan_deploy"}
         elif kind == "done":
             break
+        elif kind == "decision" and prompt["card"]["preparing"]:
+            # The card came with its options only; the screen asks for the models next.
+            action = {"action": "prepare"}
         elif kind == "decision":
             card = prompt["card"]
             asked.append(card["card_id"])

@@ -578,6 +578,8 @@ def run_journey(client, idea=IDEA):
             action = {"action": "clarify", "answers": {}}
         elif prompt["type"] == "fork":
             action = {"action": "plan_deploy"}
+        elif prompt["card"]["preparing"]:
+            action = {"action": "prepare"}
         else:
             action = {"action": "accept_recommendation"}
         before = view
@@ -686,9 +688,11 @@ def test_a_finished_journey_can_change_one_decision_and_redesign():
         ).json()
         while view["prompt"]:  # Only cards the change affected are asked again.
             assert view["prompt"]["type"] == "decision"
+            preparing = view["prompt"]["card"]["preparing"]
+            action = {"action": "prepare" if preparing else "accept_recommendation"}
             view = client.post(
                 f"/api/v1/journeys/{view['journey_id']}/decisions",
-                json={"revision": view["revision"], "action": {"action": "accept_recommendation"}},
+                json={"revision": view["revision"], "action": action},
             ).json()
         second = client.get(f"/api/v1/journeys/{finished['journey_id']}/design").json()
 

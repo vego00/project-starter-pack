@@ -2101,3 +2101,204 @@ describe("fork after the agent design", () => {
     });
   });
 });
+
+describe("card preparation", () => {
+  const DECISIONS = `/api/v1/journeys/${ID}/decisions`;
+  const options = [optionView("none", "없음"), optionView("approval", "승인")];
+  const preparing = journey({
+    prompt: decisionPrompt(
+      {},
+      {
+        options: options.map((view) => ({ ...view, note: "" })),
+        recommendation: null,
+        preparing: true,
+        advice_source: "card_text",
+      },
+    ),
+  });
+  const prepared = journey({
+    revision: 12,
+    prompt: decisionPrompt(
+      {},
+      {
+        options,
+        recommendation: { ...recommendation, option_id: "approval" },
+      },
+    ),
+  });
+  const next = journey({
+    revision: 13,
+    prompt: decisionPrompt(
+      {},
+      { card_id: "cloud.target", question: "어디에 배포할까요?" },
+    ),
+  });
+
+  function deferred() {
+    let resolve!: (response: Response) => void;
+    const promise = new Promise<Response>((done) => (resolve = done));
+    return { promise, resolve };
+  }
+
+  const actionOf = (call: unknown[]) => bodyOf(call).action.action;
+  const posts = (mock: ReturnType<typeof stubFetch>, action: string) =>
+    mock.mock.calls.filter(
+      (call) => call[0] === DECISIONS && actionOf(call) === action,
+    );
+  const optionNames = () =>
+    screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
+
+  it("shows the options at once and asks for the recommendation by itself", async () => {
+    const answer = deferred();
+    const user = userEvent.setup();
+    const mock = stubFetch((url) =>
+      url === DECISIONS
+        ? answer.promise
+        : Response.json(preparing, { status: 201 }),
+    );
+    render(<App />);
+    await user.type(
+      screen.getByLabelText("프로젝트 아이디어"),
+      "강의 자료를 찾아 답하는 서비스",
+    );
+    await user.click(screen.getByRole("button", { name: "보내기" }));
+
+    expect(await screen.findByText(/추천을 준비하고 있어요/)).toBeVisible();
+    expect(screen.getByRole("button", { name: "승인 선택" })).toBeEnabled();
+    expect(document.querySelector(".workspace-card")).toHaveAttribute(
+      "aria-busy",
+      "false",
+    );
+    expect(screen.queryByText(/비교 필요/)).toBeNull();
+    expect(screen.queryByText(/AI 설명을 만들지 못해/)).toBeNull();
+    await waitFor(() => expect(posts(mock, "prepare")).toHaveLength(1));
+    expect(bodyOf(posts(mock, "prepare")[0]).revision).toBe(7);
+
+    answer.resolve(Response.json(prepared));
+
+    expect(
+      await screen.findByRole("button", { name: "승인 이걸로 정하기" }),
+    ).toBeEnabled();
+    expect(screen.queryByText(/추천을 준비하고 있어요/)).toBeNull();
+    expect(screen.getByText("추천이 왔어요: 승인")).toBeInTheDocument();
+    // The recommended option does not jump to the top under the pointer.
+    expect(optionNames()).toEqual(["없음", "승인"]);
+    expect(posts(mock, "prepare")).toHaveLength(1);
+  });
+
+  it("waits for a preparation that is already running instead of failing", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      stubStorage({ [LAST_KEY]: ID });
+      const reads = [preparing, preparing, prepared];
+      const mock = stubFetch((url) =>
+        url === DECISIONS
+          ? errorResponse(409, "stale_revision", "화면이 최신 상태가 아니에요.")
+          : Response.json(reads.shift()),
+      );
+      render(<App />);
+      expect(await screen.findByText(/추천을 준비하고 있어요/)).toBeVisible();
+      await waitFor(() => expect(posts(mock, "prepare")).toHaveLength(1));
+
+      await act(() => vi.advanceTimersByTimeAsync(3000));
+      expect(screen.getByText(/추천을 준비하고 있어요/)).toBeVisible();
+      await act(() => vi.advanceTimersByTimeAsync(3000));
+
+      expect(
+        await screen.findByRole("button", { name: "승인 이걸로 정하기" }),
+      ).toBeVisible();
+      expect(screen.queryByText(/추천을 받지 못했어요/)).toBeNull();
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(posts(mock, "prepare")).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows the card's own text and 비교 필요 when the models could not answer", async () => {
+    const fallback = journey({
+      revision: 12,
+      prompt: decisionPrompt(
+        {},
+        {
+          options,
+          advice_source: "card_text",
+          recommendation: {
+            ...recommendation,
+            status: "needs_comparison",
+            option_id: null,
+            reason: "",
+          },
+        },
+      ),
+    });
+    stubStorage({ [LAST_KEY]: ID });
+    stubFetch((url) =>
+      url === DECISIONS ? Response.json(fallback) : Response.json(preparing),
+    );
+    render(<App />);
+
+    expect(
+      await screen.findByText("비교 필요: 하나를 추천할 근거가 부족해요."),
+    ).toBeVisible();
+    expect(screen.getByText(/AI 설명을 만들지 못해/)).toBeVisible();
+    expect(screen.queryByText(/추천을 준비하고 있어요/)).toBeNull();
+  });
+
+  it("offers to ask again when the request fails, and the options stay usable", async () => {
+    const user = userEvent.setup();
+    stubStorage({ [LAST_KEY]: ID });
+    const answers = [
+      errorResponse(502, "upstream", "응답을 받지 못했어요."),
+      Response.json(prepared),
+    ];
+    const mock = stubFetch((url) =>
+      url === DECISIONS ? answers.shift()! : Response.json(preparing),
+    );
+    render(<App />);
+
+    expect(await screen.findByText("추천을 받지 못했어요.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "승인 선택" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "추천 다시 받기" }));
+
+    expect(
+      await screen.findByRole("button", { name: "승인 이걸로 정하기" }),
+    ).toBeVisible();
+    expect(posts(mock, "prepare")).toHaveLength(2);
+  });
+
+  it("saves a choice made before the recommendation and moves on", async () => {
+    const preparation = deferred();
+    const choice = deferred();
+    const user = userEvent.setup();
+    stubStorage({ [LAST_KEY]: ID });
+    const mock = stubFetch((url, init) => {
+      if (url !== DECISIONS) return Response.json(preparing);
+      const sent = JSON.parse(init!.body as string).action.action;
+      return sent === "prepare" ? preparation.promise : choice.promise;
+    });
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "없음 선택" }));
+
+    expect(bodyOf(posts(mock, "select")[0])).toEqual({
+      revision: 7,
+      action: { action: "select", option_id: "none" },
+    });
+    expect(
+      screen.getByText(
+        "고른 답을 저장하고 있어요. 추천 준비가 끝나면 바로 다음 카드로 넘어가요.",
+      ),
+    ).toBeVisible();
+    // The choice comes back first here; the older preparation must not replace it.
+    choice.resolve(Response.json(next));
+    expect(
+      await screen.findByRole("heading", { name: "어디에 배포할까요?" }),
+    ).toBeVisible();
+    preparation.resolve(Response.json(prepared));
+    await act(() => preparation.promise);
+
+    expect(
+      screen.getByRole("heading", { name: "어디에 배포할까요?" }),
+    ).toBeVisible();
+  });
+});

@@ -83,6 +83,17 @@ def test_journey_continues_across_processes_until_completed():
 
 
 @needs_postgres
+def test_a_card_shown_in_one_process_is_prepared_in_another():
+    journey_id = uuid4()
+    shown = step(journey_id, "start", SPEC)
+    assert (shown["card_id"], shown["preparing"]) == ("product.surface", True)
+
+    prepared = step(journey_id, "resume", {"action": "prepare"})
+
+    assert (prepared["card_id"], prepared["preparing"]) == ("product.surface", False)
+
+
+@needs_postgres
 def test_invalid_answer_after_restart_keeps_the_same_card():
     journey_id = uuid4()
     step(journey_id, "start", SPEC)
