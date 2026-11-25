@@ -10,6 +10,10 @@ RUN npm run build
 FROM nginxinc/nginx-unprivileged:1.28.2-alpine
 COPY infrastructure/docker/nginx-app.conf /etc/nginx/app.conf
 COPY infrastructure/docker/nginx-https.conf /etc/nginx/https.conf
+COPY infrastructure/docker/nginx-auth-api-on.conf /etc/nginx/auth-api-on.conf
+COPY infrastructure/docker/nginx-auth-page-on.conf /etc/nginx/auth-page-on.conf
+COPY --chown=nginx:nginx infrastructure/docker/nginx-auth-api-off.conf /etc/nginx/auth-api.conf
+COPY --chown=nginx:nginx infrastructure/docker/nginx-auth-page-off.conf /etc/nginx/auth-page.conf
 # 시작 스크립트가 인증서를 찾으면 이 파일을 HTTPS 설정으로 덮어쓴다.
 COPY --chown=nginx:nginx infrastructure/docker/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --chmod=755 infrastructure/docker/40-use-https-when-cert-exists.sh /docker-entrypoint.d/

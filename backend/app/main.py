@@ -21,6 +21,7 @@ from app.journey.service import JourneyError, JourneyService, JourneyView
 from app.journey.services import JourneyDeps, build_deps
 from app.journey.start import StartChange
 from app.journey.state import JourneyAction, ProjectSpec
+from app.owners import MemoryOwners, OwnerStore, PostgresOwners
 from app.registry.loader import Registry, load_registry
 
 logger = logging.getLogger(__name__)
@@ -99,13 +100,50 @@ def get_journeys(request: Request) -> JourneyService:
 
 
 Journeys = Annotated[JourneyService, Depends(get_journeys)]
-ERROR_RESPONSES = {status: {"model": ErrorResponse} for status in (404, 409, 422, 503)}
+ERROR_RESPONSES = {status: {"model": ErrorResponse} for status in (401, 404, 409, 422, 503)}
+LOCAL_USER = "local"
+
+
+def current_user(request: Request) -> str:
+    if request.app.state.settings.auth == "local":
+        return LOCAL_USER
+    # Nginx overwrites this header with the oauth2-proxy result, so a client cannot set it.
+    email = request.headers.get("x-user-email", "").strip().lower()
+    if not email:
+        raise JourneyError(401, "login_required", "로그인이 필요해요.")
+    return email
+
+
+User = Annotated[str, Depends(current_user)]
+
+
+def get_owners(request: Request) -> OwnerStore:
+    owners = request.app.state.owners
+    if owners is None:
+        raise JourneyError(
+            503, "persistence_unavailable", "저장소가 연결되어 있지 않아 여정을 시작할 수 없어요."
+        )
+    return owners
+
+
+Owners = Annotated[OwnerStore, Depends(get_owners)]
+
+
+def owned_journey(journey_id: UUID, user: User, owners: Owners) -> UUID:
+    # Same answer as a missing journey, so other people's journey ids reveal nothing.
+    if owners.owner(journey_id) != user:
+        raise JourneyError(404, "journey_not_found", "여정을 찾을 수 없어요.")
+    return journey_id
+
+
+OwnedJourney = Annotated[UUID, Depends(owned_journey)]
 
 
 def create_app(
     settings: Settings | None = None,
     *,
     checkpointer: Checkpointer = None,
+    owners: OwnerStore | None = None,
     deps: JourneyDeps | None = None,
     registry: Registry | None = None,
 ) -> FastAPI:
@@ -115,15 +153,20 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        app.state.settings = settings
         if checkpointer is not None:
             app.state.journeys = JourneyService(registry, checkpointer, deps)
+            app.state.owners = owners or MemoryOwners()
             yield
         elif settings.database_url is not None:
             with open_checkpointer(settings.database_url.get_secret_value()) as saver:
                 app.state.journeys = JourneyService(registry, saver, deps)
+                app.state.owners = PostgresOwners(saver.conn)
+                app.state.owners.setup()
                 yield
         else:
             app.state.journeys = None
+            app.state.owners = None
             yield
 
     app = FastAPI(title="Project Starter Pack API", version="0.2.0", lifespan=lifespan)
@@ -158,11 +201,13 @@ def create_app(
     @app.post(
         "/api/v1/journeys", status_code=201, response_model=JourneyView, responses=ERROR_RESPONSES
     )
-    def create_journey(spec: ProjectSpec, journeys: Journeys):
-        return _guarded(None, lambda: journeys.start(spec))
+    def create_journey(spec: ProjectSpec, journeys: Journeys, owners: Owners, user: User):
+        view = _guarded(None, lambda: journeys.start(spec))
+        owners.add(view.journey_id, user)
+        return view
 
     @app.get("/api/v1/journeys/{journey_id}", response_model=JourneyView, responses=ERROR_RESPONSES)
-    def get_journey(journey_id: UUID, journeys: Journeys):
+    def get_journey(journey_id: OwnedJourney, journeys: Journeys):
         return _guarded(journey_id, lambda: journeys.get(journey_id))
 
     @app.post(
@@ -170,13 +215,13 @@ def create_app(
         response_model=JourneyView,
         responses=ERROR_RESPONSES,
     )
-    def act_on_journey(journey_id: UUID, payload: ActionRequest, journeys: Journeys):
+    def act_on_journey(journey_id: OwnedJourney, payload: ActionRequest, journeys: Journeys):
         return _guarded(
             journey_id, lambda: journeys.act(journey_id, payload.revision, payload.action)
         )
 
     @app.get("/api/v1/journeys/{journey_id}/summary.md", responses=ERROR_RESPONSES)
-    def get_summary(journey_id: UUID, journeys: Journeys):
+    def get_summary(journey_id: OwnedJourney, journeys: Journeys):
         document = _guarded(journey_id, lambda: journeys.summary(journey_id))
         return Response(
             content=document,
@@ -192,7 +237,7 @@ def create_app(
         response_model=ServiceDesign,
         responses=ERROR_RESPONSES,
     )
-    def get_design(journey_id: UUID, journeys: Journeys):
+    def get_design(journey_id: OwnedJourney, journeys: Journeys):
         return _guarded(journey_id, lambda: journeys.design(journey_id))
 
     @app.post(
@@ -200,7 +245,7 @@ def create_app(
         response_model=ServiceDesign,
         responses=ERROR_RESPONSES,
     )
-    def save_design(journey_id: UUID, edit: DesignEdit, journeys: Journeys):
+    def save_design(journey_id: OwnedJourney, edit: DesignEdit, journeys: Journeys):
         return _guarded(journey_id, lambda: journeys.save_design(journey_id, edit))
 
     @app.post(
@@ -208,7 +253,9 @@ def create_app(
         response_model=JourneyView,
         responses=ERROR_RESPONSES,
     )
-    def send_module_message(journey_id: UUID, payload: ModuleMessageRequest, journeys: Journeys):
+    def send_module_message(
+        journey_id: OwnedJourney, payload: ModuleMessageRequest, journeys: Journeys
+    ):
         return _guarded(
             journey_id,
             lambda: journeys.send_module_message(journey_id, payload.revision, payload.text),
@@ -219,7 +266,7 @@ def create_app(
         response_model=JourneyView,
         responses=ERROR_RESPONSES,
     )
-    def edit_module(journey_id: UUID, payload: ModuleEditRequest, journeys: Journeys):
+    def edit_module(journey_id: OwnedJourney, payload: ModuleEditRequest, journeys: Journeys):
         return _guarded(
             journey_id, lambda: journeys.edit_module(journey_id, payload.revision, payload.change)
         )
@@ -229,7 +276,7 @@ def create_app(
         response_model=JourneyView,
         responses=ERROR_RESPONSES,
     )
-    def undo_module(journey_id: UUID, payload: ModuleUndoRequest, journeys: Journeys):
+    def undo_module(journey_id: OwnedJourney, payload: ModuleUndoRequest, journeys: Journeys):
         return _guarded(journey_id, lambda: journeys.undo_module(journey_id, payload.revision))
 
     @app.post(
@@ -237,7 +284,9 @@ def create_app(
         response_model=JourneyView,
         responses=ERROR_RESPONSES,
     )
-    def send_start_message(journey_id: UUID, payload: StartMessageRequest, journeys: Journeys):
+    def send_start_message(
+        journey_id: OwnedJourney, payload: StartMessageRequest, journeys: Journeys
+    ):
         return _guarded(
             journey_id,
             lambda: journeys.send_start_message(
@@ -250,7 +299,7 @@ def create_app(
         response_model=JourneyView,
         responses=ERROR_RESPONSES,
     )
-    def edit_start(journey_id: UUID, payload: StartEditRequest, journeys: Journeys):
+    def edit_start(journey_id: OwnedJourney, payload: StartEditRequest, journeys: Journeys):
         return _guarded(
             journey_id, lambda: journeys.edit_start(journey_id, payload.revision, payload.change)
         )
@@ -260,7 +309,7 @@ def create_app(
         response_model=JourneyView,
         responses=ERROR_RESPONSES,
     )
-    def answer_start(journey_id: UUID, payload: StartEditRequest, journeys: Journeys):
+    def answer_start(journey_id: OwnedJourney, payload: StartEditRequest, journeys: Journeys):
         return _guarded(
             journey_id, lambda: journeys.answer_start(journey_id, payload.revision, payload.change)
         )
@@ -270,7 +319,7 @@ def create_app(
         response_model=JourneyView,
         responses=ERROR_RESPONSES,
     )
-    def fill_start(journey_id: UUID, payload: StartFillRequest, journeys: Journeys):
+    def fill_start(journey_id: OwnedJourney, payload: StartFillRequest, journeys: Journeys):
         return _guarded(journey_id, lambda: journeys.fill_start(journey_id, payload.revision))
 
     @app.get(
@@ -282,12 +331,12 @@ def create_app(
         return _guarded(None, journeys.blueprint_examples)
 
     @app.get("/api/v1/journeys/{journey_id}/package", responses=ERROR_RESPONSES)
-    def get_package_files(journey_id: UUID, journeys: Journeys):
+    def get_package_files(journey_id: OwnedJourney, journeys: Journeys):
         files = _guarded(journey_id, lambda: journeys.package_files(journey_id))
         return {"files": [{"path": path, "content": files[path]} for path in sorted(files)]}
 
     @app.get("/api/v1/journeys/{journey_id}/package.zip", responses=ERROR_RESPONSES)
-    def get_package(journey_id: UUID, journeys: Journeys):
+    def get_package(journey_id: OwnedJourney, journeys: Journeys):
         archive = _guarded(journey_id, lambda: journeys.package(journey_id))
         return Response(
             content=archive,

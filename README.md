@@ -86,12 +86,13 @@ docker compose -f compose.yaml -f compose.prod.yaml up --build
 
 ## VM 배포
 
-main에 머지되면 CI가 이미지를 `ghcr.io/vego00/project-starter-pack/{backend,frontend}:<커밋 SHA>`로 올린다. 배포는 Actions → **Deploy** → Run workflow에 그 SHA를 넣어 시작한다. 버튼을 누르는 것이 승인이다. GitHub가 IAP로 VM에 접속해 `scripts/deploy.sh`를 실행한다. 이 스크립트는 이미지를 받아 교체하고 `/health`를 확인하며, 실패하면 직전 배포로 되돌린다.
+main에 머지되면 CI가 이미지를 `ghcr.io/vego00/project-starter-pack/{backend,frontend}:<커밋 SHA>`로 올린다. 배포는 Actions → **Deploy** → Run workflow로 시작한다. SHA를 비우면 main 최신 커밋을 배포한다. 버튼을 누르는 것이 승인이다. GitHub가 IAP로 VM에 접속해 `scripts/deploy.sh`를 실행한다. 이 스크립트는 이미지를 받아 교체하고 `/health`를 확인하며, 실패하면 직전 배포로 되돌린다.
 
 - VM의 저장소는 배포한 커밋에 detached 상태로 머문다. VM에서 직접 `git pull`하지 않는다. `.env`는 그대로 유지된다.
 - 현재·직전 배포 SHA는 VM의 `.deploy/current`, `.deploy/previous`에 남는다. 직전 버전으로 돌아가려면 `.deploy/previous`의 SHA로 Deploy를 다시 실행한다.
 - 첫 배포에는 되돌아갈 직전 배포가 없다. 실패하면 VM에서 `docker compose -f compose.yaml -f compose.prod.yaml up -d --build`로 다시 빌드한다.
 - HTTPS: 주소는 `https://pjstarter.duckdns.org`(DuckDNS, VM이 5분마다 IP 갱신)다. VM의 `.env`에 `HTTPS_PUBLISH=0.0.0.0:443`을 두고 `scripts/cert.sh`로 Let's Encrypt 인증서를 받는다. cron으로 하루 두 번 실행하면 만료 30일 전부터 갱신한다. 인증서가 없으면 Nginx는 HTTP로만 뜬다.
+- 로그인: HTTPS 모드에서는 oauth2-proxy가 Google 로그인과 초대 명단(`allowed-emails.txt`, 한 줄에 이메일 하나, 저장 즉시 반영)을 확인한다. 백엔드는 Nginx가 넘기는 `X-User-Email`로 여정 소유자를 확인하고, 다른 사람의 여정은 404로 막는다. VM `.env`에 `COMPOSE_PROFILES=auth`와 `OAUTH2_PROXY_*` 값을 둔다. 로그아웃은 `/oauth2/sign_out`.
 - VM 접속: `gcloud compute ssh instance-20261123-032325 --zone=asia-northeast3-c --project=project-starter-pack --tunnel-through-iap` 후 `sudo -iu p141`.
 
 ## 산출물
