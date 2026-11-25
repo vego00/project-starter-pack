@@ -7,7 +7,7 @@ from app.journey.deciders.mock import MockDecider
 from app.journey.graph import OwnershipError, _guarded, build_graph, journey_config, journey_input
 from app.journey.nodes import resume_command
 from app.journey.prompts import project_context
-from app.journey.services import JourneyDeps
+from app.journey.services import JourneyDeps, MockAdvisor
 from app.journey.state import MAX_QUESTIONS_PER_CARD, Advice, GcbDraft, JourneyState, ProjectSpec
 from app.registry.loader import Registry, load_registry
 from langgraph.checkpoint.memory import InMemorySaver
@@ -858,6 +858,131 @@ def test_changed_info_with_the_same_answer_rebuilds_a_finished_result():
 
     assert journey.state.project_spec.has_gpu is True
     assert runs(journey, "composer") == composed + 1
+
+
+class CountingAdvisor(MockAdvisor):
+    def __init__(self):
+        self.calls = 0
+
+    def advise(self, state, card):
+        self.calls += 1
+        return super().advise(state, card)
+
+
+class CountingDecider(MockDecider):
+    """Counts recommendation questions only; card selection asks the decider too."""
+
+    def __init__(self):
+        super().__init__()
+        self.calls = 0
+
+    def decide(self, state, question):
+        self.calls += question.id.startswith("recommend.")
+        return super().decide(state, question)
+
+
+def counted():
+    advisor, decider = CountingAdvisor(), CountingDecider()
+    spec = {k: v for k, v in COMPLETE_SPEC.items() if k not in BLANK}
+    journey = Journey(spec, JourneyDeps(advisor=advisor, decider=decider))
+    while journey.prompt["type"] == "clarify":
+        journey.send({})
+    return journey, lambda: advisor.calls + decider.calls
+
+
+def other_option(journey):
+    held = journey.state.decisions[journey.card_id].option_id
+    return next(
+        view["option"]["id"]
+        for view in journey.prompt["card"]["options"]
+        if view["option"]["id"] != held and not view["blocked_reason"]
+    )
+
+
+def test_opening_a_finished_card_again_calls_no_model():
+    journey, calls = counted()
+    journey.choose_defaults()
+    before = calls()
+
+    for card_id in sorted(journey.state.decisions):
+        journey.send({"action": "revise", "card_id": card_id})
+        assert journey.card_id == card_id
+        journey.send({"action": "defer"})
+
+    assert calls() == before
+
+
+def test_a_card_to_review_is_prepared_once_then_reused():
+    journey, calls = counted()
+    journey.choose_defaults()
+    journey.send({"action": "revise", "card_id": "model.provider"})
+    journey.select(other_option(journey))
+    later = journey.state.needs_review[0]
+
+    before = calls()
+    journey.send({"action": "revise", "card_id": later})
+    # An earlier answer it read changed, so it is explained and recommended again.
+    assert calls() == before + 2
+    journey.send({"action": "defer"})
+    journey.send({"action": "revise", "card_id": later})
+
+    assert calls() == before + 2
+    assert later in journey.state.needs_review
+
+
+def test_a_card_shown_before_and_left_open_is_not_prepared_again():
+    journey, calls = counted()
+    first = journey.card_id
+    other = next(c for c in journey.state.pending_cards if c != first)
+    journey.send({"action": "focus", "card_id": other})
+    before = calls()
+
+    journey.send({"action": "focus", "card_id": first})
+
+    assert journey.card_id == first
+    assert calls() == before
+
+
+def test_changed_info_prepares_the_card_again():
+    journey, calls = counted()
+    advance_to(journey, "model.provider")
+    journey.send({"action": "accept_recommendation"})
+    journey.send({"action": "revise", "card_id": "model.provider"})
+    before = calls()
+
+    journey.send({"action": "signal", "field": "has_gpu", "value": "yes"})
+
+    assert calls() == before + 2
+
+
+def test_picking_the_value_a_card_already_has_changes_nothing():
+    journey, calls = counted()
+    journey.choose_defaults()
+    composed = runs(journey, "composer")
+    journey.send({"action": "revise", "card_id": "model.provider"})
+    held = journey.state.project_spec.has_gpu
+    before = calls()
+
+    journey.send({"action": "signal", "field": "has_gpu", "value": "yes" if held else "no"})
+    journey.send({"action": "defer"})
+
+    assert calls() == before
+    assert journey.state.info_changed is False
+    assert runs(journey, "composer") == composed
+
+
+def test_a_brief_saved_without_its_inputs_keeps_the_old_rule():
+    journey, calls = counted()
+    journey.choose_defaults()
+    briefs = {
+        k: v.model_copy(update={"inputs": None}) for k, v in journey.state.card_briefs.items()
+    }
+    journey.graph.update_state(journey.config, {"card_briefs": briefs})
+    before = calls()
+
+    journey.send({"action": "revise", "card_id": "model.provider"})
+
+    assert calls() == before
 
 
 def test_signal_in_revise_mode_stays_editing():
