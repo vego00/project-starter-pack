@@ -250,6 +250,7 @@ def test_blocked_option_is_never_recommended():
     journey.select("approval")
     journey.select("gemini")
     journey.select("memory")
+    journey.select("code")
     journey.select("sync")
     journey.select("none")
     journey.select("external_api")
@@ -266,6 +267,7 @@ def test_recommendation_falls_back_when_the_default_is_blocked():
     journey.select("none")
     journey.select("gemini")
     journey.select("postgres")
+    journey.select("code")
     journey.select("sync")
     journey.select("managed_k8s")
     journey.select("external_api")
@@ -303,6 +305,7 @@ def test_blocked_option_is_rejected_with_reason():
     journey = Journey().select("question")
     journey.select("gemini")
     journey.select("memory")
+    journey.select("code")
     journey.select("sync")
     journey.select("none")
     journey.select("external_api")
@@ -379,13 +382,14 @@ def test_deferring_every_remaining_card_rotates_instead_of_sticking():
 def test_implied_card_is_skipped_and_recorded_separately():
     journey = Journey().select("none").select("ollama")
     seen = []
-    for option_id in ("postgres", "sync", "none", "local"):
+    for option_id in ("postgres", "code", "sync", "none", "local"):
         seen.append(journey.card_id)
         journey.select(option_id)
 
     state = journey.state
     assert seen == [
         "data.checkpointer",
+        "backend.implementation",
         "backend.execution",
         "devops.orchestration",
         "cloud.target",
@@ -432,13 +436,15 @@ def test_reopen_keeps_decisions_that_are_not_affected():
     journey.send({"action": "reopen", "card_id": "model.provider"})
 
     assert set(journey.state.decisions) == {"agent.hitl", "data.checkpointer"}
-    assert journey.select("openai").card_id == "backend.execution"
+    assert journey.select("openai").card_id == "backend.implementation"
 
 
 # Consistency Reviewer
 def journey_with_conflict():
     """Serving is chosen first, then the provider changes so a rule contradicts the choice."""
-    journey = Journey().select("none").select("gemini").select("postgres").select("sync")
+    journey = (
+        Journey().select("none").select("gemini").select("postgres").select("code").select("sync")
+    )
     journey.select("none").select("external_api")
     journey.send({"action": "reopen", "card_id": "model.provider"})
     journey.select("ollama").select("local")
@@ -488,7 +494,9 @@ def test_reopening_the_source_returns_to_that_card_then_completes():
 
 
 def test_warning_is_kept_without_stopping_the_journey():
-    journey = Journey().select("none").select("gemini").select("postgres").select("sync")
+    journey = (
+        Journey().select("none").select("gemini").select("postgres").select("code").select("sync")
+    )
     journey.select("none").select("ollama").select("gcp")
 
     state = journey.state
@@ -509,7 +517,7 @@ def test_journey_resumes_from_a_new_graph_instance_with_the_same_checkpointer():
         resume_command({"action": "select", "option_id": "postgres"}), journey.config
     )
 
-    assert result["__interrupt__"][0].value["card"]["card_id"] == "backend.execution"
+    assert result["__interrupt__"][0].value["card"]["card_id"] == "backend.implementation"
     values = restarted.get_state(journey.config).values
     assert set(values["decisions"]) == {"agent.hitl", "model.provider", "data.checkpointer"}
 

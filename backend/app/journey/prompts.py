@@ -14,7 +14,7 @@ from app.registry.schema import DecisionCard
 ADVISOR_VERSION = "advisor-v2"
 GCB_VERSION = "gcb-v1"
 QA_VERSION = "qa-v1"
-DESIGN_VERSION = "design-v6"
+DESIGN_VERSION = "design-v6.1"
 MODULE_VERSION = "module-v1"
 MODULE_CHAT_TURNS = 8
 START_VERSION = "start-v3"
@@ -103,6 +103,7 @@ DESIGN_SYSTEM = """당신은 사용자의 pain point와 결정을 바탕으로 �
 - LIMITS를 반드시 지킵니다. 에이전트 수, 사람 확인 지점, 허용 제공자를 벗어나지 않습니다.
 - LIMITS.primary_db가 "none"이면 데이터를 저장하는 도구와 노드를 만들지 않습니다. LIMITS.vector_store가 "none"이면 의미 검색 도구를 만들지 않습니다.
 - LIMITS.primary_db나 LIMITS.vector_store가 null이면 저장소를 지어내지 말고 정하지 않은 저장소로 unknowns에 적습니다.
+- LIMITS.implementation이 "n8n"이면 노드 하나가 n8n 노드 하나(code는 Code, agent는 AI Agent, human은 Wait)로 옮겨지게 나눕니다. 외부 서비스 호출은 노드 하나에 하나씩 두고 responsibility에 서비스 이름을 씁니다.
 - 더 단순한 구조로도 될 수 있으면 simpler_alternatives에 적고 택하지 않은 이유를 씁니다.
 
 형식 규칙:

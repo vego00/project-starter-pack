@@ -20,6 +20,7 @@ CHOICES = {
     "data.vector_store": "pgvector",
     "data.checkpointer": "postgres",
     "backend.execution": "queue",
+    "backend.implementation": "code",
     "devops.orchestration": "none",
     "mlops.model_serving": "external_api",
     "cloud.target": "local",

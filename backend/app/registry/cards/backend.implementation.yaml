@@ -1,0 +1,42 @@
+card_id: backend.implementation
+version: 1
+layer: backend
+order: 10
+title: 구현 방식
+question: 서비스의 흐름을 무엇으로 만들까요?
+options:
+  - id: code
+    name: 코드로 구현 (FastAPI·LangGraph)
+    summary: 설계의 노드와 흐름을 Python 코드로 만듭니다.
+    pros: [흐름, 상태, 테스트를 코드로 세밀하게 다룹니다]
+    cons: [코드를 직접 읽고 고쳐야 합니다]
+    learning_difficulty: medium
+    ops_burden: medium
+    cost_nature: 서버 운영 비용
+  - id: n8n
+    name: n8n workflow
+    summary: 설계의 노드를 n8n 노드로 옮긴 workflow를 받아 n8n 화면에서 이어 만듭니다.
+    pros: [외부 서비스 연결 노드가 많고, 화면에서 흐름을 고칩니다]
+    cons: [복잡한 분기와 상태, 테스트는 코드보다 다루기 어렵습니다, n8n을 직접 띄워 운영해야 합니다]
+    learning_difficulty: low
+    ops_burden: medium
+    cost_nature: n8n 운영 비용
+signals:
+  code: [흐름이나 상태가 복잡함, 테스트를 코드로 남겨야 함]
+  n8n: [외부 서비스 연결과 알림이 중심, 이미 n8n을 씀, 코드를 직접 고치기 어려움]
+conflicts:
+  - id: n8n-runs-its-own-executions
+    when:
+      - {card: backend.implementation, in: [n8n]}
+      - {card: backend.execution, in: [background, queue]}
+    severity: warning
+    message: n8n은 workflow 실행을 스스로 관리합니다. Redis 큐와 Worker를 따로 두지 않고, 실행이 많아지면 배포 설계에서 n8n의 queue 모드를 정합니다.
+artifacts:
+  n8n: ["n8n/workflow.json", "compose:n8n"]
+default_recommendation:
+  option: code
+  reason: n8n을 쓴다는 신호가 없으면 설계를 그대로 옮기기 쉬운 코드 구현에서 시작합니다.
+sources:
+  - https://github.com/n8n-io/n8n/releases/tag/n8n%402.49.5
+  - https://docs.n8n.io/workflows/export-import/
+checked_at: 2026-11-25

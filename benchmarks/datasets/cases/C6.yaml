@@ -29,6 +29,7 @@ selection:
   data.vector_store: none
   data.checkpointer: postgres
   backend.execution: queue
+  backend.implementation: code
   devops.orchestration: none
   mlops.model_serving: ollama
   cloud.target: local

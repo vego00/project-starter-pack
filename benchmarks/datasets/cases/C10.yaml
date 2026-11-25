@@ -1,0 +1,58 @@
+# Copy of a fixed evaluation case. The source is the Notion page in `notion`; change it there
+# first. `spec` was written by hand for the n8n implementation card (no source journey), so a run
+# skips drafting. Facts the input does not give (team, budget, GPU) are left blank on purpose.
+id: C10
+title: 카페 매장 아침 준비량 리포트 · 공공 예보와 판매 기록 (n8n)
+status: 초안
+notion: https://app.notion.com/p/42396199efb3810eb31fe2b8fbe4e6d0
+copied_on: '2026-11-25'
+spec:
+  idea: 동네 카페 세 곳을 관리합니다. 매일 아침 날씨와 미세먼지 예보, 그리고 지난주 같은 요일 판매 기록을 보고 매장마다 우유와 디저트를 얼마나
+    준비할지 정하는데, 출근 전에 이걸 다 확인하기가 번거롭습니다. 매일 아침 7시에 공공데이터 API에서 예보를 받고, 구글 시트에 쌓아 둔 판매 기록을
+    읽어서, 매장별로 오늘 준비할 양을 근거와 함께 제안하는 요약을 매장 담당자들에게 보내고 싶습니다. 예보를 못 받았거나 판매 기록이 비어 있으면
+    추측하지 말고 그렇다고 알려 주세요. 코드를 직접 고치기는 어려워서 n8n으로 만들고 싶습니다.
+  goal: 매일 아침 7시에 매장 담당자들이 예보와 지난 판매 기록을 근거로 한 매장별 준비량 제안을 받아 보는 상태
+  context: 카페 세 곳의 준비량을 매일 아침 예보와 지난주 같은 요일 판매 기록으로 정하는데, 출근 전에 모두 확인하기가 번거롭습니다. 판매 기록은
+    구글 시트에 쌓여 있습니다.
+  boundary: 매일 아침 7시에 보냅니다. 제안에는 근거(예보, 지난 판매량)가 붙어야 합니다. 예보나 판매 기록을 받지 못하면 추측하지 않고 그 사실을
+    알립니다. n8n으로 만들어 화면에서 고칠 수 있어야 합니다.
+  data_traits:
+  - 공공데이터 날씨·미세먼지 예보
+  - 구글 시트 판매 기록
+  deployment_target: small_group
+selection:
+  product.surface: report
+  agent.topology: single
+  agent.hitl: none
+  model.provider: gemini
+  data.primary_db: none
+  data.vector_store: none
+  data.checkpointer: memory
+  backend.execution: sync
+  backend.implementation: n8n
+  devops.orchestration: none
+  mlops.model_serving: external_api
+  cloud.target: local
+  ops.tracing: logs
+must_ask:
+- backend.implementation
+may_skip:
+- mlops.model_serving
+- devops.orchestration
+- data.vector_store
+family: C10
+evaluation: design
+human_review:
+- 정해진 시간(매일 아침 7시)에 시작한다
+- 공공 API 예보와 시트 판매 기록을 각각 읽는 단계가 있다
+- 매장별 준비량 제안을 근거(예보, 지난 판매량)와 함께 만든다
+- API 호출이 실패하거나 데이터가 비면 추측하지 않고 실패를 알린다
+- 결과를 정해진 받는 사람에게 보낸다
+- 외부 호출 노드가 Code 노드가 아니라 HTTP Request나 해당 서비스 노드로 옮길 수 있게 나뉘어 있다
+- API 키, 시트 위치, 받는 사람과 보내는 방법을 미확인이나 사람이 할 일로 남긴다
+design_checks:
+- node_references
+- validation
+- package_matches_revision
+- spec_snapshot
+- fixed_choices

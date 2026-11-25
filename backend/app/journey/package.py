@@ -15,6 +15,7 @@ from pathlib import Path
 
 from app.journey.design import ServiceDesign
 from app.journey.modules import ModuleNote, ModulePlan, build_module_plan
+from app.journey.n8n import N8N_IMAGE, WORKFLOW_PATH, workflow_json
 from app.registry.loader import Registry
 from app.registry.modules import default_module_rules
 
@@ -257,7 +258,18 @@ def _design_doc(design: ServiceDesign) -> str:
 
 
 def _chosen(design: ServiceDesign, registry: Registry) -> dict[str, str | None]:
+    return _picked(design)
+
+
+def _picked(design: ServiceDesign) -> dict[str, str | None]:
     return {ref.card_id: ref.option_id for ref in design.provenance.decisions}
+
+
+N8N_IMPORT = (
+    f" n8n을 띄운 뒤 `{WORKFLOW_PATH}`를 가져온다(n8n 화면의 Import from File, 또는 컨테이너 안에서 "
+    f"`n8n import:workflow --input={WORKFLOW_PATH}`). 노드 이름은 설계의 노드 ID와 같고, 노드 메모에 "
+    "맡은 일과 끝 조건이 있다."
+)
 
 
 def _skipped(design: ServiceDesign) -> set[str]:
@@ -267,6 +279,9 @@ def _skipped(design: ServiceDesign) -> set[str]:
 def _containers(chosen: Mapping[str, str]) -> list[str]:
     """The containers the card choices call for, so a build needs only Docker on the computer."""
     found = ["앱: 서비스 코드와 언어 런타임. 이 컴퓨터에 설치하지 않고 이미지 안에서 실행한다."]
+    if chosen.get("backend.implementation") == "n8n":
+        found = [f"n8n: `{N8N_IMAGE}`. 포트는 127.0.0.1:5678에만 열고, workflow와 자격 증명은 "
+                 "`/home/node/.n8n` 볼륨에 둔다."]  # fmt: skip
     if "postgres" in (chosen.get("data.primary_db"), chosen.get("data.checkpointer")) or (
         chosen.get("data.vector_store") == "pgvector"
     ):
@@ -297,6 +312,13 @@ def _containers(chosen: Mapping[str, str]) -> list[str]:
 def _stack(chosen: Mapping[str, str | None]) -> list[str]:
     """The languages and frameworks, fixed by the bundle so the builder does not pick them. Two
     build trials (2026-11-05, 2026-11-23) found none named; the first builder chose these."""
+    if chosen.get("backend.implementation") == "n8n":
+        return [
+            f"흐름: n8n {N8N_IMAGE.rsplit(':', 1)[1]}. `{WORKFLOW_PATH}`를 가져와 설계의 노드를 "
+            "같은 이름의 n8n 노드로 채운다.",
+            "노드 안의 코드: Code 노드의 JavaScript. 외부 API는 HTTP Request나 해당 서비스 노드로 부른다.",
+            "실행 상태: n8n이 실행 기록을 자체 저장소에 남긴다. 실행 상태 저장 카드는 적용하지 않는다.",
+        ]
     found = [
         "언어: Python 3.12. 의존성은 uv로 잠가 고정한다.",
         "API 서버: FastAPI.",
@@ -387,7 +409,9 @@ def _build_doc(design: ServiceDesign, idea: str, modules: list[ModulePlan]) -> s
             "0. 개발 환경을 준비한다. 이 컴퓨터에 필요한 것은 Docker와 Docker Compose뿐이다. "
             "앱, 데이터베이스, 모델 서버는 `docs/infrastructure.md`의 컨테이너 목록대로 모두 "
             "`docker compose`로 띄우고 이미지 버전을 고정한다. 언어와 프레임워크는 "
-            "`docs/infrastructure.md`의 기술 스택을 따른다. Docker가 없거나 꺼져 있으면 사용자에게 "
+            "`docs/infrastructure.md`의 기술 스택을 따른다."
+            + (N8N_IMPORT if _picked(design).get("backend.implementation") == "n8n" else "")
+            + " Docker가 없거나 꺼져 있으면 사용자에게 "
             "알리고 멈춘다. 이 컴퓨터에 언어나 도구가 없다는 이유로 설계를 줄이지 말고 컨테이너 안에서 "
             "해결한다. 큰 이미지나 모델 파일은 용량을 알리고 사용자가 확인한 뒤 받는다. "
             "`docker compose up` 뒤 서비스마다 상태를 확인하면 이 단계가 끝난다.",
@@ -515,6 +539,9 @@ def build_package(
         "docs/infrastructure.md": _infrastructure_doc(design, registry),
         "docs/lessons.md": (TEMPLATES / "lessons.md").read_text("utf-8"),
     }
+    picked = _picked(design)
+    if picked.get("backend.implementation") == "n8n":
+        files[WORKFLOW_PATH] = workflow_json(design, picked.get("model.provider"))
     used: set[str] = set()
     for node in design.nodes:
         if node.kind == "agent":

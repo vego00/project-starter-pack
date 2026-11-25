@@ -96,7 +96,7 @@ def test_full_journey_through_the_api(client):
         seen.append(card["card_id"])
         view = select(client, view, card["recommendation"]["option_id"])
 
-    assert len(seen) == 7
+    assert len(seen) == 8
     assert view["status"] == "completed"
     assert {card["state"] for card in view["cards"]} == {"decided"}
     assert all(card["option_name"] for card in view["cards"])
@@ -111,6 +111,7 @@ def test_view_is_labelled_as_mock_and_lists_cards_in_order(client):
         "agent",
         "model",
         "data",
+        "backend",
         "backend",
         "devops",
         "mlops",
@@ -264,7 +265,9 @@ def test_unknown_option_is_explained_on_the_same_card(client):
 
 def test_issue_flow_through_the_api(client):
     view = start(client)
-    view = select_each(client, view, ("none", "gemini", "postgres", "sync", "none", "external_api"))
+    view = select_each(
+        client, view, ("none", "gemini", "postgres", "code", "sync", "none", "external_api")
+    )
     view = act(client, view, action="reopen", card_id="model.provider").json()
     view = select(client, view, "ollama")
     view = select(client, view, "local")
@@ -284,7 +287,7 @@ def test_issue_flow_through_the_api(client):
 def test_warnings_are_listed_on_the_finished_journey(client):
     view = start(client)
     view = select_each(
-        client, view, ("none", "gemini", "postgres", "sync", "none", "ollama", "gcp")
+        client, view, ("none", "gemini", "postgres", "code", "sync", "none", "ollama", "gcp")
     )
 
     assert view["status"] == "completed"
@@ -332,7 +335,9 @@ def test_summary_of_unknown_journey_is_not_found(client):
 
 def test_summary_is_rewritten_after_an_issue_is_fixed(client):
     view = start(client)
-    view = select_each(client, view, ("none", "gemini", "postgres", "sync", "none", "external_api"))
+    view = select_each(
+        client, view, ("none", "gemini", "postgres", "code", "sync", "none", "external_api")
+    )
     view = act(client, view, action="reopen", card_id="model.provider").json()
     view = select(client, select(client, view, "ollama"), "local")
     url = f"{JOURNEYS}/{view['journey_id']}/summary.md"

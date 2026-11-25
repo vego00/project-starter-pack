@@ -32,6 +32,7 @@ CONSTRAINING_CARDS = {
     "data.vector_store",
     "data.checkpointer",
     "backend.execution",
+    "backend.implementation",
 }
 # Left undecided, these change core function, permissions or feasibility.
 BLOCKING_CARDS = {"agent.topology", "agent.hitl", "model.provider"}
@@ -58,6 +59,7 @@ class TargetServiceConstraints(_Record):
     allowed_providers: list[str] | None = None
     resumable: bool | None = None
     execution: str | None = None
+    implementation: str | None = None
     # "none" means the design must not add that store or the tools that read and write it.
     primary_db: str | None = None
     vector_store: str | None = None
@@ -170,6 +172,7 @@ def derive_design_constraints(state: JourneyState, registry: Registry) -> Design
         allowed_providers=None if provider is None else [provider],
         resumable=RESUMABLE.get(usable.get("data.checkpointer", "")),
         execution=usable.get("backend.execution"),
+        implementation=usable.get("backend.implementation"),
         primary_db=usable.get("data.primary_db"),
         vector_store=usable.get("data.vector_store"),
     )
