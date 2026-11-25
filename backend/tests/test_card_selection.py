@@ -7,6 +7,7 @@ from uuid import uuid4
 import httpx
 import pytest
 from app.config import Settings
+from app.journey.build_plan import plan_build
 from app.journey.constraints import revived
 from app.journey.deciders.base import DeciderQuestion, DeciderResult
 from app.journey.deciders.jev import NONE_FITS, ROUTES, JevDecider
@@ -153,7 +154,7 @@ def test_the_summary_and_package_say_a_skipped_card_does_not_apply():
     run.answer_all()
 
     assert "## 해당 없음" in run.service.summary(run.id)
-    files = build_package(run.service.design(run.id), REGISTRY, SPEC.idea)
+    files = build_package(plan_build(run.service.design(run.id), REGISTRY, SPEC.idea))
     assert any("### 검색 저장소: 해당 없음" in text for text in files.values())
 
 

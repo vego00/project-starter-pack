@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 sys.path.insert(0, str(ROOT))
 
+from app.journey.build_plan import plan_build  # noqa: E402
 from app.journey.design import ServiceDesign  # noqa: E402
 from app.journey.package import build_package  # noqa: E402
 from app.registry.loader import load_registry  # noqa: E402
@@ -106,7 +107,9 @@ BUILD_FILES = [
 
 
 def build_files(case: dict, design: dict) -> str:
-    files = build_package(ServiceDesign(**design), load_registry(), case["spec"]["idea"])
+    files = build_package(
+        plan_build(ServiceDesign(**design), load_registry(), case["spec"]["idea"])
+    )
     # Fenced, so the files' own headings do not read as sections of this prompt.
     return "\n\n".join(f"### {name}\n\n~~~~\n{files[name].strip()}\n~~~~" for name in BUILD_FILES)
 

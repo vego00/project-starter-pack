@@ -2,6 +2,7 @@ import importlib.util
 import json
 from pathlib import Path
 
+from app.journey.build_plan import plan_build
 from app.journey.design import ServiceDesign
 from app.journey.n8n import N8N_IMAGE, WORKFLOW_PATH, build_workflow
 from app.journey.package import build_package
@@ -46,13 +47,13 @@ def test_the_card_loads_with_code_as_the_default():
 
 
 def test_choosing_n8n_adds_an_importable_workflow_and_code_does_not():
-    files = build_package(design(), REGISTRY, "아이디어")
-    plain = build_package(design("code"), REGISTRY, "아이디어")
+    files = build_package(plan_build(design(), REGISTRY, "아이디어"))
+    plain = build_package(plan_build(design("code"), REGISTRY, "아이디어"))
 
     assert WORKFLOW_PATH in files and WORKFLOW_PATH not in plain
     workflow = json.loads(files[WORKFLOW_PATH])
     assert {"name", "nodes", "connections", "settings"} <= set(workflow)
-    assert files == build_package(design(), REGISTRY, "아이디어")
+    assert files == build_package(plan_build(design(), REGISTRY, "아이디어"))
 
 
 def test_every_node_has_the_import_fields_and_every_link_points_at_a_node():
@@ -96,7 +97,7 @@ def test_a_provider_without_an_n8n_model_node_gets_no_model_node():
 
 
 def test_the_docs_point_to_n8n_instead_of_the_code_stack():
-    files = build_package(design(), REGISTRY, "아이디어")
+    files = build_package(plan_build(design(), REGISTRY, "아이디어"))
     infra, build = files["docs/infrastructure.md"], files["BUILD.md"]
 
     assert N8N_IMAGE in infra and "127.0.0.1:5678" in infra
