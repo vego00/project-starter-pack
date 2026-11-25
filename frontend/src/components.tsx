@@ -392,30 +392,81 @@ function OptionCard({
   );
 }
 
+/** Waiting for a card's recommendation: what the person can do meanwhile, and how long. */
+function PreparingNote({
+  failed,
+  onRetry,
+}: {
+  failed: boolean;
+  onRetry: () => void;
+}) {
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    if (failed) return;
+    const started = Date.now();
+    const timer = setInterval(
+      () => setSeconds(Math.floor((Date.now() - started) / 1000)),
+      1000,
+    );
+    return () => clearInterval(timer);
+  }, [failed]);
+
+  if (failed)
+    return (
+      <div className="note preparing">
+        <p>
+          <strong>추천을 받지 못했어요.</strong> 선택지는 지금 그대로 고를 수
+          있어요.
+        </p>
+        <button onClick={onRetry}>추천 다시 받기</button>
+      </div>
+    );
+  return (
+    <p className="note preparing">
+      <strong>
+        추천을 준비하고 있어요{seconds >= 3 && ` (${seconds}초)`}.
+      </strong>{" "}
+      선택지별 설명도 함께 와요. 기다리지 않고 먼저 골라도 돼요.
+    </p>
+  );
+}
+
 export function DecisionView({
   prompt,
   busy,
   act,
+  prepareFailed = false,
+  onRetryPrepare = () => {},
 }: {
   prompt: DecisionPrompt;
   busy: boolean;
   act: Act;
+  prepareFailed?: boolean;
+  onRetryPrepare?: () => void;
 }) {
   const { card } = prompt;
   const [question, setQuestion] = useState("");
   const heading = useFocusedHeading(card.card_id);
   const recommendation = card.recommendation;
+  const recommendedId = recommendation?.option_id ?? null;
   const heldId = prompt.current_option_id ?? null;
   const held = card.options.find((view) => view.option.id === heldId);
-  const hasRecommendation = card.options.some(
-    (view) => view.option.id === recommendation.option_id,
+  const recommendedView = card.options.find(
+    (view) => view.option.id === recommendedId,
   );
-  // The recommended option leads, and carries its own reason.
-  const ordered = [...card.options].sort(
-    (a, b) =>
-      Number(b.option.id === recommendation.option_id) -
-      Number(a.option.id === recommendation.option_id),
-  );
+  // A card shown before its recommendation keeps its order, so nothing moves under the pointer.
+  const firstSeen = useRef({ id: card.card_id, preparing: card.preparing });
+  if (firstSeen.current.id !== card.card_id)
+    firstSeen.current = { id: card.card_id, preparing: card.preparing };
+  const arrived = firstSeen.current.preparing && !card.preparing;
+  // Otherwise the recommended option leads, and carries its own reason.
+  const ordered = firstSeen.current.preparing
+    ? card.options
+    : [...card.options].sort(
+        (a, b) =>
+          Number(b.option.id === recommendedId) -
+          Number(a.option.id === recommendedId),
+      );
 
   useEffect(() => {
     setQuestion("");
@@ -429,7 +480,7 @@ export function DecisionView({
     }
   }
 
-  const reason = (
+  const reason = recommendation && (
     <>
       {recommendation.reason && (
         <p className="option-reason">{recommendation.reason}</p>
@@ -476,11 +527,21 @@ export function DecisionView({
             <p>{card.to_review.join(" · ")}</p>
           </div>
         )}
-        {!hasRecommendation && (
-          <p className="note">
-            <strong>비교 필요: 하나를 추천할 근거가 부족해요.</strong>
-          </p>
+        {card.preparing ? (
+          <PreparingNote failed={prepareFailed} onRetry={onRetryPrepare} />
+        ) : (
+          !recommendedView && (
+            <p className="note">
+              <strong>비교 필요: 하나를 추천할 근거가 부족해요.</strong>
+            </p>
+          )
         )}
+        <p className="sr-only" role="status">
+          {arrived &&
+            (recommendedView
+              ? `추천이 왔어요: ${recommendedView.option.name}`
+              : "추천할 근거가 부족해 직접 비교해야 해요.")}
+        </p>
         {card.evidence.length > 0 && (
           <div className="note">
             {card.evidence.map((item) => (
@@ -508,7 +569,7 @@ export function DecisionView({
             있어요.
           </p>
         )}
-        {card.advice_source === "card_text" && (
+        {card.advice_source === "card_text" && !card.preparing && (
           <p className="muted option-source">
             AI 설명을 만들지 못해 카드의 기본 설명을 보여드려요.
           </p>
@@ -518,7 +579,7 @@ export function DecisionView({
             <OptionCard
               key={view.option.id}
               view={view}
-              recommended={view.option.id === recommendation.option_id}
+              recommended={view.option.id === recommendedId}
               reason={reason}
               held={view.option.id === heldId}
               changing={held !== undefined}

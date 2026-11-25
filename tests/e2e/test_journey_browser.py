@@ -115,6 +115,31 @@ def plan_deploy(page: Page) -> None:
     page.get_by_role("button", name=re.compile("^배포 계획 세우기")).click()
 
 
+def test_a_new_card_shows_its_options_before_its_recommendation(page: Page):
+    answers: list[tuple[str, bool]] = []
+
+    def record(response) -> None:
+        if response.url.endswith("/decisions") and response.ok:
+            sent = response.request.post_data_json["action"]["action"]
+            answers.append((sent, response.json()["prompt"]["card"]["preparing"]))
+
+    page.on("response", record)
+    start(page)
+    skip_clarify(page)
+    shown = len(answers)
+    choose_surface(page)
+    expect(page.get_by_role("button", name=re.compile("이걸로 정하기$"))).to_be_visible()
+    for _ in range(50):  # Responses are recorded as they finish reading.
+        if len(answers) >= shown + 2:
+            break
+        page.wait_for_timeout(100)
+
+    # Choosing returns the next card with its options only; the screen then asks for the rest.
+    (chose, first), (then, second) = answers[shown : shown + 2]
+    assert chose in ("select", "accept_recommendation") and first is True
+    assert (then, second) == ("prepare", False)
+
+
 def test_all_cards_to_completion_with_reload_and_restart(page: Page):
     shot(page, "1-start")
     start(page)
