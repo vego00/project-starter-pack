@@ -324,6 +324,12 @@ class DeferAction(_Action):
     action: Literal["defer"]
 
 
+class DesignAction(_Action):
+    """Makes the service design once every decision is in; it is the journey's longest wait."""
+
+    action: Literal["design"]
+
+
 class PrepareAction(_Action):
     """Asks the models about a card that was shown with its options only."""
 
@@ -416,6 +422,7 @@ JourneyAction = Annotated[
     | KeepAction
     | SignalAction
     | PrepareAction
+    | DesignAction
     | EndHereAction
     | PlanDeployAction
     | ClarifyAction
@@ -424,6 +431,7 @@ JourneyAction = Annotated[
 ]
 GCB_ACTION = TypeAdapter(GcbAction)
 GATE_ACTION = TypeAdapter(GateAction)
+DESIGN_ACTION = TypeAdapter(DesignAction)
 ISSUE_ACTION = TypeAdapter(ReopenAction)
 FORK_ACTION = TypeAdapter(
     Annotated[EndHereAction | PlanDeployAction | ReviseAction, Field(discriminator="action")]
