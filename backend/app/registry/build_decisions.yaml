@@ -107,6 +107,7 @@ items:
     design_has: agent
     when:
       - {card: backend.implementation, in: [code]}
+    compute: model_ids
     question: 에이전트 노드마다 쓸 모델 ID를 무엇으로 할까요?
     recommendation: 고른 제공자의 공식 문서에서 지금 쓸 수 있는 모델을 확인하고, 노드의 필요한 모델 능력에 맞춰 고릅니다.
   # 둘 다 고른 경우. 추천은 의미 검색이 있는지에 따라 달라서 항목을 둘로 나눈다.
@@ -133,6 +134,7 @@ items:
     source: ask
     when:
       - {card: data.vector_store, not_in: [none]}
+    compute: embedding
     question: 의미 검색에 쓸 임베딩 모델과 벡터 차원을 무엇으로 할까요?
     recommendation: 모델 서빙이 Ollama면 Ollama의 임베딩 모델, 아니면 모델 제공자의 임베딩 모델을 쓰고, 차원은 그 모델 문서의 값을 씁니다.
   - id: data_scope

@@ -131,3 +131,43 @@ def test_an_unknown_compute_name_is_rejected():
                 "items": [{"id": "x", "title": "x", "source": "default", "compute": "z"}],
             }
         )
+
+
+def test_model_ids_are_recommended_with_their_source_and_date():
+    from app.registry.provider_models import default_provider_models
+
+    spec = plan_build(design(**{"model.provider": "openai", "data.vector_store": "pgvector",
+                                "data.primary_db": "postgres"}), REGISTRY, "아이디어")  # fmt: skip
+    advice = {item.id: item.recommendation for item in spec.open}
+    entry = default_provider_models().providers["openai"]
+
+    assert f"`{entry.chat}`" in advice["model_ids"] and "사용자가 확정한다" in advice["model_ids"]
+    assert (
+        entry.checked_at.isoformat() in advice["model_ids"] and entry.source in advice["model_ids"]
+    )
+    assert f"`{entry.embedding}`" in advice["embedding_model"]
+
+
+def test_an_old_model_entry_is_warned_and_a_missing_one_stays_generic():
+    from datetime import date
+
+    from app.registry.provider_models import ProviderModels, ProviderModelTable
+
+    old = ProviderModelTable(version=1, stale_after_days=60, providers={"gemini": ProviderModels(
+        chat="m", source="https://example.invalid", checked_at=date(2026, 8, 1))})  # fmt: skip
+    spec = plan_build(design(), REGISTRY, "아이디어", models=old)
+    missing = plan_build(design(**{"model.provider": "upstage"}), REGISTRY, "아이디어", models=old)
+
+    assert "models.stale" in {issue.rule_id for issue in spec.issues}
+    advice = next(i.recommendation for i in missing.open if i.id == "model_ids")
+    assert "공식 문서에서" in advice
+
+
+def test_the_model_table_only_names_real_providers(tmp_path):
+    from app.registry.provider_models import load_provider_models
+
+    path = tmp_path / "models.yaml"
+    path.write_text("version: 1\nstale_after_days: 60\nproviders:\n  nobody:\n"
+                    "    source: x\n    checked_at: 2026-11-25\n")  # fmt: skip
+    with pytest.raises(RegistryError):
+        load_provider_models(REGISTRY, path)

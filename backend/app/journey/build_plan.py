@@ -20,6 +20,7 @@ from app.journey.state import ProjectSpec
 from app.registry.build_decisions import BuildDecisions, BuildItem, default_build_decisions
 from app.registry.loader import Registry
 from app.registry.modules import default_module_rules
+from app.registry.provider_models import ProviderModelTable, default_provider_models
 
 EXTERNAL_KEY_PROVIDERS = {"gemini", "openai", "upstage", "exaone", "openrouter"}
 SOURCE_NOTICE = {
@@ -153,6 +154,29 @@ def _human_tasks(chosen: Mapping[str, str | None]) -> tuple[list[str], list[str]
     return now, later
 
 
+def _model_advice(
+    item: BuildItem, chosen: Mapping[str, str | None], models: ProviderModelTable
+) -> str | None:
+    """A recommendation from the provider model table, or the item's own words without one."""
+    provider = chosen.get("model.provider")
+    if item.compute == "embedding" and chosen.get("mlops.model_serving") == "ollama":
+        provider = "ollama"
+    entry = models.providers.get(provider or "")
+    if entry is None:
+        return item.recommendation
+    checked = f"(확인 {entry.checked_at.isoformat()}, {entry.source}). 사용자가 확정한다"
+    note = f" {entry.note}" if entry.note else ""
+    if item.compute == "embedding":
+        note = f" {entry.embedding_note}" if entry.embedding_note else ""
+    if item.compute == "model_ids" and entry.chat:
+        light = f", 가벼운 일은 `{entry.light}`" if entry.light else ""
+        return f"추천: 주 모델 `{entry.chat}`{light} {checked}.{note}"
+    if item.compute == "embedding" and entry.embedding:
+        size = f", {entry.embedding_dimensions}차원" if entry.embedding_dimensions else ""
+        return f"추천: `{entry.embedding}`{size} {checked}.{note}"
+    return item.recommendation
+
+
 def _applies(item: BuildItem, chosen: Mapping[str, str | None], design: ServiceDesign) -> bool:
     if not all(condition.matches(chosen.get(condition.card)) for condition in item.when):
         return False
@@ -194,8 +218,10 @@ def plan_build(
     notes: Mapping[str, ModuleNote] | None = None,
     decisions: BuildDecisions | None = None,
     project: ProjectSpec | None = None,
+    models: ProviderModelTable | None = None,
 ) -> BuildSpec:
     items = (decisions or default_build_decisions()).items
+    models = models or default_provider_models()
     chosen: dict[str, str | None] = {
         ref.card_id: ref.option_id for ref in design.provenance.decisions
     }
@@ -267,13 +293,26 @@ def plan_build(
             ]
             continue
         if item.source == "ask":
+            advice = (
+                _model_advice(item, chosen, models)
+                if item.compute in ("model_ids", "embedding")
+                else item.recommendation
+            )
             open_items.append(OpenDecision(id=item.id, title=item.title, source="ask",
                                            question=item.question or item.title,
-                                           recommendation=item.recommendation))  # fmt: skip
+                                           recommendation=advice))  # fmt: skip
         else:
             decided.append(Decided(id=item.id, title=item.title, source=item.source))
 
     issues = build_issues(design, chosen, project)
+    provider = chosen.get("model.provider")
+    if provider and (late := models.stale_days(provider, design.provenance.generated_at.date())):
+        # Measured against the design's own date, so the same design gives the same bundle.
+        issues.append(BuildIssue(
+            rule_id="models.stale", severity="warning", route="note",
+            message=f"{provider} 기본 모델은 확인한 지 {models.stale_after_days + late}일이 지났어요. "
+            "공식 문서에서 지금 모델을 다시 확인한 뒤 정해요.",
+        ))  # fmt: skip
     for number, issue in enumerate(issues, 1):
         if issue.severity == "error":
             # A design rule still broken here (a design saved before the rule) becomes a question.

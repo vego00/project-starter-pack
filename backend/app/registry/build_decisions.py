@@ -13,7 +13,16 @@ from app.registry.schema import Condition
 BUILD_DECISIONS_FILE = Path(__file__).parent / "build_decisions.yaml"
 Source = Literal["card", "default", "design", "ask"]
 # Values worked out in code (app.journey.build_plan) rather than written here.
-Compute = Literal["stack", "containers", "human_tasks", "antislop", "unknowns", "open_targets"]
+Compute = Literal[
+    "stack",
+    "containers",
+    "human_tasks",
+    "antislop",
+    "unknowns",
+    "open_targets",
+    "model_ids",
+    "embedding",
+]
 Section = Literal["rules", "verify", "containers"]
 
 
