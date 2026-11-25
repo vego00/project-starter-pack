@@ -377,7 +377,14 @@ class JourneyService:
     def package_files(self, journey_id: UUID) -> dict[str, str]:
         """The build bundle as path to content: what package.zip holds, for viewing."""
         with self._lock(journey_id):
-            state = JourneyState.model_validate(self._snapshot(journey_id).values)
+            snapshot = self._snapshot(journey_id)
+            state = JourneyState.model_validate(snapshot.values)
+            prompt = _pending_prompt(snapshot)
+        # While a new design is being made, the saved one belongs to the decisions before it.
+        if prompt is not None and prompt["type"] == "designing":
+            raise JourneyError(
+                409, "designing", "설계를 만드는 중이에요. 끝나면 묶음을 받을 수 있어요."
+            )
         if state.design.current is None:
             raise JourneyError(409, "package_unavailable", "결정을 모두 마치면 받을 수 있어요.")
         return build_package(

@@ -182,3 +182,14 @@ def test_a_failed_design_ends_with_the_reference_template():
 
     assert done["prompt"] is None and done["status"] == "completed"
     assert values["design"]["status"] == "failed"
+
+
+def test_no_bundle_is_built_while_the_design_is_made():
+    designer = HeldDesigner(draft())
+    with make_client(designer) as client:
+        view, _ = to_designing(client)
+        files = client.get(f"{JOURNEYS}/{view['journey_id']}/package")
+        archive = client.get(f"{JOURNEYS}/{view['journey_id']}/package.zip")
+
+    for response in (files, archive):
+        assert (response.status_code, response.json()["error"]["code"]) == (409, "designing")
