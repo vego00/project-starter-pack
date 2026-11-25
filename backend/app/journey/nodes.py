@@ -36,6 +36,7 @@ from app.journey.start import (
 )
 from app.journey.state import (
     CLARIFY_QUESTIONS,
+    DESIGN_ACTION,
     DONE_ACTION,
     FORK_ACTION,
     GATE_ACTION,
@@ -813,6 +814,15 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
             return _plan_deploy(state, action)
         return _revise(state, action.card_id)
 
+    def design_gate(state: JourneyState) -> dict[str, Any]:
+        """Every decision is in; the screen shows what needs no model and then asks for the design."""
+        raw = _wait_for_user({"type": "designing", "error": state.gate_error})
+        try:
+            DESIGN_ACTION.validate_python(raw)
+        except ValidationError:
+            return _reject("설계를 만드는 중이에요. 설계가 끝나면 결정을 바꿀 수 있어요.")
+        return {"gate_outcome": "advance", "gate_error": None}
+
     def done_gate(state: JourneyState) -> dict[str, Any]:
         raw = _wait_for_user({"type": "done", "error": state.gate_error})
         try:
@@ -847,5 +857,6 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
         "designer": designer,
         "issue_gate": issue_gate,
         "fork_gate": fork_gate,
+        "design_gate": design_gate,
         "done_gate": done_gate,
     }

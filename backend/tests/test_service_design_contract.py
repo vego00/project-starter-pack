@@ -407,6 +407,8 @@ def test_a_finished_journey_saves_its_design_in_a_shape_that_loads_again():
         prompt = interrupts[0].value
         if prompt["type"] == "fork":
             action = {"action": "plan_deploy"}
+        elif prompt["type"] == "designing":
+            action = {"action": "design"}
         elif prompt["card"]["preparing"]:
             action = {"action": "prepare"}
         else:

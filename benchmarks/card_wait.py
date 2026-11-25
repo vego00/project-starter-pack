@@ -1,11 +1,15 @@
-"""How long a person waits for each card after answering, read from a journey's trace.
+"""How long a person waits for each card after answering, and for the design after the last
+answer, read from a journey's trace.
 
 Each request runs the graph from one wait to the next, so the trace splits into runs at the
 waiting nodes. A card's options are visible when its run reaches `present`; its recommendation
 is visible when the run that called its models does. The three preparers run in parallel, so a
-run counts the longest of them. Only node time is counted: HTTP and checkpoint writes are not.
+run counts the longest of them. The completion screen is visible when the run that wrote the
+decision summary (`composer`) ends; the design when the run with `designer` does. Only node time
+is counted: HTTP and checkpoint writes are not.
 
     uv run --project backend python benchmarks/card_wait.py --mock [--model-delay 0.5]
+        [--design-delay 3]
     uv run --project backend python benchmarks/card_wait.py --database-url URL --journey-id ID
 
 The second form only reads the journey. Mock runs and simulated delays are not real model times.
@@ -41,6 +45,7 @@ WAITING_NODES = {
     "gcb_gate",
     "clarify_question",
     "decision_gate",
+    "design_gate",
     "issue_gate",
     "fork_gate",
     "done_gate",
@@ -93,6 +98,20 @@ def card_waits(trace: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return waits
 
 
+def design_waits(trace: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Per design made: when the completion screen and when the design became visible (ms)."""
+    waits: list[dict[str, Any]] = []
+    for run in runs(trace):
+        nodes = {e["node"] for e in run}
+        if "composer" in nodes:
+            ms = run_ms(run)
+            waits.append({"screen_ms": ms, "design_ms": ms if "designer" in nodes else None})
+        elif run[0]["node"] == "design_gate" and "designer" in nodes and waits:
+            # A `design` request: the screen opened before it, the design arrives now.
+            waits[-1]["design_ms"] = waits[-1]["screen_ms"] + run_ms(run)
+    return waits
+
+
 def summary(waits: list[dict[str, Any]]) -> dict[str, Any]:
     def median(key: str) -> float | None:
         values = [w[key] for w in waits]
@@ -126,9 +145,24 @@ class DelayedDecider(MockDecider):
         return super().decide(state, question)
 
 
-def mock_trace(delay: float) -> list[dict[str, Any]]:
+class DelayedDesigner:
+    """Waits, then fails, so the design ends as the reference template after its attempts."""
+
+    def __init__(self, delay: float):
+        self.delay = delay
+
+    def draft(self, state, constraints, problems):
+        time.sleep(self.delay)
+        raise TimeoutError("simulated model")
+
+
+def mock_trace(delay: float, design_delay: float = 0.0) -> list[dict[str, Any]]:
     """Answers every card with its first open option, preparing cards the way the screen does."""
-    deps = JourneyDeps(advisor=DelayedAdvisor(delay), decider=DelayedDecider(delay))
+    deps = JourneyDeps(
+        advisor=DelayedAdvisor(delay),
+        decider=DelayedDecider(delay),
+        designer=DelayedDesigner(design_delay) if design_delay else None,
+    )
     saver = InMemorySaver()
     service = JourneyService(load_registry(), saver, deps)
     view = service.start(ProjectSpec(**SPEC))
@@ -140,6 +174,8 @@ def mock_trace(delay: float) -> list[dict[str, Any]]:
             action = {"action": "clarify", "answers": {}}
         elif prompt["type"] == "fork":
             action = {"action": "plan_deploy"}
+        elif prompt["type"] == "designing":
+            action = {"action": "design"}
         elif prompt["card"].get("preparing"):
             action = {"action": "prepare"}
         else:
@@ -164,17 +200,21 @@ def main() -> None:
     parser.add_argument(
         "--model-delay", type=float, default=0.0, help="simulated seconds per model call"
     )
+    parser.add_argument(
+        "--design-delay", type=float, default=0.0, help="simulated seconds per design call"
+    )
     parser.add_argument("--database-url")
     parser.add_argument("--journey-id", type=UUID)
     args = parser.parse_args()
     if args.mock:
-        trace = mock_trace(args.model_delay)
+        trace = mock_trace(args.model_delay, args.design_delay)
     elif args.database_url and args.journey_id:
         trace = stored_trace(args.database_url, args.journey_id)
     else:
         parser.error("give --mock, or --database-url with --journey-id")
     waits = card_waits(trace)
-    print(json.dumps({"summary": summary(waits), "cards": waits}, ensure_ascii=False, indent=1))
+    report = {"summary": summary(waits), "design": design_waits(trace), "cards": waits}
+    print(json.dumps(report, ensure_ascii=False, indent=1))
 
 
 if __name__ == "__main__":

@@ -124,20 +124,36 @@ def test_a_new_card_shows_its_options_before_its_recommendation(page: Page):
             answers.append((sent, response.json()["prompt"]["card"]["preparing"]))
 
     page.on("response", record)
+    # The first card's `prepare` reaches the browser only once its options are on screen, the
+    # order that once made this test flaky in CI: the server has prepared it, it arrives late.
+    held = []
+
+    def hold_first_prepare(route) -> None:
+        if route.request.post_data_json["action"]["action"] == "prepare" and not held:
+            held.append((route, route.fetch()))
+            return
+        route.continue_()
+
+    page.route("**/decisions", hold_first_prepare)
     start(page)
     skip_clarify(page)
-    shown = len(answers)
+    held_route, held_response = held[0]
+    held_route.fulfill(response=held_response)
     choose_surface(page)
     expect(page.get_by_role("button", name=re.compile("이걸로 정하기$"))).to_be_visible()
-    for _ in range(50):  # Responses are recorded as they finish reading.
-        if len(answers) >= shown + 2:
+    chosen = ("select", "accept_recommendation")
+    # Responses are recorded as they finish reading, and the first card's own `prepare` may
+    # still land after the choice was made, so find the choice instead of counting.
+    for _ in range(50):
+        picks = [i for i, (sent, _) in enumerate(answers) if sent in chosen]
+        if picks and len(answers) > picks[0] + 1 and ("prepare", False) in answers[picks[0] :]:
             break
         page.wait_for_timeout(100)
 
     # Choosing returns the next card with its options only; the screen then asks for the rest.
-    (chose, first), (then, second) = answers[shown : shown + 2]
-    assert chose in ("select", "accept_recommendation") and first is True
-    assert (then, second) == ("prepare", False)
+    first = picks[0]
+    assert answers[first][1] is True
+    assert ("prepare", False) in answers[first + 1 :]
 
 
 def test_all_cards_to_completion_with_reload_and_restart(page: Page):
@@ -221,6 +237,36 @@ def test_all_cards_to_completion_with_reload_and_restart(page: Page):
         build = archive.read("starter-pack/BUILD.md").decode("utf-8")
     assert "starter-pack/docs/infrastructure.md" in names
     assert "참고 템플릿" in build
+
+
+def test_the_last_answer_opens_the_completion_screen_before_the_design(page: Page):
+    answers: list[tuple[str, str | None]] = []
+
+    def record(response) -> None:
+        if response.url.endswith("/decisions") and response.ok:
+            prompt = response.json()["prompt"]
+            sent = response.request.post_data_json["action"]["action"]
+            answers.append((sent, prompt["type"] if prompt else None))
+
+    page.on("response", record)
+    start(page)
+    skip_clarify(page)
+    choose_surface(page)
+    choose(page, "에이전트를 어떤 구조로 구성할까요?", "고정 파이프라인")
+    choose(page, "에이전트가 실행 중간에 사람의 확인을 받아야 하나요?", "승인 후 실행")
+    choose(page, "어떤 경로로 LLM을 사용할까요?", "Gemini")
+    page.get_by_role("button", name=re.compile("^여기서 끝내기")).click()
+
+    expect(page.get_by_role("heading", name="설계가 준비됐어요")).to_be_visible()
+    for _ in range(50):  # Responses are recorded as they finish reading.
+        if ("design", None) in answers:
+            break
+        page.wait_for_timeout(100)
+
+    # Ending comes back waiting for the design; the screen then asks for it. Responses are
+    # recorded as they finish reading, so look for them in order instead of by position.
+    ended = answers.index(("end_here", "designing"))
+    assert ("design", None) in answers[ended + 1 :]
 
 
 def test_ending_at_the_agent_design_and_planning_the_rest_later(page: Page):

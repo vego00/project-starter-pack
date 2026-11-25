@@ -54,6 +54,7 @@ from app.journey.state import (
     AcceptRecommendationAction,
     ClarifyAction,
     Decision,
+    DesignAction,
     EndHereAction,
     GcbAction,
     JourneyAction,
@@ -215,7 +216,17 @@ def _resume_payload(action: JourneyAction) -> Any:
     return action.model_dump(mode="json")
 
 
+DESIGNING = "설계를 만드는 중이에요. 설계가 끝나면 결정을 바꿀 수 있어요."
+
+
+def _in_designer(snapshot: StateSnapshot) -> bool:
+    """Past the design gate and not done: a design runs now, or one stopped midway."""
+    return tuple(snapshot.next) == ("designer",) and _pending_prompt(snapshot) is None
+
+
 def _allowed(prompt_type: str, action: JourneyAction) -> bool:
+    if prompt_type == "designing":
+        return isinstance(action, DesignAction)
     if prompt_type == "done":
         return isinstance(action, ReopenAction | ReviseAction | KeepAction | PlanDeployAction)
     if prompt_type == "fork":
@@ -226,7 +237,9 @@ def _allowed(prompt_type: str, action: JourneyAction) -> bool:
         return isinstance(action, GcbAction)
     if prompt_type == "issues":
         return isinstance(action, ReopenAction)
-    return not isinstance(action, ClarifyAction | GcbAction | EndHereAction | PlanDeployAction)
+    return not isinstance(
+        action, ClarifyAction | GcbAction | EndHereAction | PlanDeployAction | DesignAction
+    )
 
 
 class JourneyService:
@@ -252,7 +265,8 @@ class JourneyService:
         snapshot = self._read(journey_id)
         if snapshot.next and _pending_prompt(snapshot) is None:
             lock = self._lock(journey_id)
-            if lock.locked():
+            if lock.locked() or _in_designer(snapshot):
+                # A design is not made inside a read: `design` continues one that stopped.
                 snapshot = self._last_stop(journey_id)
             else:
                 # No run holds it, so an earlier one failed midway and is continued here.
@@ -261,14 +275,26 @@ class JourneyService:
         return self._view(journey_id, snapshot)
 
     def act(self, journey_id: UUID, revision: int, action: JourneyAction) -> JourneyView:
-        with self._lock(journey_id):
+        lock = self._lock(journey_id)
+        if lock.locked() and _in_designer(self._read(journey_id)):
+            # Answered at once, so a second `design` or a change does not wait minutes for it.
+            raise JourneyError(409, "designing", DESIGNING)
+        with lock:
             snapshot = self._snapshot(journey_id)
+            config = journey_config(journey_id)
+            if _in_designer(snapshot):
+                if not isinstance(action, DesignAction):
+                    raise JourneyError(409, "designing", DESIGNING)
+                self._graph.invoke(None, config)
+                return self._view(journey_id, self._snapshot(journey_id))
+            prompt = _pending_prompt(snapshot)
+            if prompt and prompt["type"] == "designing" and not isinstance(action, DesignAction):
+                raise JourneyError(409, "designing", DESIGNING)
             trace = snapshot.values.get("trace", [])
             if len(trace) != revision and not _answers_prepared_card(trace, revision, action):
                 raise JourneyError(
                     409, "stale_revision", "화면이 최신 상태가 아니에요. 최신 내용을 불러왔어요."
                 )
-            prompt = _pending_prompt(snapshot)
             finished = prompt is None or prompt["type"] == "done"
             if finished and not (
                 prompt is not None
@@ -283,7 +309,6 @@ class JourneyService:
                 self._check_reopen(JourneyState.model_validate(snapshot.values), action)
             if prompt["type"] == "done" and isinstance(action, PlanDeployAction):
                 self._check_plan_deploy(JourneyState.model_validate(snapshot.values), action)
-            config = journey_config(journey_id)
             self._graph.invoke(resume_command(_resume_payload(action)), config)
             return self._view(journey_id, self._snapshot(journey_id))
 
@@ -430,7 +455,7 @@ class JourneyService:
     def _snapshot(self, journey_id: UUID) -> StateSnapshot:
         config = journey_config(journey_id)
         snapshot = self._read(journey_id)
-        if snapshot.next and _pending_prompt(snapshot) is None:
+        if snapshot.next and _pending_prompt(snapshot) is None and not _in_designer(snapshot):
             # A run failed between two interrupts: continue from the last saved step.
             self._graph.invoke(None, config)
             snapshot = self._graph.get_state(config)
@@ -487,9 +512,12 @@ class JourneyService:
         prompt = _pending_prompt(snapshot)
         waiting_at_end = prompt is not None and prompt["type"] == "done"
         status = state.status
+        designing = prompt is not None and prompt["type"] == "designing"
         if prompt is not None and prompt["type"] in ("gcb", "clarify", "decision", "fork"):
             # A reopened card is asked again after the reviewer last said "completed".
             status = "in_progress"
+        if designing:
+            status = "in_progress"  # Not complete until the design exists.
         return JourneyView(
             journey_id=journey_id,
             revision=len(state.trace),
@@ -499,7 +527,8 @@ class JourneyService:
             cards=self._card_statuses(state),
             warnings=[c.message for c in state.conflicts if c.severity == "warning"],
             notice=self._notice(),
-            design=self._design_view(state),
+            # While a new one is made, the last design no longer matches the decisions.
+            design=None if designing else self._design_view(state),
             blueprint=build_blueprint(state, self._registry),
             modules=self._plan(state),
             module_mode=self._module_mode(waiting_at_end),

@@ -61,6 +61,10 @@ class Run:
     def _prepared(self, view):
         """A card shown with its options only is prepared at once, as the screen does."""
         prompt = view.prompt
+        if prompt and prompt["type"] == "designing":
+            return self.service.act(
+                view.journey_id, view.revision, ACTION.validate_python({"action": "design"})
+            )
         if prompt and prompt["type"] == "decision" and prompt["card"]["preparing"]:
             return self.service.act(
                 view.journey_id, view.revision, ACTION.validate_python({"action": "prepare"})

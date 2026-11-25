@@ -76,10 +76,14 @@ def test_journey_continues_across_processes_until_completed():
     assert len(result["decisions"]) == 11
 
     assert step(journey_id, "resume", select("local"))["card_id"] == "ops.tracing"
-    final = step(journey_id, "resume", select("none"))
-    assert final["card_id"] is None
+    last = step(journey_id, "resume", select("none"))
+    assert (last["card_id"], last["type"]) == (None, "designing")
+    assert len(last["decisions"]) == len(load_registry().cards)
+
+    # The design is asked for from yet another process.
+    final = step(journey_id, "resume", {"action": "design"})
+    assert final["type"] == "done"
     assert final["status"] == "completed"
-    assert len(final["decisions"]) == len(load_registry().cards)
 
 
 @needs_postgres

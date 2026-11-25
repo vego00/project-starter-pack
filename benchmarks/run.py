@@ -287,6 +287,8 @@ def run_flow(
             action = {"action": "clarify", "answers": {}}
         elif kind == "fork":
             action = {"action": "plan_deploy"}
+        elif kind == "designing":
+            action = {"action": "design"}
         elif kind == "done":
             break
         elif kind == "decision" and prompt["card"]["preparing"]:

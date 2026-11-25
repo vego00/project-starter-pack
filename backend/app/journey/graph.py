@@ -56,6 +56,7 @@ NODE_WRITES: dict[str, set[str]] = {
     "qa": {"qa_history"},
     "reviewer": {"review_issues", "status"},
     "composer": {"artifacts"},
+    "design_gate": {"gate_outcome", "gate_error"},
     "designer": {"design"},
     "issue_gate": GATE_WRITES,
     "fork_gate": {"plan_scope", "focus_card", "editing_card", "gate_outcome", "gate_error"},
@@ -147,6 +148,10 @@ def _after_fork(state: JourneyState) -> str:
     return "fork_gate" if state.gate_outcome == "invalid" else "constraint_engine"
 
 
+def _after_design_gate(state: JourneyState) -> str:
+    return "design_gate" if state.gate_outcome == "invalid" else "designer"
+
+
 def _after_done(state: JourneyState) -> str:
     # Keeping a decision changes nothing, so the design is not generated again.
     return "done_gate" if state.gate_outcome in ("invalid", "keep") else "constraint_engine"
@@ -182,7 +187,9 @@ def build_graph(registry: Registry, *, checkpointer: Checkpointer, deps: Journey
     )
     graph.add_edge("qa", "decision_gate")
     graph.add_conditional_edges("reviewer", _after_review, ["issue_gate", "composer"])
-    graph.add_edge("composer", "designer")
+    # The answer that ends the decisions comes back before the design; `design` makes it.
+    graph.add_edge("composer", "design_gate")
+    graph.add_conditional_edges("design_gate", _after_design_gate, ["design_gate", "designer"])
     # A finished journey waits here, so a decision can still change and the design follow it.
     graph.add_edge("designer", "done_gate")
     graph.add_conditional_edges("done_gate", _after_done, ["done_gate", "constraint_engine"])

@@ -41,12 +41,16 @@ COMPLETE_SPEC = {
 class Journey:
     """Drives a journey the way an API would: start once, then answer each interrupt.
     By default the fork after the agent design goes on to the deployment cards, and a card
-    shown with its options only is prepared at once, as the screen does."""
+    shown with its options only is prepared at once, and the design is asked for once every
+    decision is in, as the screen does."""
 
-    def __init__(self, spec=None, deps=None, checkpointer=None, at_fork="plan", prepare=True):
+    def __init__(
+        self, spec=None, deps=None, checkpointer=None, at_fork="plan", prepare=True, design=True
+    ):
         self.id = uuid4()
         self.at_fork = at_fork
         self.auto_prepare = prepare
+        self.auto_design = design
         self.saver = checkpointer or InMemorySaver()
         self.graph = build_graph(REGISTRY, checkpointer=self.saver, deps=deps)
         self.config = journey_config(self.id)
@@ -62,6 +66,9 @@ class Journey:
         if self.auto_prepare and waiting and waiting["type"] == "decision":
             if waiting["card"]["preparing"]:
                 self.result = self.graph.invoke(resume_command({"action": "prepare"}), self.config)
+        waiting = self.waiting
+        if self.auto_design and waiting and waiting["type"] == "designing":
+            self.result = self.graph.invoke(resume_command({"action": "design"}), self.config)
 
     @property
     def waiting(self):
@@ -586,8 +593,8 @@ def test_shipped_registry_starts_at_the_earliest_stage_and_completes():
     assert result["__interrupt__"][0].value["card"]["card_id"] == "product.surface"
 
     while (prompt := result["__interrupt__"][0].value)["type"] != "done":
-        if prompt["type"] == "fork":
-            action = "plan_deploy"
+        if prompt["type"] in ("fork", "designing"):
+            action = "plan_deploy" if prompt["type"] == "fork" else "design"
         else:
             action = "prepare" if prompt["card"]["preparing"] else "accept_recommendation"
         result = graph.invoke(resume_command({"action": action}), config)
