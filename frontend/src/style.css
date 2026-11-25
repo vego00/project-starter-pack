@@ -2331,3 +2331,44 @@ button.danger {
     max-height: 60vh;
   }
 }
+
+/* Login (oauth2-proxy). The account sits with the other quiet top-bar controls; a long
+   address wraps instead of pushing the bar wider than a phone. */
+.account {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.account-email {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+.account .button {
+  flex: none;
+}
+/* A shared link that did not open. It explains before the start screen asks for an idea. */
+.missing-journey {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  padding: 16px 18px;
+  margin-bottom: 16px;
+}
+.missing-journey h2 {
+  font-size: 1.15rem;
+  margin: 0 0 6px;
+}
+.missing-journey p {
+  margin: 0 0 8px;
+}
+.missing-journey strong {
+  overflow-wrap: anywhere;
+}
+.missing-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}

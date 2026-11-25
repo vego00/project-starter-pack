@@ -126,11 +126,20 @@ type Handler = (
   init?: RequestInit,
 ) => Response | Promise<Response>;
 
+// Login is answered apart from the app's own calls, so call indexes in tests stay the app's.
+let signedIn: string | null = null;
+
 function stubFetch(handler: Handler) {
   const mock = vi.fn(async (url: string, init?: RequestInit) =>
     handler(url, init),
   );
-  vi.stubGlobal("fetch", mock);
+  vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+    if (url === "/oauth2/userinfo")
+      return signedIn
+        ? Response.json({ email: signedIn })
+        : new Response("<!doctype html>", { status: 200 });
+    return mock(url, init);
+  });
   return mock;
 }
 
@@ -168,6 +177,7 @@ async function openStage(
 }
 
 beforeEach(() => {
+  signedIn = null;
   stubStorage();
   window.history.replaceState(null, "", "/");
 });
@@ -341,6 +351,30 @@ describe("starting", () => {
   });
 });
 
+describe("account", () => {
+  it("shows the signed-in account and a way to sign out", async () => {
+    signedIn = "tester@example.com";
+    stubFetch(() => Response.json(journey()));
+    render(<App />);
+
+    const banner = screen.getByRole("banner");
+    expect(await within(banner).findByText("tester@example.com")).toBeVisible();
+    expect(
+      within(banner).getByRole("link", { name: "로그아웃" }),
+    ).toHaveAttribute("href", "/oauth2/sign_out?rd=%2F");
+  });
+
+  it("shows no account where nothing signs people in", async () => {
+    stubFetch(() => Response.json(journey()));
+    render(<App />);
+
+    await screen.findByLabelText("프로젝트 아이디어");
+    await act(async () => {});
+    expect(screen.queryByRole("link", { name: "로그아웃" })).toBeNull();
+    expect(screen.queryByText("로그인한 계정", { exact: false })).toBeNull();
+  });
+});
+
 describe("restoring", () => {
   it("reopens the journey in the address and remembers it", async () => {
     const items = stubStorage();
@@ -390,6 +424,52 @@ describe("restoring", () => {
 
     expect(await screen.findByLabelText("프로젝트 아이디어")).toBeVisible();
     expect(items.has(LAST_KEY)).toBe(false);
+  });
+
+  it("explains a shared link that does not open and offers the next steps", async () => {
+    signedIn = "tester@example.com";
+    window.history.replaceState(null, "", `/?journey=${ID}`);
+    stubFetch(() =>
+      errorResponse(404, "journey_not_found", "여정을 찾을 수 없어요."),
+    );
+    const user = userEvent.setup();
+    render(<App />);
+
+    const notice = await screen.findByRole("region", {
+      name: "이 링크의 여정을 열 수 없어요",
+    });
+    expect(notice).toHaveTextContent("다른 Google 계정으로 만든 여정");
+    expect(notice).toHaveTextContent("지금 로그인한 계정: tester@example.com");
+    expect(
+      within(notice).getByRole("link", { name: "다른 계정으로 로그인" }),
+    ).toHaveAttribute(
+      "href",
+      `/oauth2/sign_out?rd=${encodeURIComponent(`/?journey=${ID}`)}`,
+    );
+    expect(window.location.search).toContain(ID);
+
+    await user.click(
+      within(notice).getByRole("button", { name: "새 여정 시작하기" }),
+    );
+    expect(
+      screen.queryByRole("region", { name: /여정을 열 수 없어요/ }),
+    ).toBeNull();
+    expect(window.location.search).not.toContain(ID);
+    expect(screen.getByLabelText("프로젝트 아이디어")).toHaveFocus();
+  });
+
+  it("explains a link that does not open without login, with no account to switch", async () => {
+    window.history.replaceState(null, "", `/?journey=${ID}`);
+    stubFetch(() =>
+      errorResponse(404, "journey_not_found", "여정을 찾을 수 없어요."),
+    );
+    render(<App />);
+
+    const notice = await screen.findByRole("region", {
+      name: "이 링크의 여정을 열 수 없어요",
+    });
+    expect(notice).not.toHaveTextContent("로그인한 계정");
+    expect(within(notice).queryByRole("link")).toBeNull();
   });
 
   it("keeps the saved journey when the server is only temporarily down", async () => {

@@ -301,6 +301,7 @@ export function StartChat({
   busy,
   preview,
   recent,
+  notice,
   onIdea,
   onSend,
   onEdit,
@@ -312,6 +313,7 @@ export function StartChat({
   busy: boolean;
   preview?: ReactNode;
   recent?: ReactNode;
+  notice?: ReactNode;
   onIdea: (idea: string) => void;
   onSend: Send;
   onEdit: Edit;
@@ -539,6 +541,7 @@ export function StartChat({
               </div>
             </div>
           )}
+          {!shown && notice}
           {!shown && (
             <div className="start-intro">
               <h2>어떤 서비스를 만들고 싶은지 말로 적어 주세요</h2>

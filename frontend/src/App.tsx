@@ -13,6 +13,7 @@ import {
   undoModule,
 } from "./api";
 import type { Action, Journey } from "./api";
+import { AccountMenu, MissingJourney, useAccount } from "./account";
 import { BlueprintPanel, SamplePreview } from "./blueprint";
 import {
   ClarifyForm,
@@ -90,11 +91,15 @@ export default function App() {
   const [lastAction, setLastAction] = useState<string | null>(null);
   const [side, setSide] = useState<SideView>("summary");
   const [listing, setListing] = useState(false);
+  // A shared link that does not open: gone, mistyped, or made under another account.
+  const [missingLink, setMissingLink] = useState<string | null>(null);
   const projects = useProjects();
+  const account = useAccount();
   const stacked = useStacked();
   const inFlight = useRef(false);
 
   function show(next: Journey) {
+    setMissingLink(null);
     setJourney(next);
     rememberJourney(next.journey_id);
     recordProject(next);
@@ -116,20 +121,32 @@ export default function App() {
   useEffect(() => {
     const id = savedJourneyId();
     if (!id) return;
+    const link = window.location.pathname + window.location.search;
+    const fromLink = new URLSearchParams(window.location.search).has("journey");
     getJourney(id)
       .then(show)
       .catch((failure: unknown) => {
         if (
           failure instanceof ApiError &&
           ["journey_not_found", "invalid_input"].includes(failure.code)
-        )
-          rememberJourney(null);
-        else setError(messageOf(failure));
+        ) {
+          // Keep a link someone opened in the address bar until they choose what to do.
+          if (fromLink && failure.code === "journey_not_found")
+            setMissingLink(link);
+          else rememberJourney(null);
+        } else setError(messageOf(failure));
       })
       .finally(() => setRestoring(false));
   }, []);
 
+  function startFresh() {
+    setMissingLink(null);
+    rememberJourney(null);
+    document.getElementById("idea")?.focus();
+  }
+
   function start(idea: string) {
+    setMissingLink(null);
     void run(async () => {
       try {
         show(await startJourney(idea));
@@ -196,6 +213,7 @@ export default function App() {
   }
 
   function restart() {
+    setMissingLink(null);
     rememberJourney(null);
     setJourney(null);
     setError("");
@@ -237,6 +255,15 @@ export default function App() {
             onAll={() => setListing(true)}
           />
         ) : undefined
+      }
+      notice={
+        missingLink !== null && (
+          <MissingJourney
+            email={account}
+            link={missingLink}
+            onNew={startFresh}
+          />
+        )
       }
       onIdea={start}
       onSend={(text, focus) =>
@@ -348,6 +375,7 @@ export default function App() {
                 새 프로젝트
               </button>
             ))}
+          {account && <AccountMenu email={account} />}
           <ThemeToggle />
         </div>
       </header>
