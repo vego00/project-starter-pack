@@ -223,6 +223,34 @@ def test_all_cards_to_completion_with_reload_and_restart(page: Page):
     assert "참고 템플릿" in build
 
 
+def test_the_last_answer_opens_the_completion_screen_before_the_design(page: Page):
+    answers: list[tuple[str, str | None]] = []
+
+    def record(response) -> None:
+        if response.url.endswith("/decisions") and response.ok:
+            prompt = response.json()["prompt"]
+            sent = response.request.post_data_json["action"]["action"]
+            answers.append((sent, prompt["type"] if prompt else None))
+
+    page.on("response", record)
+    start(page)
+    skip_clarify(page)
+    choose_surface(page)
+    choose(page, "에이전트를 어떤 구조로 구성할까요?", "고정 파이프라인")
+    choose(page, "에이전트가 실행 중간에 사람의 확인을 받아야 하나요?", "승인 후 실행")
+    choose(page, "어떤 경로로 LLM을 사용할까요?", "Gemini")
+    page.get_by_role("button", name=re.compile("^여기서 끝내기")).click()
+
+    expect(page.get_by_role("heading", name="설계가 준비됐어요")).to_be_visible()
+    for _ in range(50):  # Responses are recorded as they finish reading.
+        if ("design", None) in answers:
+            break
+        page.wait_for_timeout(100)
+
+    # Ending comes back waiting for the design; the screen then asks for it.
+    assert answers[-2:] == [("end_here", "designing"), ("design", None)]
+
+
 def test_ending_at_the_agent_design_and_planning_the_rest_later(page: Page):
     start(page)
     skip_clarify(page)

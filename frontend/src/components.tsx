@@ -753,6 +753,48 @@ const NODE_KIND: Record<string, string> = {
 
 export type SideView = "summary" | "chat";
 
+/** The design is being made: what is ready now, how long it has taken, and what waits for it. */
+function DesigningNote({
+  stuck,
+  onRetry,
+}: {
+  stuck: boolean;
+  onRetry: () => void;
+}) {
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    if (stuck) return;
+    const started = Date.now();
+    const timer = setInterval(
+      () => setSeconds(Math.floor((Date.now() - started) / 1000)),
+      1000,
+    );
+    return () => clearInterval(timer);
+  }, [stuck]);
+
+  if (stuck)
+    return (
+      <div className="note designing" id="design-wait">
+        <p>
+          <strong>설계를 아직 받지 못했어요.</strong> 15분 넘게 기다렸지만
+          끝났다는 응답이 없어요. 다시 시도하면 만들던 설계를 이어서 만들고,
+          이미 끝났으면 바로 보여 드려요.
+        </p>
+        <button onClick={onRetry}>다시 시도</button>
+      </div>
+    );
+  const minutes = Math.floor(seconds / 60);
+  const elapsed =
+    minutes > 0 ? `${minutes}분 ${seconds % 60}초` : `${seconds}초`;
+  return (
+    <p className="note designing" id="design-wait">
+      <strong>설계를 만들고 있어요 ({elapsed}).</strong> 몇 분 걸릴 수 있어요.
+      끝나면 이 자리에서 빌드 묶음을 받을 수 있고, 이 화면을 닫아도 설계는 계속
+      만들어요. 설계를 만드는 동안에는 결정을 바꿀 수 없어요.
+    </p>
+  );
+}
+
 export function CompletedView({
   journey,
   graph,
@@ -762,6 +804,7 @@ export function CompletedView({
   onSide,
   onPlanDeploy,
   busy = false,
+  designing,
 }: {
   journey: Journey;
   graph: ReactNode;
@@ -771,11 +814,17 @@ export function CompletedView({
   moduleChat?: ReactNode;
   side?: SideView;
   onSide?: (side: SideView) => void;
+  /** Set while the design is being made after the last decision. */
+  designing?: { stuck: boolean; onRetry: () => void };
 }) {
   const hasChat = moduleChat !== undefined && journey.module_mode !== "closed";
   const showChat = hasChat && side === "chat";
   const heading = useFocusedHeading();
   const design = journey.design;
+  // Said once when the design arrives on this screen, not on every visit.
+  const waited = useRef(false);
+  if (designing) waited.current = true;
+  const arrived = waited.current && !designing && Boolean(design);
   const count = journey.cards.filter((card) => card.option_name).length;
   const unplanned = journey.cards.filter((card) => card.state === "unplanned");
   return (
@@ -791,6 +840,15 @@ export function CompletedView({
             {design ? "설계가 준비됐어요" : "모든 결정을 마쳤어요"}
           </h2>
           <p>{journey.idea}</p>
+          {designing && (
+            <DesigningNote
+              stuck={designing.stuck}
+              onRetry={designing.onRetry}
+            />
+          )}
+          <p className="sr-only" role="status">
+            {arrived && "설계가 준비됐어요. 빌드 묶음을 받을 수 있어요."}
+          </p>
           {design && (
             <p className="muted">
               압축을 풀고 Claude Code나 Codex에 <code>BUILD.md</code>대로 만들어
@@ -799,6 +857,11 @@ export function CompletedView({
           )}
         </div>
         <div className="done-actions">
+          {designing && (
+            <button disabled aria-describedby="design-wait">
+              빌드 묶음 다운로드
+            </button>
+          )}
           {design && (
             <a
               className="button primary"

@@ -2302,3 +2302,170 @@ describe("card preparation", () => {
     ).toBeVisible();
   });
 });
+
+describe("design wait", () => {
+  const DECISIONS = `/api/v1/journeys/${ID}/decisions`;
+  const designingView = journey({
+    revision: 20,
+    status: "in_progress",
+    prompt: { type: "designing", error: null },
+    cards: cards("decided", "decided"),
+  });
+  const doneView = journey({
+    revision: 22,
+    status: "completed",
+    prompt: null,
+    cards: cards("decided", "decided"),
+    design: {
+      status: "review_required",
+      source: "model",
+      error: null,
+      nodes: [{ id: "worker", kind: "agent", responsibility: "초안을 쓴다" }],
+      first_task: "뼈대 연결하기",
+      first_task_check: "결과가 돌아온다",
+      unknowns: [],
+      warnings: [],
+      files: ["BUILD.md", "CLAUDE.md"],
+    },
+  });
+  const designs = (mock: ReturnType<typeof stubFetch>) =>
+    mock.mock.calls.filter(
+      (call) =>
+        call[0] === DECISIONS && bodyOf(call).action.action === "design",
+    );
+
+  function deferred() {
+    let resolve!: (response: Response) => void;
+    const promise = new Promise<Response>((done) => (resolve = done));
+    return { promise, resolve };
+  }
+
+  it("opens the completion screen and asks for the design by itself", async () => {
+    const answer = deferred();
+    stubStorage({ [LAST_KEY]: ID });
+    const mock = stubFetch((url) =>
+      url === DECISIONS ? answer.promise : Response.json(designingView),
+    );
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "모든 결정을 마쳤어요" }),
+    ).toBeVisible();
+    expect(screen.getByText(/설계를 만들고 있어요/)).toBeVisible();
+    expect(
+      screen.getByText(/설계를 만드는 동안에는 결정을 바꿀 수 없어요/),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("link", { name: "결정 요약 다운로드" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "빌드 묶음 다운로드" }),
+    ).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /다시 고르기/ })).toBeNull();
+    await waitFor(() => expect(designs(mock)).toHaveLength(1));
+    expect(bodyOf(designs(mock)[0]).revision).toBe(20);
+
+    answer.resolve(Response.json(doneView));
+
+    expect(
+      await screen.findByRole("heading", { name: "설계가 준비됐어요" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("link", { name: "빌드 묶음 다운로드 (파일 2개)" }),
+    ).toBeVisible();
+    expect(
+      screen.getByText("설계가 준비됐어요. 빌드 묶음을 받을 수 있어요."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/설계를 만들고 있어요/)).toBeNull();
+  });
+
+  it.each([
+    [
+      "cut by the proxy",
+      () => errorResponse(504, "upstream", "응답이 늦어요."),
+    ],
+    [
+      "already being made",
+      () => errorResponse(409, "designing", "설계를 만드는 중이에요."),
+    ],
+  ])(
+    "keeps waiting when the request is %s, reading every 10 seconds",
+    async (_, failure) => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        stubStorage({ [LAST_KEY]: ID });
+        const reads = [designingView, designingView, doneView];
+        const mock = stubFetch((url) =>
+          url === DECISIONS ? failure() : Response.json(reads.shift()),
+        );
+        render(<App />);
+        await waitFor(() => expect(designs(mock)).toHaveLength(1));
+
+        await act(() => vi.advanceTimersByTimeAsync(10_000));
+        expect(screen.getByText(/설계를 만들고 있어요/)).toBeVisible();
+        await act(() => vi.advanceTimersByTimeAsync(10_000));
+
+        expect(
+          await screen.findByRole("heading", { name: "설계가 준비됐어요" }),
+        ).toBeVisible();
+        expect(screen.queryByRole("alert")).toBeNull();
+        expect(designs(mock)).toHaveLength(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("offers to try again when the design has not come after about 15 minutes", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({
+        advanceTimers: vi.advanceTimersByTime,
+      });
+      stubStorage({ [LAST_KEY]: ID });
+      const mock = stubFetch((url) =>
+        url === DECISIONS
+          ? errorResponse(409, "designing", "설계를 만드는 중이에요.")
+          : Response.json(designingView),
+      );
+      render(<App />);
+      await waitFor(() => expect(designs(mock)).toHaveLength(1));
+
+      await act(() => vi.advanceTimersByTimeAsync(899_000));
+      expect(screen.queryByText("설계를 아직 받지 못했어요.")).toBeNull();
+      await act(() => vi.advanceTimersByTimeAsync(1_000));
+
+      expect(screen.getByText("설계를 아직 받지 못했어요.")).toBeVisible();
+      await user.click(screen.getByRole("button", { name: "다시 시도" }));
+      await waitFor(() => expect(designs(mock)).toHaveLength(2));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("the last answer opens the design wait at once", async () => {
+    const answer = deferred();
+    const user = userEvent.setup();
+    stubStorage({ [LAST_KEY]: ID });
+    const mock = stubFetch((url, init) => {
+      if (url !== DECISIONS) return Response.json(journey());
+      const sent = JSON.parse(init!.body as string).action.action;
+      return sent === "design" ? answer.promise : Response.json(designingView);
+    });
+    render(<App />);
+    await user.click(
+      await screen.findByRole("button", { name: "없음 이걸로 정하기" }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "모든 결정을 마쳤어요" }),
+    ).toBeVisible();
+    await waitFor(() => expect(designs(mock)).toHaveLength(1));
+    // The page is not dimmed while the design is made.
+    expect(document.querySelector("[aria-busy='true']")).toBeNull();
+    answer.resolve(Response.json(doneView));
+    expect(
+      await screen.findByRole("heading", { name: "설계가 준비됐어요" }),
+    ).toBeVisible();
+  });
+});

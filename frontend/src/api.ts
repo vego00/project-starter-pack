@@ -122,6 +122,11 @@ const promptSchema = z.discriminatedUnion("type", [
     asks: z.array(z.string()),
     error: z.string().nullable(),
   }),
+  // Every decision is in and the design is being made: the screen asks for it with `design`.
+  z.object({
+    type: z.literal("designing"),
+    error: z.string().nullable(),
+  }),
 ]);
 
 const blueprintGraphSchema = z.object({
@@ -361,6 +366,7 @@ export type Action =
   | { action: "select"; option_id: string; rationale?: string }
   | { action: "accept_recommendation" }
   | { action: "prepare" }
+  | { action: "design" }
   | { action: "defer" }
   | { action: "ask"; question: string }
   | { action: "reopen"; card_id: string }
@@ -388,7 +394,7 @@ export class ApiError extends Error {
   }
 }
 
-// The last decision also generates the design: up to two long model calls on the server.
+// The `design` request can run past this (three model calls); the screen then reads again.
 const REQUEST_TIMEOUT_MS = 300000;
 const OFFLINE =
   "서버에 연결할 수 없어요. 백엔드 실행 상태를 확인하고 다시 시도해 주세요.";

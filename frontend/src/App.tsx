@@ -89,6 +89,10 @@ const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 const keyOf = (journey: Journey) => `${journey.journey_id}:${journey.revision}`;
 const isPreparing = (journey: Journey) =>
   journey.prompt?.type === "decision" && journey.prompt.card.preparing;
+// The design takes minutes and its request can be cut at 5 minutes; reading again picks it up.
+export const DESIGN_POLL_MS = 10_000;
+const DESIGN_POLLS = 90; // About 15 minutes: three model calls of up to 280 seconds, and a margin.
+const isDesigning = (journey: Journey) => journey.prompt?.type === "designing";
 
 export default function App() {
   const [journey, setJourney] = useState<Journey | null>(null);
@@ -97,7 +101,6 @@ export default function App() {
   const [restoring, setRestoring] = useState(() => savedJourneyId() !== null);
   const [cardOpen, setCardOpen] = useState(true);
   const [confirmingRestart, setConfirmingRestart] = useState(false);
-  const [lastAction, setLastAction] = useState<string | null>(null);
   const [side, setSide] = useState<SideView>("summary");
   const [listing, setListing] = useState(false);
   // A shared link that does not open: gone, mistyped, or made under another account.
@@ -162,6 +165,48 @@ export default function App() {
     setPrepareFailed(keyOf(current));
   }
 
+  // The design whose request is running or being waited for, and one that never arrived.
+  const designing = useRef<string | null>(null);
+  const [designStuck, setDesignStuck] = useState<string | null>(null);
+
+  async function requestDesign(current: Journey) {
+    const key = keyOf(current);
+    designing.current = key;
+    setDesignStuck(null);
+    try {
+      show(await sendAction(current, { action: "design" }));
+    } catch {
+      // Cut at 5 minutes, or already being made elsewhere: the server keeps going, so read again.
+      await waitForDesign(current);
+    } finally {
+      if (designing.current === key) designing.current = null;
+    }
+  }
+
+  async function waitForDesign(current: Journey) {
+    for (let poll = 0; poll < DESIGN_POLLS; poll++) {
+      await sleep(DESIGN_POLL_MS);
+      if (shown.current?.journey_id !== current.journey_id) return;
+      try {
+        const next = await getJourney(current.journey_id);
+        if (!isDesigning(next)) {
+          show(next);
+          return;
+        }
+      } catch {
+        // A dropped read says nothing about the design; the next one may get through.
+      }
+    }
+    setDesignStuck(keyOf(current));
+  }
+
+  useEffect(() => {
+    if (!journey || !isDesigning(journey)) return;
+    const key = keyOf(journey);
+    if (designing.current === key || designStuck === key) return;
+    void requestDesign(journey);
+  }, [journey, designStuck]);
+
   useEffect(() => {
     if (!journey || !isPreparing(journey)) return;
     const key = keyOf(journey);
@@ -222,7 +267,6 @@ export default function App() {
 
   function act(action: Action) {
     if (!journey) return;
-    setLastAction(action.action);
     const current = journey;
     // The server holds this choice until the preparation ends, then applies it.
     setChoosingEarly(isPreparing(current) && action.action === "select");
@@ -344,16 +388,10 @@ export default function App() {
     />
   );
   const briefing = prompt?.type === "gcb" || prompt?.type === "clarify";
-  const finished = !prompt && journey?.status === "completed";
+  const designingNow = prompt?.type === "designing";
+  // The completion screen opens as soon as the decisions are in, before the design arrives.
+  const finished = (!prompt && journey?.status === "completed") || designingNow;
   const inWorkspace = journey !== null && !briefing && !finished && !listing;
-  // The last decision also generates the design, the one wait that runs long.
-  const makingDesign =
-    (prompt?.type === "fork" && lastAction === "end_here") ||
-    (prompt?.type === "decision" &&
-      !prompt.current_option_id &&
-      ["select", "accept_recommendation"].includes(lastAction ?? "") &&
-      journey!.cards.filter((c) => !c.option_name && c.state !== "skipped")
-        .length <= 1);
   const panels = journey && [
     <BlueprintPanel
       key="graph"
@@ -458,11 +496,9 @@ export default function App() {
       )}
       <p className={busy ? "working" : "sr-only"} role="status">
         {busy
-          ? makingDesign
-            ? "결정을 반영해 설계를 만들고 있어요. 시간이 조금 걸려요."
-            : choosingEarly
-              ? "고른 답을 저장하고 있어요. 추천 준비가 끝나면 바로 다음 카드로 넘어가요."
-              : "처리하는 중이에요. 모델을 쓸 때는 시간이 조금 걸려요."
+          ? choosingEarly
+            ? "고른 답을 저장하고 있어요. 추천 준비가 끝나면 바로 다음 카드로 넘어가요."
+            : "처리하는 중이에요. 모델을 쓸 때는 시간이 조금 걸려요."
           : ""}
       </p>
       {restoring ? (
@@ -493,6 +529,14 @@ export default function App() {
           <main className="done-page">
             <CompletedView
               journey={journey}
+              designing={
+                designingNow
+                  ? {
+                      stuck: designStuck === keyOf(journey),
+                      onRetry: () => void requestDesign(journey),
+                    }
+                  : undefined
+              }
               onRestart={restart}
               busy={busy}
               onPlanDeploy={() => actAndShowCard({ action: "plan_deploy" })}
