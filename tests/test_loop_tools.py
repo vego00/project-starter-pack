@@ -134,6 +134,22 @@ def test_judge_scores_average_per_case_and_keep_notes_below_full_marks(tmp_path)
     assert scored["C1"]["notes"] == ["기준 2 (0/2): 이유2"]
 
 
+def test_questions_the_builder_should_not_have_to_ask_reach_the_improver(tmp_path):
+    import json
+
+    questions = [{"question": "기획서 양식은?", "kind": "missing"},
+                 {"question": "검색 방식은?", "kind": "in_unknowns"},
+                 {"question": "API 키를 .env에 넣어 주세요", "kind": "human_only"}]  # fmt: skip
+    result = {"result": {"scores": [{"criterion": 1, "score": 2, "quote": "", "reason": ""}],
+                         "builder_questions": questions}}  # fmt: skip
+    (tmp_path / "judge-key.json").write_text(json.dumps({"J-1": "r0-C1-1"}))
+    (tmp_path / "judge-J-1.json").write_text(json.dumps(result))
+
+    assert loop.judge_scores(tmp_path)["C1"]["notes"] == [
+        "설계가 정하지도 묻지도 않은 질문: 기획서 양식은?"
+    ]
+
+
 def test_averaging_keeps_the_judge_score():
     mean = loop.average({"A": _j(0.6)}, {"A": _j(0.8)})["A"]
 
