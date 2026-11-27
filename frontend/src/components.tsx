@@ -751,7 +751,7 @@ const NODE_KIND: Record<string, string> = {
   human: "사람 확인",
 };
 
-export type SideView = "summary" | "chat";
+export type SideView = "build" | "summary" | "chat";
 
 /** The design is being made: what is ready now, how long it has taken, and what waits for it. */
 function DesigningNote({
@@ -805,6 +805,7 @@ export function CompletedView({
   onPlanDeploy,
   busy = false,
   designing,
+  buildPrep,
 }: {
   journey: Journey;
   graph: ReactNode;
@@ -816,9 +817,14 @@ export function CompletedView({
   onSide?: (side: SideView) => void;
   /** Set while the design is being made after the last decision. */
   designing?: { stuck: boolean; onRetry: () => void };
+  /** Build preparation, shown in the side panel once the design is in. */
+  buildPrep?: ReactNode;
 }) {
   const hasChat = moduleChat !== undefined && journey.module_mode !== "closed";
+  const hasBuild = buildPrep !== undefined && Boolean(journey.build);
   const showChat = hasChat && side === "chat";
+  const showBuild = hasBuild && side === "build";
+  const remaining = journey.build?.remaining ?? 0;
   const heading = useFocusedHeading();
   const design = journey.design;
   // Said once when the design arrives on this screen, not on every visit.
@@ -849,10 +855,18 @@ export function CompletedView({
           <p className="sr-only" role="status">
             {arrived && "설계가 준비됐어요. 빌드 묶음을 받을 수 있어요."}
           </p>
+          {design && journey.build && (
+            <p className="build-line">
+              {remaining > 0 ? `남은 결정 ${remaining}개` : "남은 결정 없음"}
+              {" · "}직접 할 일 {journey.build.human_tasks.length}개
+            </p>
+          )}
           {design && (
             <p className="muted">
               압축을 풀고 Claude Code나 Codex에 <code>BUILD.md</code>대로 만들어
               달라고 요청하세요.
+              {remaining > 0 &&
+                ` 남은 결정 ${remaining}개는 BUILD.md에 적혀 있어 빌더가 먼저 물어요.`}
             </p>
           )}
         </div>
@@ -927,27 +941,46 @@ export function CompletedView({
         </div>
         <aside
           className="done-side"
-          aria-label={showChat ? "모듈 대화" : "결과 요약"}
+          aria-label={
+            showChat ? "모듈 대화" : showBuild ? "빌드 준비" : "결과 요약"
+          }
         >
-          {hasChat && (
+          {(hasChat || hasBuild) && (
             <div className="segment" role="group" aria-label="오른쪽 내용">
+              {hasBuild && (
+                <button
+                  className={showBuild ? "on" : ""}
+                  aria-pressed={showBuild}
+                  onClick={() => onSide?.("build")}
+                >
+                  빌드 준비{remaining > 0 && ` (${remaining})`}
+                </button>
+              )}
               <button
-                className={showChat ? "" : "on"}
-                aria-pressed={!showChat}
+                className={showChat || showBuild ? "" : "on"}
+                aria-pressed={!showChat && !showBuild}
                 onClick={() => onSide?.("summary")}
               >
                 결과 요약
               </button>
-              <button
-                className={showChat ? "on" : ""}
-                aria-pressed={showChat}
-                onClick={() => onSide?.("chat")}
-              >
-                {journey.module_mode === "form" ? "모듈 채우기" : "모듈 대화"}
-              </button>
+              {hasChat && (
+                <button
+                  className={showChat ? "on" : ""}
+                  aria-pressed={showChat}
+                  onClick={() => onSide?.("chat")}
+                >
+                  {journey.module_mode === "form" ? "모듈 채우기" : "모듈 대화"}
+                </button>
+              )}
             </div>
           )}
-          {showChat ? moduleChat : <ResultSummary journey={journey} />}
+          {showChat ? (
+            moduleChat
+          ) : showBuild ? (
+            buildPrep
+          ) : (
+            <ResultSummary journey={journey} />
+          )}
         </aside>
       </div>
     </>

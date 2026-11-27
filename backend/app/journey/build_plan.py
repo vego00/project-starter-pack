@@ -194,10 +194,10 @@ def _model_advice(
         note = f" {entry.embedding_note}" if entry.embedding_note else ""
     if item.compute == "model_ids" and entry.chat:
         light = f", 가벼운 일은 `{entry.light}`" if entry.light else ""
-        return f"추천: 주 모델 `{entry.chat}`{light} {checked}.{note}"
+        return f"주 모델 `{entry.chat}`{light} {checked}.{note}"
     if item.compute == "embedding" and entry.embedding:
         size = f", {entry.embedding_dimensions}차원" if entry.embedding_dimensions else ""
-        return f"추천: `{entry.embedding}`{size} {checked}.{note}"
+        return f"`{entry.embedding}`{size} {checked}.{note}"
     return item.recommendation
 
 

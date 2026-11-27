@@ -24,6 +24,7 @@ import {
   ProgressRail,
 } from "./components";
 import type { SideView } from "./components";
+import { BuildPrepPanel } from "./buildPrep";
 import { ModuleChat } from "./moduleChat";
 import {
   forgetProject,
@@ -199,6 +200,13 @@ export default function App() {
     }
     setDesignStuck(keyOf(current));
   }
+
+  // Build preparation opens on the side when the design arrives with questions left.
+  const askingBuild =
+    journey?.prompt?.type === "build" && (journey.build?.remaining ?? 0) > 0;
+  useEffect(() => {
+    if (askingBuild) setSide((now) => (now === "chat" ? now : "build"));
+  }, [askingBuild]);
 
   useEffect(() => {
     if (!journey || !isDesigning(journey)) return;
@@ -390,7 +398,10 @@ export default function App() {
   const briefing = prompt?.type === "gcb" || prompt?.type === "clarify";
   const designingNow = prompt?.type === "designing";
   // The completion screen opens as soon as the decisions are in, before the design arrives.
-  const finished = (!prompt && journey?.status === "completed") || designingNow;
+  const finished =
+    (!prompt && journey?.status === "completed") ||
+    designingNow ||
+    prompt?.type === "build";
   const inWorkspace = journey !== null && !briefing && !finished && !listing;
   const panels = journey && [
     <BlueprintPanel
@@ -542,6 +553,14 @@ export default function App() {
               onPlanDeploy={() => actAndShowCard({ action: "plan_deploy" })}
               side={side}
               onSide={setSide}
+              buildPrep={
+                <BuildPrepPanel
+                  journey={journey}
+                  send={(action) =>
+                    changeInPlace((current) => sendAction(current, action))
+                  }
+                />
+              }
               moduleChat={
                 <ModuleChat
                   journey={journey}

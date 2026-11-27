@@ -2469,3 +2469,82 @@ describe("design wait", () => {
     ).toBeVisible();
   });
 });
+
+describe("build preparation on the completion screen", () => {
+  const design = {
+    status: "review_required",
+    source: "model",
+    error: null,
+    nodes: [{ id: "worker", kind: "agent", responsibility: "초안을 쓴다" }],
+    first_task: "뼈대 연결하기",
+    first_task_check: "결과가 돌아온다",
+    unknowns: [],
+    warnings: [],
+    files: ["BUILD.md"],
+  };
+  const build = {
+    remaining: 2,
+    items: [
+      {
+        id: "model_ids",
+        title: "역할별 모델 ID",
+        question: "모델 ID를 무엇으로 할까요?",
+        recommendation: "주 모델 gemini-4",
+        options: [],
+        status: "open",
+        value: null,
+        by: null,
+        previous: null,
+        reason: null,
+      },
+      {
+        id: "data_scope",
+        title: "데이터 사용 범위",
+        question: "써도 되는 범위는?",
+        recommendation: "가상 예시 데이터",
+        options: [],
+        status: "open",
+        value: null,
+        by: null,
+        previous: null,
+        reason: null,
+      },
+    ],
+    human_tasks: ["API 키를 .env에 넣는다."],
+  };
+
+  it("opens build preparation with what is left, and the download stays open", async () => {
+    const { user, mock } = await startWith(
+      journey({
+        status: "completed",
+        prompt: { type: "build", error: null },
+        cards: cards("decided", "decided"),
+        design,
+        build,
+      }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "설계가 준비됐어요" }),
+    ).toBeVisible();
+    expect(screen.getByText("남은 결정 2개 · 직접 할 일 1개")).toBeVisible();
+    expect(
+      screen.getByText(
+        /남은 결정 2개는 BUILD.md에 적혀 있어 빌더가 먼저 물어요/,
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("link", { name: "빌드 묶음 다운로드 (파일 1개)" }),
+    ).toBeVisible();
+    expect(screen.getByRole("heading", { name: "빌드 준비" })).toBeVisible();
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "추천 있는 항목 2개를 추천대로 정하기",
+      }),
+    );
+
+    const last = mock.mock.calls.at(-1)!;
+    expect(bodyOf(last).action).toEqual({ action: "build_accept_all" });
+  });
+});
