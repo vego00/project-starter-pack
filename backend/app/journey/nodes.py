@@ -12,6 +12,7 @@ from langgraph.types import Command, interrupt
 from pydantic import ValidationError
 
 from app.journey.blueprint import OPTION_ICONS
+from app.journey.build_plan import BuildSpec, plan_build
 from app.journey.composers.summary import ARTIFACT_KEY, compose_summary
 from app.journey.constraints import displaced, evaluate, preview, revived
 from app.journey.controller import next_card, split_at_fork
@@ -35,6 +36,7 @@ from app.journey.start import (
     start_from_draft,
 )
 from app.journey.state import (
+    BUILD_ACTION,
     CLARIFY_QUESTIONS,
     DESIGN_ACTION,
     DONE_ACTION,
@@ -49,6 +51,13 @@ from app.journey.state import (
     QA,
     AcceptRecommendationAction,
     AskAction,
+    BuildAcceptAction,
+    BuildAcceptAllAction,
+    BuildAnswer,
+    BuildAnswerAction,
+    BuildFinishAction,
+    BuildHoldAction,
+    BuildPrepAction,
     CardBrief,
     CardPresentation,
     CardQA,
@@ -823,12 +832,88 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
             return _reject("설계를 만드는 중이에요. 설계가 끝나면 결정을 바꿀 수 있어요.")
         return {"gate_outcome": "advance", "gate_error": None}
 
+    def build_spec(state: JourneyState) -> BuildSpec:
+        return plan_build(
+            state.design.current,
+            registry,
+            state.project_spec.idea,
+            state.module_notes,
+            project=state.project_spec,
+            answers=state.build_answers,
+        )
+
+    def build_answer(state: JourneyState, action: Any) -> dict[str, Any]:
+        """Records answers only when the user presses something; a recommendation is never
+        taken on its own. Each answer keeps what the item showed, to tell later if it changed."""
+        if state.design.current is None:
+            return _reject("설계가 아직 없어요.")
+        spec = build_spec(state)
+        now = datetime.now(UTC)
+        revision = state.design.current.design_revision
+
+        def answer(item: Any, value: str, by: str) -> BuildAnswer:
+            return BuildAnswer(value=value, by=by, at=now, design_revision=revision,
+                               inputs=item.inputs)  # fmt: skip
+
+        if isinstance(action, BuildAcceptAllAction):
+            changed = {
+                item.id: answer(item, item.recommendation, "recommended")
+                for item in spec.open
+                if item.recommendation and item.status != "held"
+            }
+            if not changed:
+                return _reject("추천대로 정할 항목이 없어요.")
+        else:
+            item = next((i for i in (*spec.open, *spec.answered) if i.id == action.key), None)
+            if item is None:
+                return _reject("빌드 준비에 없는 항목이에요. 화면을 새로 불러와 주세요.")
+            if isinstance(action, BuildAnswerAction):
+                changed = {item.id: answer(item, action.value, "user")}
+            elif isinstance(action, BuildAcceptAction):
+                if not item.recommendation:
+                    return _reject("추천이 없는 항목이에요. 직접 써 주세요.")
+                changed = {item.id: answer(item, item.recommendation, "recommended")}
+            elif isinstance(action, BuildHoldAction):
+                changed = {item.id: answer(item, "", "held")}
+            else:
+                before = state.build_answers.get(item.id)
+                if before is None or getattr(item, "status", None) != "recheck":
+                    return _reject("다시 확인할 항목이 아니에요.")
+                changed = {item.id: answer(item, before.value, before.by)}
+        return {
+            "build_answers": {**state.build_answers, **changed},
+            "gate_outcome": "keep",
+            "gate_error": None,
+        }
+
+    def build_gate(state: JourneyState) -> dict[str, Any]:
+        """Build preparation (ADR-026 ③): the questions the bundle would leave for the builder.
+        The screen reads the items from the journey view; this gate only records answers."""
+        raw = _wait_for_user({"type": "build", "error": state.gate_error})
+        try:
+            action = BUILD_ACTION.validate_python(raw)
+        except ValidationError:
+            return _reject("빌드 준비에서 할 수 없는 동작이에요.")
+        if isinstance(action, BuildFinishAction):
+            return {"gate_outcome": "finish", "gate_error": None}
+        if isinstance(action, PlanDeployAction):
+            return _plan_deploy(state, action)
+        if isinstance(action, KeepAction):
+            return _keep(state, action.card_id)
+        if isinstance(action, ReviseAction):
+            return _revise(state, action.card_id)
+        if isinstance(action, ReopenAction):
+            return _reopen(state, action.card_id)
+        return build_answer(state, action)
+
     def done_gate(state: JourneyState) -> dict[str, Any]:
         raw = _wait_for_user({"type": "done", "error": state.gate_error})
         try:
             action = DONE_ACTION.validate_python(raw)
         except ValidationError:
             return _reject("다시 고를 카드를 지정해 주세요.")
+        if isinstance(action, BuildPrepAction):
+            return {"gate_outcome": "build", "gate_error": None}
         if isinstance(action, PlanDeployAction):
             return _plan_deploy(state, action)
         if isinstance(action, KeepAction):
@@ -858,5 +943,6 @@ def build_nodes(registry: Registry, deps: JourneyDeps) -> dict[str, Node]:
         "issue_gate": issue_gate,
         "fork_gate": fork_gate,
         "design_gate": design_gate,
+        "build_gate": build_gate,
         "done_gate": done_gate,
     }

@@ -37,6 +37,9 @@ def main(database_url: str, journey_id: str, command: str, payload: str) -> None
                 "type": prompt["type"] if prompt else None,
                 "decisions": sorted(values.get("decisions", {})),
                 "status": values.get("status"),
+                "build_answers": {
+                    key: answer["by"] for key, answer in values.get("build_answers", {}).items()
+                },
             }
         )
     )

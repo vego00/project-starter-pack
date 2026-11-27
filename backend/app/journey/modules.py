@@ -25,6 +25,8 @@ class ModuleItem(BaseModel):
 class ModuleGate(ModuleItem):
     # Said when someone asks to skip it, since a rule's gate cannot be dropped.
     why: str
+    kind: Literal["human", "rule", "asked"] = "human"
+    asks: str | None = None
 
 
 class ModuleCriterion(ModuleItem):
@@ -192,7 +194,9 @@ def build_module_plan(
                 include=[ModuleItem(text=text, source="chat") for text in note.include],
                 exclude=[ModuleItem(text=text, source="chat") for text in note.exclude],
                 gates=[
-                    ModuleGate(text=gate.text, why=gate.why, source="rule")
+                    ModuleGate(
+                        text=gate.text, why=gate.why, source="rule", kind=gate.kind, asks=gate.asks
+                    )
                     for gate in rule.gates
                     if _holds(gate.when, choices)
                 ],

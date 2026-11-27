@@ -7,7 +7,9 @@ bundle is made rather than kept in the journey state, because a design edited on
 saved outside the journey's nodes and a stored copy could fall behind its revision.
 """
 
+import hashlib
 from collections.abc import Mapping
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -16,7 +18,7 @@ from app.journey.build_checks import SEARCH_WORDS, BuildIssue, build_issues
 from app.journey.design import ServiceDesign
 from app.journey.modules import ModuleNote, ModulePlan, build_module_plan
 from app.journey.n8n import N8N_IMAGE, WORKFLOW_PATH
-from app.journey.state import ProjectSpec
+from app.journey.state import BuildAnswer, ProjectSpec
 from app.registry.build_decisions import BuildDecisions, BuildItem, default_build_decisions
 from app.registry.loader import Registry
 from app.registry.modules import default_module_rules
@@ -56,6 +58,27 @@ class OpenDecision(_Spec):
     source: Literal["ask", "design"]
     question: str
     recommendation: str | None = None
+    options: tuple[str, ...] = ()
+    # held: the user left it for the builder. recheck: answered, but what the item shows changed.
+    status: Literal["open", "held", "recheck"] = "open"
+    previous: str | None = None
+    reason: str | None = None
+    # What the item shows now; stored with an answer to tell later whether it changed.
+    inputs: dict[str, str | None] = {}
+
+
+class Answered(_Spec):
+    """A build preparation answer that still fits what the item shows."""
+
+    id: str
+    title: str
+    question: str
+    value: str
+    by: Literal["user", "recommended"]
+    at: datetime
+    recommendation: str | None = None
+    options: tuple[str, ...] = ()
+    inputs: dict[str, str | None] = {}
 
 
 class BuildSpec(_Spec):
@@ -76,6 +99,7 @@ class BuildSpec(_Spec):
     antislop: bool
     decided: tuple[Decided, ...]
     open: tuple[OpenDecision, ...]
+    answered: tuple[Answered, ...] = ()
     issues: tuple[BuildIssue, ...] = ()
 
 
@@ -170,10 +194,10 @@ def _model_advice(
         note = f" {entry.embedding_note}" if entry.embedding_note else ""
     if item.compute == "model_ids" and entry.chat:
         light = f", 가벼운 일은 `{entry.light}`" if entry.light else ""
-        return f"추천: 주 모델 `{entry.chat}`{light} {checked}.{note}"
+        return f"주 모델 `{entry.chat}`{light} {checked}.{note}"
     if item.compute == "embedding" and entry.embedding:
         size = f", {entry.embedding_dimensions}차원" if entry.embedding_dimensions else ""
-        return f"추천: `{entry.embedding}`{size} {checked}.{note}"
+        return f"`{entry.embedding}`{size} {checked}.{note}"
     return item.recommendation
 
 
@@ -211,6 +235,57 @@ def _card_row(registry: Registry, card_id: str, option_id: str | None, skipped: 
     )
 
 
+def _digest(text: str | None) -> str:
+    return hashlib.sha256((text or "").encode("utf-8")).hexdigest()[:12]
+
+
+def _key(prefix: str, text: str) -> str:
+    """Named by its words, so the same question in a new design keeps its answer."""
+    return f"{prefix}-{_digest(text)[:8]}"
+
+
+def _with_inputs(item: OpenDecision, cards: Mapping[str, str | None]) -> OpenDecision:
+    inputs = {"question": _digest(item.question), "recommendation": _digest(item.recommendation)}
+    return item.model_copy(update={"inputs": {**inputs, **cards}})
+
+
+def _recheck_reason(registry: Registry, before: dict[str, str | None], now: dict[str, str | None]):
+    changed = [
+        k for k in now if k not in ("question", "recommendation") and before.get(k) != now[k]
+    ]
+    if changed:
+        titles = ", ".join(registry.card(k).title for k in changed if k in registry.card_ids)
+        return f"{titles} 결정이 바뀌었어요" if titles else "결정이 바뀌었어요"
+    return "설계나 추천이 바뀌었어요"
+
+
+def _sort_answers(
+    items: list[OpenDecision],
+    answers: Mapping[str, BuildAnswer],
+    registry: Registry,
+) -> tuple[list[OpenDecision], list[Answered]]:
+    """An answer whose item shows the same thing stays decided; otherwise it is asked again.
+    Answers to items that no longer apply are kept in the journey and just not shown."""
+    still_open: list[OpenDecision] = []
+    answered: list[Answered] = []
+    for item in items:
+        answer = answers.get(item.id)
+        if answer is None:
+            still_open.append(item)
+        elif answer.inputs != item.inputs:
+            still_open.append(item.model_copy(update={
+                "status": "recheck", "previous": answer.value or None,
+                "reason": _recheck_reason(registry, answer.inputs, item.inputs)}))  # fmt: skip
+        elif answer.by == "held":
+            still_open.append(item.model_copy(update={"status": "held"}))
+        else:
+            answered.append(Answered(
+                id=item.id, title=item.title, question=item.question, value=answer.value,
+                by=answer.by, at=answer.at, recommendation=item.recommendation,
+                options=item.options, inputs=item.inputs))  # fmt: skip
+    return still_open, answered
+
+
 def plan_build(
     design: ServiceDesign,
     registry: Registry,
@@ -219,6 +294,7 @@ def plan_build(
     decisions: BuildDecisions | None = None,
     project: ProjectSpec | None = None,
     models: ProviderModelTable | None = None,
+    answers: Mapping[str, BuildAnswer] | None = None,
 ) -> BuildSpec:
     items = (decisions or default_build_decisions()).items
     models = models or default_provider_models()
@@ -275,17 +351,30 @@ def plan_build(
             antislop = True
         elif item.compute == "unknowns":
             open_items += [
-                OpenDecision(id=f"unknown-{i}", title=item.title, source="design", question=u.text)
-                for i, u in enumerate(design.unknowns, 1)
+                _with_inputs(
+                    OpenDecision(
+                        id=_key("unknown", u.text),
+                        title=item.title,
+                        source="design",
+                        question=u.text,
+                        recommendation=u.recommendation,
+                        options=tuple(u.options),
+                    ),
+                    {},
+                )  # fmt: skip
+                for u in design.unknowns
             ]
             continue
         elif item.compute == "open_targets":
             open_items += [
-                OpenDecision(
-                    id=f"target-{module.id}-{i}",
-                    title=f"정할 목표치 ({module.name})",
-                    source="ask",
-                    question=f"{c.text}의 목표치를 얼마로 할까요?",
+                _with_inputs(
+                    OpenDecision(
+                        id=f"target-{module.id}-{i}",
+                        title=f"정할 목표치 ({module.name})",
+                        source="ask",
+                        question=f"{c.text}의 목표치를 얼마로 할까요?",
+                    ),
+                    {},
                 )  # fmt: skip
                 for module in modules
                 for i, c in enumerate(module.criteria, 1)
@@ -298,9 +387,10 @@ def plan_build(
                 if item.compute in ("model_ids", "embedding")
                 else item.recommendation
             )
-            open_items.append(OpenDecision(id=item.id, title=item.title, source="ask",
-                                           question=item.question or item.title,
-                                           recommendation=advice))  # fmt: skip
+            cards_read = {c.card: chosen.get(c.card) for c in item.when}
+            open_items.append(_with_inputs(OpenDecision(
+                id=item.id, title=item.title, source="ask", question=item.question or item.title,
+                recommendation=advice, options=item.options), cards_read))  # fmt: skip
         else:
             decided.append(Decided(id=item.id, title=item.title, source=item.source))
 
@@ -313,13 +403,14 @@ def plan_build(
             message=f"{provider} 기본 모델은 확인한 지 {models.stale_after_days + late}일이 지났어요. "
             "공식 문서에서 지금 모델을 다시 확인한 뒤 정해요.",
         ))  # fmt: skip
-    for number, issue in enumerate(issues, 1):
+    for issue in issues:
         if issue.severity == "error":
             # A design rule still broken here (a design saved before the rule) becomes a question.
-            open_items.append(OpenDecision(id=f"issue-{number}", title="설계와 결정이 맞지 않는 곳",
-                                           source="ask" if issue.route == "ask" else "design",
-                                           question=issue.message,
-                                           recommendation=issue.recommendation))  # fmt: skip
+            open_items.append(_with_inputs(OpenDecision(
+                id=_key(issue.rule_id, issue.message), title="설계와 결정이 맞지 않는 곳",
+                source="ask" if issue.route == "ask" else "design", question=issue.message,
+                recommendation=issue.recommendation), {}))  # fmt: skip
+    open_items, answered = _sort_answers(open_items, answers or {}, registry)
     return BuildSpec(
         design=design,
         idea=idea,
@@ -338,5 +429,6 @@ def plan_build(
         antislop=antislop,
         decided=tuple(decided),
         open=tuple(open_items),
+        answered=tuple(answered),
         issues=tuple(issue for issue in issues if issue.severity == "warning"),
     )

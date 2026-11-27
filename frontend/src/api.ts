@@ -127,6 +127,11 @@ const promptSchema = z.discriminatedUnion("type", [
     type: z.literal("designing"),
     error: z.string().nullable(),
   }),
+  // The design is in; what the bundle leaves for the builder can be settled (ADR-026).
+  z.object({
+    type: z.literal("build"),
+    error: z.string().nullable(),
+  }),
 ]);
 
 const blueprintGraphSchema = z.object({
@@ -274,6 +279,26 @@ const moduleTurnSchema = z.object({
   rejected: z.array(z.string()),
 });
 
+// Build preparation: each item the bundle would leave for the builder, and its answer.
+const buildPrepSchema = z.object({
+  remaining: z.number(),
+  items: z.array(
+    z.object({
+      id: z.string(),
+      title: z.string(),
+      question: z.string(),
+      recommendation: z.string().nullable(),
+      options: z.array(z.string()).default([]),
+      status: z.enum(["open", "held", "recheck", "answered"]),
+      value: z.string().nullable(),
+      by: z.enum(["user", "recommended"]).nullable(),
+      previous: z.string().nullable(),
+      reason: z.string().nullable(),
+    }),
+  ),
+  human_tasks: z.array(z.string()),
+});
+
 const journeySchema = z.object({
   journey_id: z.string().uuid(),
   revision: z.number(),
@@ -326,6 +351,7 @@ const journeySchema = z.object({
     })
     .nullable()
     .optional(),
+  build: buildPrepSchema.nullable().optional(),
   blueprint: blueprintSchema,
   modules: z.array(modulePlanSchema),
   module_mode: z.enum(["model", "form", "closed"]).default("closed"),
@@ -338,6 +364,8 @@ const journeySchema = z.object({
 });
 
 export type Journey = z.infer<typeof journeySchema>;
+export type BuildPrep = z.infer<typeof buildPrepSchema>;
+export type BuildItem = BuildPrep["items"][number];
 export type Prompt = NonNullable<Journey["prompt"]>;
 export type DecisionPrompt = Extract<Prompt, { type: "decision" }>;
 export type GcbPrompt = Extract<Prompt, { type: "gcb" }>;
@@ -377,6 +405,13 @@ export type Action =
   | { action: "plan_deploy"; card_id?: string }
   | { action: "signal"; field: string; value?: string; values?: string[] }
   | { action: "clarify"; answers: Record<string, unknown> }
+  | { action: "build_answer"; key: string; value: string }
+  | { action: "build_accept"; key: string }
+  | { action: "build_accept_all" }
+  | { action: "build_hold"; key: string }
+  | { action: "build_keep"; key: string }
+  | { action: "build_finish" }
+  | { action: "build_prep" }
   | {
       action: "gcb";
       goal: string;

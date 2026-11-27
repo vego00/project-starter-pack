@@ -45,12 +45,20 @@ class Journey:
     decision is in, as the screen does."""
 
     def __init__(
-        self, spec=None, deps=None, checkpointer=None, at_fork="plan", prepare=True, design=True
+        self,
+        spec=None,
+        deps=None,
+        checkpointer=None,
+        at_fork="plan",
+        prepare=True,
+        design=True,
+        finish_build=True,
     ):
         self.id = uuid4()
         self.at_fork = at_fork
         self.auto_prepare = prepare
         self.auto_design = design
+        self.auto_finish_build = finish_build
         self.saver = checkpointer or InMemorySaver()
         self.graph = build_graph(REGISTRY, checkpointer=self.saver, deps=deps)
         self.config = journey_config(self.id)
@@ -69,6 +77,10 @@ class Journey:
         waiting = self.waiting
         if self.auto_design and waiting and waiting["type"] == "designing":
             self.result = self.graph.invoke(resume_command({"action": "design"}), self.config)
+        waiting = self.waiting
+        # Build preparation is passed at once, unless a test is about it.
+        if self.auto_finish_build and waiting and waiting["type"] == "build":
+            self.result = self.graph.invoke(resume_command({"action": "build_finish"}), self.config)
 
     @property
     def waiting(self):
@@ -593,8 +605,10 @@ def test_shipped_registry_starts_at_the_earliest_stage_and_completes():
     assert result["__interrupt__"][0].value["card"]["card_id"] == "product.surface"
 
     while (prompt := result["__interrupt__"][0].value)["type"] != "done":
-        if prompt["type"] in ("fork", "designing"):
-            action = "plan_deploy" if prompt["type"] == "fork" else "design"
+        if prompt["type"] in ("fork", "designing", "build"):
+            action = {"fork": "plan_deploy", "designing": "design", "build": "build_finish"}[
+                prompt["type"]
+            ]
         else:
             action = "prepare" if prompt["card"]["preparing"] else "accept_recommendation"
         result = graph.invoke(resume_command({"action": action}), config)

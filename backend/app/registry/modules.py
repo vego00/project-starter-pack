@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.registry.loader import Registry, RegistryError, load_registry
 from app.registry.schema import Condition
@@ -21,6 +21,16 @@ class GateRule(_Strict):
     text: str
     why: str
     when: tuple[Condition, ...] = ()
+    # human: only a person can do it, so the builder waits for it. rule: kept while building
+    # instead of approved. asked: answered in build preparation, item `asks` (ADR-026).
+    kind: Literal["human", "rule", "asked"] = "human"
+    asks: str | None = None
+
+    @model_validator(mode="after")
+    def _asked_names_its_item(self):
+        if (self.kind == "asked") != (self.asks is not None):
+            raise ValueError(f"{self.text}: only an asked gate names its build item")
+        return self
 
 
 class CriterionRule(_Strict):

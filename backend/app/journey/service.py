@@ -10,7 +10,7 @@ from langgraph.types import Checkpointer, StateSnapshot
 from pydantic import BaseModel
 
 from app.journey.blueprint import Blueprint, BlueprintExample, blueprint_examples, build_blueprint
-from app.journey.build_plan import plan_build
+from app.journey.build_plan import BuildSpec, plan_build
 from app.journey.composers.summary import ARTIFACT_KEY
 from app.journey.controller import AGENT_STAGE
 from app.journey.design import DesignState, ServiceDesign
@@ -52,7 +52,10 @@ from app.journey.start import (
     to_spec,
 )
 from app.journey.state import (
+    BUILD_ANSWERS,
     AcceptRecommendationAction,
+    BuildFinishAction,
+    BuildPrepAction,
     ClarifyAction,
     Decision,
     DesignAction,
@@ -158,6 +161,27 @@ class StartView(BaseModel):
     submit: dict[str, Any]
 
 
+class BuildItemView(BaseModel):
+    id: str
+    title: str
+    question: str
+    recommendation: str | None = None
+    options: list[str] = []
+    status: Literal["open", "held", "recheck", "answered"]
+    value: str | None = None
+    by: Literal["user", "recommended"] | None = None
+    previous: str | None = None
+    reason: str | None = None
+
+
+class BuildPrepView(BaseModel):
+    """Build preparation (ADR-026 ③): what the bundle still leaves to ask, and what is set."""
+
+    remaining: int
+    items: list[BuildItemView]
+    human_tasks: list[str]
+
+
 class JourneyView(BaseModel):
     journey_id: UUID
     # Echoed back on each action, so a double click or stale tab cannot answer the wrong card.
@@ -169,6 +193,7 @@ class JourneyView(BaseModel):
     warnings: list[str]
     notice: str | None
     design: DesignView | None = None
+    build: BuildPrepView | None = None
     blueprint: Blueprint
     modules: list[ModulePlan] = []
     # "closed" until every decision is made; "form" when no model can hold the conversation.
@@ -225,11 +250,22 @@ def _in_designer(snapshot: StateSnapshot) -> bool:
     return tuple(snapshot.next) == ("designer",) and _pending_prompt(snapshot) is None
 
 
+END_ACTIONS = (ReopenAction, ReviseAction, KeepAction, PlanDeployAction)
+BUILD_ACTIONS = (*BUILD_ANSWERS, BuildFinishAction, BuildPrepAction)
+
+
+def _at_end(prompt: dict[str, Any] | None) -> bool:
+    """Waiting after the design: in build preparation or finished. Both show the design."""
+    return prompt is not None and prompt["type"] in ("build", "done")
+
+
 def _allowed(prompt_type: str, action: JourneyAction) -> bool:
     if prompt_type == "designing":
         return isinstance(action, DesignAction)
+    if prompt_type == "build":
+        return isinstance(action, (*END_ACTIONS, *BUILD_ANSWERS, BuildFinishAction))
     if prompt_type == "done":
-        return isinstance(action, ReopenAction | ReviseAction | KeepAction | PlanDeployAction)
+        return isinstance(action, (*END_ACTIONS, BuildPrepAction))
     if prompt_type == "fork":
         return isinstance(action, EndHereAction | PlanDeployAction | ReviseAction)
     if prompt_type == "clarify":
@@ -239,7 +275,8 @@ def _allowed(prompt_type: str, action: JourneyAction) -> bool:
     if prompt_type == "issues":
         return isinstance(action, ReopenAction)
     return not isinstance(
-        action, ClarifyAction | GcbAction | EndHereAction | PlanDeployAction | DesignAction
+        action,
+        (ClarifyAction, GcbAction, EndHereAction, PlanDeployAction, DesignAction, *BUILD_ACTIONS),
     )
 
 
@@ -298,17 +335,16 @@ class JourneyService:
                 )
             finished = prompt is None or prompt["type"] == "done"
             if finished and not (
-                prompt is not None
-                and isinstance(action, ReopenAction | ReviseAction | KeepAction | PlanDeployAction)
+                prompt is not None and isinstance(action, (*END_ACTIONS, BuildPrepAction))
             ):
                 raise JourneyError(409, "journey_finished", "이미 끝난 여정이에요.")
             if not _allowed(prompt["type"], action):
                 raise JourneyError(
                     409, "action_not_allowed", "지금 단계에서 할 수 없는 동작이에요."
                 )
-            if prompt["type"] == "done" and isinstance(action, ReopenAction | ReviseAction):
+            if _at_end(prompt) and isinstance(action, ReopenAction | ReviseAction):
                 self._check_reopen(JourneyState.model_validate(snapshot.values), action)
-            if prompt["type"] == "done" and isinstance(action, PlanDeployAction):
+            if _at_end(prompt) and isinstance(action, PlanDeployAction):
                 self._check_plan_deploy(JourneyState.model_validate(snapshot.values), action)
             self._graph.invoke(resume_command(_resume_payload(action)), config)
             return self._view(journey_id, self._snapshot(journey_id))
@@ -337,7 +373,7 @@ class JourneyService:
             if current is None:
                 raise JourneyError(409, "design_unavailable", "결정을 모두 마치면 고칠 수 있어요.")
             prompt = _pending_prompt(snapshot)
-            if prompt is None or prompt["type"] != "done":
+            if not _at_end(prompt):
                 raise JourneyError(409, "design_not_editable", "지금은 설계를 고칠 수 없어요.")
             if edit.design_revision != current.design_revision:
                 raise JourneyError(
@@ -360,11 +396,7 @@ class JourneyService:
                 generated=state.design.generated or current,
                 human_renames=compose_renames(state.design.human_renames, edit.renames),
             )
-            self._graph.update_state(
-                journey_config(journey_id),
-                {"design": design.model_dump(mode="json")},
-                as_node="designer",
-            )
+            self._write_at_end(journey_id, {"design": design.model_dump(mode="json")})
             self._snapshot(journey_id)
             return saved
 
@@ -387,29 +419,55 @@ class JourneyService:
             )
         if state.design.current is None:
             raise JourneyError(409, "package_unavailable", "결정을 모두 마치면 받을 수 있어요.")
-        return build_package(
-            plan_build(
-                state.design.current,
-                self._registry,
-                state.project_spec.idea,
-                state.module_notes,
-                project=state.project_spec,
-            )
+        return build_package(self._build_spec(state))
+
+    def _build_spec(self, state: JourneyState) -> BuildSpec:
+        return plan_build(
+            state.design.current,
+            self._registry,
+            state.project_spec.idea,
+            state.module_notes,
+            project=state.project_spec,
+            answers=state.build_answers,
         )
+
+    def _build_view(self, state: JourneyState) -> BuildPrepView | None:
+        if state.design.current is None:
+            return None
+        spec = self._build_spec(state)
+        items = [
+            BuildItemView(
+                id=i.id,
+                title=i.title,
+                question=i.question,
+                recommendation=i.recommendation,
+                options=list(i.options),
+                status=i.status,
+                previous=i.previous,
+                reason=i.reason,
+            )  # fmt: skip
+            for i in spec.open
+        ] + [
+            BuildItemView(
+                id=i.id,
+                title=i.title,
+                question=i.question,
+                recommendation=i.recommendation,
+                options=list(i.options),
+                status="answered",
+                value=i.value,
+                by=i.by,
+            )  # fmt: skip
+            for i in spec.answered
+        ]
+        return BuildPrepView(remaining=len(spec.open), items=items,
+                             human_tasks=list(spec.human_tasks))  # fmt: skip
 
     def _design_view(self, state: JourneyState) -> DesignView | None:
         design: ServiceDesign | None = state.design.current
         if design is None:
             return None
-        files = build_package(
-            plan_build(
-                design,
-                self._registry,
-                state.project_spec.idea,
-                state.module_notes,
-                project=state.project_spec,
-            )
-        )
+        files = build_package(self._build_spec(state))
         issues = [i.message for i in design.validation or [] if i.severity == "warning"]
         return DesignView(
             status=state.design.status,
@@ -532,7 +590,7 @@ class JourneyService:
     def _view(self, journey_id: UUID, snapshot: StateSnapshot) -> JourneyView:
         state = JourneyState.model_validate(snapshot.values)
         prompt = _pending_prompt(snapshot)
-        waiting_at_end = prompt is not None and prompt["type"] == "done"
+        waiting_at_end = _at_end(prompt)
         status = state.status
         designing = prompt is not None and prompt["type"] == "designing"
         if prompt is not None and prompt["type"] in ("gcb", "clarify", "decision", "fork"):
@@ -545,12 +603,14 @@ class JourneyService:
             revision=len(state.trace),
             status=status,
             idea=state.project_spec.idea,
-            prompt=None if waiting_at_end else prompt,
+            # Build preparation keeps its prompt so the screen knows to show the questions.
+            prompt=None if prompt is not None and prompt["type"] == "done" else prompt,
             cards=self._card_statuses(state),
             warnings=[c.message for c in state.conflicts if c.severity == "warning"],
             notice=self._notice(),
             # While a new one is made, the last design no longer matches the decisions.
             design=None if designing else self._design_view(state),
+            build=None if designing else self._build_view(state),
             blueprint=build_blueprint(state, self._registry),
             modules=self._plan(state),
             module_mode=self._module_mode(waiting_at_end),
@@ -624,7 +684,7 @@ class JourneyService:
                 "module_undo": _jsonable(state.module_undo[:-1]),
                 "module_revision": state.module_revision + 1,
             }
-            self._graph.update_state(journey_config(journey_id), update, as_node="designer")
+            self._write_at_end(journey_id, update)
             return self._view(journey_id, self._snapshot(journey_id))
 
     def send_start_message(
@@ -820,7 +880,7 @@ class JourneyService:
     def _module_state(self, journey_id: UUID, revision: int) -> JourneyState:
         snapshot = self._snapshot(journey_id)
         prompt = _pending_prompt(snapshot)
-        if prompt is None or prompt["type"] != "done":
+        if not _at_end(prompt):
             raise JourneyError(409, "modules_closed", "결정을 모두 마치면 채울 수 있어요.")
         state = JourneyState.model_validate(snapshot.values)
         if state.module_revision != revision:
@@ -846,5 +906,18 @@ class JourneyService:
             update["module_chat"] = [*state.module_chat, *turns]
         if trace:
             update["trace"] = trace
-        self._graph.update_state(journey_config(journey_id), _jsonable(update), as_node="designer")
+        self._write_at_end(journey_id, _jsonable(update))
         return self._view(journey_id, self._snapshot(journey_id))
+
+    def _write_at_end(self, journey_id: UUID, update: dict[str, Any]) -> None:
+        """Saves an edit made after the design and keeps the journey where it waits: written as
+        the designer it would go to build preparation, so a finished journey is written as build
+        preparation finishing, which leads back to the end."""
+        config = journey_config(journey_id)
+        prompt = _pending_prompt(self._graph.get_state(config))
+        if prompt is not None and prompt["type"] == "done":
+            self._graph.update_state(
+                config, {**update, "gate_outcome": "finish"}, as_node="build_gate"
+            )
+        else:
+            self._graph.update_state(config, update, as_node="designer")

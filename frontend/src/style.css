@@ -2372,3 +2372,52 @@ button.danger {
   gap: 8px;
   margin-top: 12px;
 }
+/* Build preparation (ADR-026): a list to scan and settle, inside the completion screen. */
+.build-line {
+  font-weight: 700;
+}
+.build-count {
+  font-weight: 700;
+  margin: 8px 0;
+}
+.build-list {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0;
+}
+.build-item {
+  border-top: 1px solid var(--line);
+  padding: 12px 0;
+}
+.build-item h4 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 0 0 4px;
+  font-size: 1rem;
+}
+.build-item p {
+  margin: 0 0 6px;
+}
+.build-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 6px;
+}
+.build-write label {
+  display: block;
+  margin: 8px 0 4px;
+}
+.build-write textarea {
+  width: 100%;
+  min-height: 88px;
+}
+.build-done summary {
+  cursor: pointer;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  font-weight: 700;
+}

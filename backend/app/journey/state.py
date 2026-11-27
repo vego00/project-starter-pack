@@ -221,6 +221,20 @@ class NodeEvent(BaseModel):
     output_tokens: int | None = None
 
 
+class BuildAnswer(BaseModel):
+    """One answer in build preparation. `inputs` is what the item showed when it was answered;
+    when the item shows something else now, the answer is due for another look. Nothing stores
+    that flag, so a new design or a changed card cannot leave a stale one behind."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    value: str = Field(default="", max_length=2000)
+    by: Literal["user", "recommended", "held"]
+    at: datetime
+    design_revision: int
+    inputs: dict[str, str | None] = {}
+
+
 class JourneyState(BaseModel):
     journey_id: UUID
     project_spec: ProjectSpec
@@ -254,7 +268,10 @@ class JourneyState(BaseModel):
     evidence: list[Evidence] = []
     current_card: CardPresentation | None = None
     card_briefs: dict[CardId, CardBrief] = {}
-    gate_outcome: Literal["advance", "ask", "invalid", "keep", "unchanged", "prepare"] | None = None
+    gate_outcome: (
+        Literal["advance", "ask", "invalid", "keep", "unchanged", "prepare", "finish", "build"]
+        | None
+    ) = None
     gate_error: str | None = None
     pending_question: str | None = None
     qa_history: list[CardQA] = []
@@ -264,6 +281,8 @@ class JourneyState(BaseModel):
     design: DesignState = DesignState()
     # The build order's conversation (ADR-022). Each change pushes the notes it replaced.
     module_notes: dict[str, ModuleNote] = {}
+    # Build preparation answers (ADR-026 ③), kept across new designs. Empty for older journeys.
+    build_answers: dict[str, BuildAnswer] = {}
     module_chat: list[ModuleTurn] = []
     module_undo: list[dict[str, ModuleNote]] = []
     module_revision: int = 0
@@ -384,6 +403,52 @@ class PlanDeployAction(_Action):
     card_id: CardId | None = None
 
 
+BuildKey = Annotated[str, Field(min_length=1, max_length=120)]
+
+
+class BuildAnswerAction(_Action):
+    """A build preparation answer the user wrote, or one of the item's options."""
+
+    action: Literal["build_answer"]
+    key: BuildKey
+    value: str = Field(min_length=1, max_length=2000)
+
+
+class BuildAcceptAction(_Action):
+    action: Literal["build_accept"]
+    key: BuildKey
+
+
+class BuildAcceptAllAction(_Action):
+    """Every item with a recommendation and no answer yet, or one due for another look."""
+
+    action: Literal["build_accept_all"]
+
+
+class BuildHoldAction(_Action):
+    """Leaves the item for the builder to ask; the bundle says so."""
+
+    action: Literal["build_hold"]
+    key: BuildKey
+
+
+class BuildKeepAction(_Action):
+    """Keeps an answer due for another look as it is."""
+
+    action: Literal["build_keep"]
+    key: BuildKey
+
+
+class BuildFinishAction(_Action):
+    action: Literal["build_finish"]
+
+
+class BuildPrepAction(_Action):
+    """From the finished journey back to build preparation."""
+
+    action: Literal["build_prep"]
+
+
 class GcbAction(_Action):
     action: Literal["gcb"]
     goal: str = Field(default="", max_length=MAX_GCB_CHARS)
@@ -426,9 +491,23 @@ JourneyAction = Annotated[
     | EndHereAction
     | PlanDeployAction
     | ClarifyAction
-    | GcbAction,
+    | GcbAction
+    | BuildAnswerAction
+    | BuildAcceptAction
+    | BuildAcceptAllAction
+    | BuildHoldAction
+    | BuildKeepAction
+    | BuildFinishAction
+    | BuildPrepAction,
     Field(discriminator="action"),
 ]
+BUILD_ANSWERS = (
+    BuildAnswerAction,
+    BuildAcceptAction,
+    BuildAcceptAllAction,
+    BuildHoldAction,
+    BuildKeepAction,
+)
 GCB_ACTION = TypeAdapter(GcbAction)
 GATE_ACTION = TypeAdapter(GateAction)
 DESIGN_ACTION = TypeAdapter(DesignAction)
@@ -438,7 +517,22 @@ FORK_ACTION = TypeAdapter(
 )
 DONE_ACTION = TypeAdapter(
     Annotated[
-        ReopenAction | ReviseAction | KeepAction | PlanDeployAction,
+        ReopenAction | ReviseAction | KeepAction | PlanDeployAction | BuildPrepAction,
+        Field(discriminator="action"),
+    ]
+)
+BUILD_ACTION = TypeAdapter(
+    Annotated[
+        BuildAnswerAction
+        | BuildAcceptAction
+        | BuildAcceptAllAction
+        | BuildHoldAction
+        | BuildKeepAction
+        | BuildFinishAction
+        | ReopenAction
+        | ReviseAction
+        | KeepAction
+        | PlanDeployAction,
         Field(discriminator="action"),
     ]
 )

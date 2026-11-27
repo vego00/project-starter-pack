@@ -10,9 +10,10 @@ import io
 import json
 import re
 import zipfile
+from collections.abc import Mapping
 from pathlib import Path
 
-from app.journey.build_plan import BuildSpec
+from app.journey.build_plan import Answered, BuildSpec
 from app.journey.design import ServiceDesign
 from app.journey.modules import ModulePlan
 from app.journey.n8n import WORKFLOW_PATH, workflow_json
@@ -55,9 +56,11 @@ BUILD_NOTES = (
     "## 막힌 곳\n"
 )
 GATE_RULE = (
-    "모듈의 시작 조건을 사용자와 확인해 `docs/gates.md`에 기록하기 전에는 그 모듈을 구현하지 않는다. "
+    "`docs/gates.md`에서 열린 시작 조건(사람만 할 수 있는 일)을 사용자와 확인해 기록하기 전에는 그 "
+    "모듈을 구현하지 않는다. 지킬 것은 구현하는 동안 지키고, 받음으로 적힌 조건은 다시 묻지 않는다. "
     "시작 조건은 빼거나 바꾸지 않고, 정할 값은 시작 전에 사용자에게 묻는다."
 )
+BY_LABEL = {"user": "직접 정함", "recommended": "추천대로"}
 
 
 def _waits_for(module: ModulePlan, names: dict[str, str]) -> str:
@@ -98,23 +101,38 @@ def _build_order(modules: list[ModulePlan]) -> list[str]:
         if module.exclude:
             lines += ["이번에 안 만들 것", "", *_bullets([i.text for i in module.exclude]), ""]
         lines += ["시작 조건", ""]
-        lines += [f"- {gate.text} (이유: {gate.why})" for gate in module.gates]
+        kinds = {"rule": "지킬 것: ", "asked": "빌드 준비: "}
+        lines += [f"- {kinds.get(g.kind, '')}{g.text} (이유: {g.why})" for g in module.gates]
         lines += ["", "완료 기준", "", *[_criterion(c) for c in module.criteria], ""]
     return lines
 
 
-def _gates_doc(modules: list[ModulePlan]) -> str:
+def _gate_lines(gate, answered: Mapping[str, Answered]) -> list[str]:
+    if gate.kind == "rule":
+        return [f"- 지킬 것: {gate.text}"]
+    if gate.kind == "asked":
+        answer = answered.get(gate.asks or "")
+        if answer is None:
+            return [f"- [ ] {gate.text} (빌드 준비에서 남김. 시작 전에 사용자에게 묻는다)"]
+        return [f"- [x] {gate.text}",
+                f"  - 받음: {answer.at.date().isoformat()}, 빌드 준비에서 {BY_LABEL[answer.by]}",
+                f"  - 답: {_inline(answer.value)}"]  # fmt: skip
+    return [f"- [ ] {gate.text}", "  - 확인한 날:", "  - 확인한 방법:"]
+
+
+def _gates_doc(modules: list[ModulePlan], answered: Mapping[str, Answered]) -> str:
     lines = [
         "# 시작 조건 기록",
         "",
-        "모듈을 시작하기 전에 아래 조건을 사용자와 확인하고, 확인한 날과 방법을 적는다.",
-        "기록이 없는 모듈은 구현하지 않는다. 조건은 빼거나 바꾸지 않는다.",
+        "모듈을 시작하기 전에 열린 조건(- [ ])을 사용자와 확인하고, 확인한 날과 방법을 적는다.",
+        "열린 조건의 기록이 없는 모듈은 구현하지 않는다. 받음으로 적힌 조건은 다시 묻지 않고, "
+        "지킬 것은 구현하는 동안 지킨다. 조건은 빼거나 바꾸지 않는다.",
         "",
     ]
     for module in modules:
         lines += [f"## {module.column + 1}단계: {module.name}", ""]
         for gate in module.gates:
-            lines += [f"- [ ] {gate.text}", "  - 확인한 날:", "  - 확인한 방법:"]
+            lines += _gate_lines(gate, answered)
         for criterion in module.criteria:
             if criterion.needs_target:
                 target = _inline(criterion.target) if criterion.target else ""
@@ -285,6 +303,21 @@ def _issue_lines(spec: BuildSpec) -> list[str]:
     return ["## 확인할 점", "", *[f"- {_inline(issue.message)}" for issue in spec.issues], ""]
 
 
+def _answered_lines(spec: BuildSpec) -> list[str]:
+    if not spec.answered:
+        return []
+    lines = [
+        "## 정한 것 (빌드 준비)",
+        "",
+        "사용자가 빌드 준비에서 정한 것이다. 다시 묻지 않는다.",
+        "",
+    ]
+    for item in spec.answered:
+        when = item.at.date().isoformat()
+        lines.append(f"- {item.title}: {_inline(item.value)} ({BY_LABEL[item.by]}, {when})")
+    return [*lines, ""]
+
+
 def _open_lines(spec: BuildSpec) -> list[str]:
     if not spec.open:
         return ["## 남은 결정", "", "- 없음", ""]
@@ -298,6 +331,11 @@ def _open_lines(spec: BuildSpec) -> list[str]:
     ]
     for item in spec.open:
         tail = f" (추천: {_inline(item.recommendation)})" if item.recommendation else ""
+        if item.status == "held":
+            tail += " (사용자가 보류함)"
+        if item.status == "recheck":
+            before = f", 전에 정한 답: {_inline(item.previous)}" if item.previous else ""
+            tail += f" (다시 확인: {item.reason}{before})"
         lines.append(f"- {item.title}: {_inline(item.question)}{tail}")
     return [*lines, ""]
 
@@ -329,8 +367,9 @@ def _build_doc(spec: BuildSpec) -> str:
             "1. `AGENTS.md`와 `docs/lessons.md`를 읽는다.",
             "2. `docs/multi-agent-design.md`를 읽고, 아래 남은 결정을 사용자에게 먼저 한 번에 묻는다.",
             "3. `docs/infrastructure.md`에서 사람이 할 일을 사용자에게 알리고 끝났는지 확인한다.",
-            "4. 아래 만드는 순서대로 모듈을 진행한다. 모듈을 시작하기 전에 시작 조건을 사용자와 "
-            "확인하고 `docs/gates.md`에 기록한다. 기록이 없는 모듈은 구현하지 않는다.",
+            "4. 아래 만드는 순서대로 모듈을 진행한다. 모듈을 시작하기 전에 `docs/gates.md`의 열린 "
+            "시작 조건을 사용자와 확인하고 기록한다. 기록이 없는 모듈은 구현하지 않는다. 받음으로 "
+            "적힌 조건은 다시 묻지 않는다.",
             "5. `build-service` skill의 순서대로 작업을 하나씩 구현한다. 작업이 속한 모듈의 "
             "시작 조건이 기록되어 있는지 먼저 확인한다.",
             "6. 작업마다 `verify-design` skill로 확인한 뒤 다음으로 넘어간다.",
@@ -338,6 +377,7 @@ def _build_doc(spec: BuildSpec) -> str:
             "8. 구현하면서 `docs/build-notes.md`에 설계에서 불분명했던 곳, 설계와 다르게 만든 곳, "
             "막힌 곳을 그때그때 적는다. 끝나면 사용자에게 이 파일을 알린다.",
             "",
+            *_answered_lines(spec),
             *_open_lines(spec),
             *_issue_lines(spec),
             *_build_order(list(spec.modules)),
@@ -454,7 +494,7 @@ def build_package(spec: BuildSpec) -> dict[str, str]:
     modules = list(spec.modules)
     files = {
         "BUILD.md": _build_doc(spec),
-        "docs/gates.md": _gates_doc(modules),
+        "docs/gates.md": _gates_doc(modules, {item.id: item for item in spec.answered}),
         # AGENTS.md holds the rules: Codex and other tools read it on their own, and Claude
         # Code loads it through the @AGENTS.md import in CLAUDE.md.
         "AGENTS.md": guidelines.rstrip() + "\n" + project_rules,

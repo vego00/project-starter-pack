@@ -259,14 +259,15 @@ def test_the_last_answer_opens_the_completion_screen_before_the_design(page: Pag
 
     expect(page.get_by_role("heading", name="설계가 준비됐어요")).to_be_visible()
     for _ in range(50):  # Responses are recorded as they finish reading.
-        if ("design", None) in answers:
+        if ("design", "build") in answers:
             break
         page.wait_for_timeout(100)
 
-    # Ending comes back waiting for the design; the screen then asks for it. Responses are
-    # recorded as they finish reading, so look for them in order instead of by position.
+    # Ending comes back waiting for the design; the screen then asks for it, and the design
+    # leads to build preparation (ADR-026). Responses are recorded as they finish reading, so
+    # look for them in order instead of by position.
     ended = answers.index(("end_here", "designing"))
-    assert ("design", None) in answers[ended + 1 :]
+    assert ("design", "build") in answers[ended + 1 :]
 
 
 def test_ending_at_the_agent_design_and_planning_the_rest_later(page: Page):
@@ -295,6 +296,50 @@ def test_ending_at_the_agent_design_and_planning_the_rest_later(page: Page):
     page.get_by_role("button", name=re.compile("^배포 계획 이어서 세우기")).click()
     choose(page, "서비스가 다루는 데이터를 어디에 저장할까요?", "PostgreSQL")
     expect(page.get_by_role("heading", name="여기서 끝낼까요?")).to_be_hidden()
+
+
+def test_build_preparation_settles_what_the_bundle_leaves_and_keeps_it(page: Page):
+    """Design, settle every question, see it in the bundle, change the provider: only the
+    question that reads the provider is asked again (ADR-026 ③)."""
+    start(page)
+    skip_clarify(page)
+    choose_surface(page)
+    choose(page, "에이전트를 어떤 구조로 구성할까요?", "고정 파이프라인")
+    choose(page, "에이전트가 실행 중간에 사람의 확인을 받아야 하나요?", "승인 후 실행")
+    choose(page, "어떤 경로로 LLM을 사용할까요?", "Gemini")
+    page.get_by_role("button", name=re.compile("^여기서 끝내기")).click()
+
+    panel = page.get_by_role("region", name="빌드 준비")
+    expect(panel).to_be_visible()
+    expect(page.get_by_text(re.compile(r"^남은 결정 \d+개 · 직접 할 일"))).to_be_visible()
+    shot(page, "build-prep")
+    panel.get_by_role("button", name=re.compile("개를 추천대로 정하기$")).click()
+    # Questions with no recommendation are written by hand, one at a time.
+    while panel.get_by_role("button", name=re.compile(" 직접 쓰기$")).count():
+        panel.get_by_role("button", name=re.compile(" 직접 쓰기$")).first.click()
+        panel.get_by_label(re.compile(": 내 답$")).fill("가상 예시로 시작한다")
+        panel.get_by_role("button", name="저장").click()
+        page.wait_for_timeout(200)
+    expect(panel.get_by_role("status")).to_have_text("남은 결정 없음")
+    shot(page, "build-prep-done")
+
+    journey = page.get_by_role("link", name=re.compile("^빌드 묶음 다운로드")).get_attribute("href")
+    listed = page.request.get(BASE_URL + journey.replace(".zip", "")).json()["files"]
+    files = {f["path"]: f["content"] for f in listed}
+    assert "## 정한 것 (빌드 준비)" in files["BUILD.md"]
+    assert files["BUILD.md"].split("## 남은 결정", 1)[1].split("##", 1)[0].strip() == "- 없음"
+
+    open_stage(page, "에이전트 설계")
+    page.get_by_role("button", name="모델 제공자 다시 고르기").click()
+    option_button(page, "OpenAI").click()
+
+    expect(panel).to_be_visible()
+    model_ids = panel.get_by_role("listitem").filter(has_text="역할별 모델 ID")
+    expect(model_ids.get_by_text("다시 확인")).to_be_visible()
+    expect(panel.get_by_role("status")).to_have_text("남은 결정 1개")
+    shot(page, "build-prep-recheck")
+    panel.get_by_role("button", name="역할별 모델 ID 그대로 두기").click()
+    expect(panel.get_by_role("status")).to_have_text("남은 결정 없음")
 
 
 def test_questions_defer_and_reopen(page: Page):
@@ -427,7 +472,8 @@ def test_the_build_order_shows_start_conditions_from_the_decisions(page: Page):
 
     page.get_by_role("button", name=re.compile("^웹 화면 시작 조건")).click()
 
-    expect(page.get_by_text("승인 전에는 화면 코드를 쓰지 않는다")).to_be_visible()
+    # Settled in build preparation instead of a mock-up approval (ADR-026).
+    expect(page.get_by_text("화면 구성(화면 수와 화면마다 보여 줄 것)을 정한다")).to_be_visible()
     expect(page.get_by_text(re.compile("^빼면 안 되는 이유:")).first).to_be_visible()
     shot(page, "build-order")
 

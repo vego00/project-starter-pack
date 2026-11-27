@@ -90,7 +90,8 @@ def test_the_last_answer_comes_back_before_the_design():
     assert summary.status_code == 200  # The decision summary needs no model.
     assert designing >= 2.0
     assert designer.calls == 1
-    assert done["prompt"] is None and done["status"] == "completed"
+    # The design leads to build preparation, which waits for the user like the end does.
+    assert done["prompt"]["type"] == "build" and done["status"] == "completed"
     assert done["design"] is not None
 
 
@@ -169,7 +170,7 @@ def test_a_design_stopped_midway_is_continued_by_design_not_by_a_read(monkeypatc
     assert elapsed < 1.0
     assert read["prompt"]["type"] == "designing"
     assert calls_after_read == 0
-    assert done["prompt"] is None and done["design"] is not None
+    assert done["prompt"]["type"] == "build" and done["design"] is not None
     assert designer.calls == 1
 
 
@@ -180,7 +181,8 @@ def test_a_failed_design_ends_with_the_reference_template():
         done = post(client, view, action="design").json()
         values = client.app.state.journeys._read(view["journey_id"]).values
 
-    assert done["prompt"] is None and done["status"] == "completed"
+    # The design leads to build preparation, which waits for the user like the end does.
+    assert done["prompt"]["type"] == "build" and done["status"] == "completed"
     assert values["design"]["status"] == "failed"
 
 
