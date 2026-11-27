@@ -577,3 +577,47 @@ def test_rescore_reports_when_the_validator_now_disagrees(tmp_path):
     lines = rescorer.rescore([{"case": "C4", "run": 1, "design_attempts": counter.attempts}])
 
     assert any("달라짐 (실행 때: some.old_rule)" in line for line in lines)
+
+
+def test_replay_judges_a_saved_design_under_the_decisions_it_was_made_with():
+    """A benchmark run skipped the vector store card; a fresh run would choose "none" and the
+    validator would then reject the design's open question about vector search."""
+    from uuid import UUID
+
+    from app.owners import MemoryOwners
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    from benchmarks.replay_to_app import replay
+
+    case = runner.load_cases(["C2"])[0]
+    design = runner.run_case(case, "flow", JourneyDeps(), REGISTRY)["artifact"]
+    for decision in design["provenance"]["decisions"]:
+        if decision["card_id"] == "data.vector_store":
+            decision.update(option_id=None, by="skipped")
+    design["unknowns"] = [
+        {"text": "의미 검색(Vector Store) 도입 여부", "blocks_confirmation": False}
+    ]
+    owners = MemoryOwners()
+
+    result = replay(case, design, REGISTRY, InMemorySaver(), owners)
+
+    assert result["design"]["source"] == "model"
+    skipped = [d for d in result["artifact"]["provenance"]["decisions"] if d["by"] == "skipped"]
+    assert [d["card_id"] for d in skipped] == ["data.vector_store"]
+    assert owners.owner(UUID(result["journey_id"])) == "local"
+
+
+def test_a_design_case_never_skips_a_card_it_fixes_but_may_skip_the_rest():
+    from app.journey.deciders.base import DeciderResult
+    from app.journey.deciders.mock import MockDecider
+
+    sure = DeciderResult(answer="unneeded", confidence=1.0)
+    decider = MockDecider({"select.data.vector_store": sure, "select.mlops.model_serving": sure})
+    case = runner.load_cases(["C2"])[0]
+    assert "mlops.model_serving" in case["may_skip"]
+
+    result = runner.run_case(case, "flow", JourneyDeps(decider=decider), REGISTRY)
+
+    assert "data.vector_store" in result["asked"]
+    assert "mlops.model_serving" in result["skipped"]
+    assert {c["id"]: c["status"] for c in result["checks"]}["fixed_choices"] == "pass"
