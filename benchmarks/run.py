@@ -32,6 +32,7 @@ sys.path.insert(0, str(ROOT))
 
 import yaml  # noqa: E402
 from app.config import Settings  # noqa: E402
+from app.journey.deciders.base import DeciderBatch, DeciderResult  # noqa: E402
 from app.journey.design import ServiceDesign  # noqa: E402
 from app.journey.design_generator import (  # noqa: E402
     MAX_ATTEMPTS,
@@ -467,6 +468,30 @@ def deadline(seconds):
         signal.signal(signal.SIGALRM, previous)
 
 
+class KeepFixedCards:
+    """Card selection that never leaves out a card the case fixes. A design case is measured
+    under its own choices; when card selection skipped one (C2's vector store, 45 of 45 saved
+    model designs until 2026-11-27), the design was judged under decisions the case never made.
+    Cards the case lets skip, and cards it does not fix, are judged as in the product."""
+
+    def __init__(self, inner, fixed: set[str]):
+        self._inner = inner
+        self._fixed = {f"select.{card_id}" for card_id in fixed}
+        self.name = inner.name
+
+    def decide(self, state, question):
+        if question.id in self._fixed:
+            return DeciderResult(answer="needed", confidence=1.0)
+        return self._inner.decide(state, question)
+
+    def decide_many(self, state, questions):
+        asked = [q for q in questions if q.id not in self._fixed]
+        batch = self._inner.decide_many(state, asked) if asked else DeciderBatch(results={})
+        kept = {q.id: DeciderResult(answer="needed", confidence=1.0)
+                for q in questions if q.id in self._fixed}  # fmt: skip
+        return batch.model_copy(update={"results": {**batch.results, **kept}})
+
+
 def run_case(
     case: dict, mode: str, deps: JourneyDeps, registry: Registry, timeout_s: float = 600
 ) -> dict[str, Any]:
@@ -477,6 +502,9 @@ def run_case(
     old_level = logger.level
     logger.addHandler(lines)
     logger.setLevel(logging.INFO)
+    if case.get("evaluation") == "design":
+        fixed = set(case["selection"]) - set(case.get("may_skip", []))
+        deps = replace(deps, decider=KeepFixedCards(deps.decider, fixed))
     counter = CountingDesigner(deps.designer, record=True) if deps.designer else None
     if counter:
         deps = replace(deps, designer=counter)

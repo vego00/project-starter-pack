@@ -108,6 +108,17 @@ def measure(work: Path, ref: str, round_no: int, cases: list[str], runs: int) ->
     return {"ref": ref, "reports": {c: (r.name if r else None) for c, r in reports.items()}}
 
 
+def _off_case(row: dict) -> bool:
+    """Made under decisions the case did not fix (a fixed card was skipped or changed)."""
+    return any(c["id"] == "fixed_choices" and c["status"] == "fail" for c in row.get("checks", []))
+
+
+def _counted(row: dict) -> bool:
+    """A design the measurement counts: made by the model under the case's own decisions."""
+    source = (row.get("artifact") or {}).get("provenance", {}).get("source")
+    return source == "model" and not _off_case(row)
+
+
 def metrics(measurement: dict) -> dict:
     """Per case: designs that met the rules, single-draft passes, rules and contract breaks."""
     out: dict = {}
@@ -124,8 +135,11 @@ def metrics(measurement: dict) -> dict:
         rows = results["results"]
         out[case] = {
             "runs": len(rows),
-            "model": sum((r.get("design") or {}).get("source") == "model" for r in rows),
-            "single": sum(bool(r.get("single_draft_pass")) for r in rows),
+            # A design made under other decisions than the case fixed is reported apart, not
+            # counted as passing (2026-11-27: C2 skipped its vector store in every saved run).
+            "model": sum(_counted(r) for r in rows),
+            "single": sum(bool(r.get("single_draft_pass")) and not _off_case(r) for r in rows),
+            "off_case": sum(_off_case(r) for r in rows),
             "rules": dict(rules),
         }
     return out
@@ -262,7 +276,7 @@ def judge(work: Path, measurement: dict, round_no: int) -> str | None:
             continue
         results = json.loads((ROOT / "reports" / report / "results.json").read_text("utf-8"))
         for row in results["results"]:
-            if (row.get("artifact") or {}).get("provenance", {}).get("source") == "model":
+            if _counted(row):
                 picks[f"r{round_no}-{case}-{row['run']}"] = {
                     "case": case, "report": report, "run": row["run"]}  # fmt: skip
     if not picks:
@@ -323,8 +337,9 @@ def write_report(work: Path, rounds: list[dict]) -> None:
                 continue
             top = ", ".join(f"{k} {v}" for k, v in Counter(m["rules"]).most_common(4)) or "-"
             score = f", 채점 {m['judge']:.2f}" if m.get("judge") is not None else ""
+            off = f", 사례와 다른 결정 {m['off_case']}" if m.get("off_case") else ""
             lines.append(
-                f"- {case}: {m['model']}/{m['runs']}, 첫 초안 {m['single']}{score} · {top}"
+                f"- {case}: {m['model']}/{m['runs']}, 첫 초안 {m['single']}{score}{off} · {top}"
             )
         if entry.get("confirm_metrics"):
             again = entry["confirm_metrics"]

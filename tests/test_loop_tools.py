@@ -1,6 +1,7 @@
 """The improvement agent's guard keeps a Codex change inside the prompt text it may edit."""
 
 import importlib.util
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -185,3 +186,22 @@ def test_the_judge_sees_common_criteria_after_the_case_and_the_build_files():
     for name in judge.BUILD_FILES:
         assert f"### {name}\n\n~~~~\n" in prompt
     assert "design-v1" not in prompt and "test-model" not in prompt
+
+
+def test_a_design_made_under_other_decisions_is_reported_apart_and_not_judged(
+    tmp_path, monkeypatch
+):
+    def row(run, source, fixed="pass"):
+        return {"case": "C2", "run": run, "single_draft_pass": True,
+                "artifact": {"provenance": {"source": source}},
+                "checks": [{"id": "fixed_choices", "status": fixed}]}  # fmt: skip
+
+    report = tmp_path / "reports" / "r"
+    report.mkdir(parents=True)
+    rows = [row(1, "model"), row(2, "model", "fail"), row(3, "template")]
+    (report / "results.json").write_text(json.dumps({"results": rows}))
+    monkeypatch.setattr(loop, "ROOT", tmp_path)
+
+    numbers = loop.metrics({"reports": {"C2": "r"}})["C2"]
+
+    assert (numbers["model"], numbers["single"], numbers["off_case"]) == (1, 2, 1)

@@ -605,3 +605,19 @@ def test_replay_judges_a_saved_design_under_the_decisions_it_was_made_with():
     skipped = [d for d in result["artifact"]["provenance"]["decisions"] if d["by"] == "skipped"]
     assert [d["card_id"] for d in skipped] == ["data.vector_store"]
     assert owners.owner(UUID(result["journey_id"])) == "local"
+
+
+def test_a_design_case_never_skips_a_card_it_fixes_but_may_skip_the_rest():
+    from app.journey.deciders.base import DeciderResult
+    from app.journey.deciders.mock import MockDecider
+
+    sure = DeciderResult(answer="unneeded", confidence=1.0)
+    decider = MockDecider({"select.data.vector_store": sure, "select.mlops.model_serving": sure})
+    case = runner.load_cases(["C2"])[0]
+    assert "mlops.model_serving" in case["may_skip"]
+
+    result = runner.run_case(case, "flow", JourneyDeps(decider=decider), REGISTRY)
+
+    assert "data.vector_store" in result["asked"]
+    assert "mlops.model_serving" in result["skipped"]
+    assert {c["id"]: c["status"] for c in result["checks"]}["fixed_choices"] == "pass"
