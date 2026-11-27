@@ -80,10 +80,18 @@ def test_journey_continues_across_processes_until_completed():
     assert (last["card_id"], last["type"]) == (None, "designing")
     assert len(last["decisions"]) == len(load_registry().cards)
 
-    # The design is asked for from yet another process.
-    final = step(journey_id, "resume", {"action": "design"})
+    # The design is asked for from yet another process, and build preparation follows.
+    prep = step(journey_id, "resume", {"action": "design"})
+    assert prep["type"] == "build"
+    assert prep["status"] == "completed"
+
+    # Answers given in one process are still there in the next (ADR-026 ③).
+    accepted = step(journey_id, "resume", {"action": "build_accept_all"})
+    assert accepted["type"] == "build" and accepted["build_answers"]
+    assert set(accepted["build_answers"].values()) == {"recommended"}
+    final = step(journey_id, "resume", {"action": "build_finish"})
     assert final["type"] == "done"
-    assert final["status"] == "completed"
+    assert final["build_answers"] == accepted["build_answers"]
 
 
 @needs_postgres

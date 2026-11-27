@@ -105,6 +105,10 @@ class Unknown(_Record):
 
     text: Text
     blocks_confirmation: bool
+    # What the designer would pick and the choices it sees, offered in build preparation
+    # (ADR-026). The user still decides; either may be left out.
+    recommendation: Short | None = None
+    options: list[Short] = Field(default=[], max_length=4)
 
 
 class Port(_Record):

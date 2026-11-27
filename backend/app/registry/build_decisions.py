@@ -46,6 +46,8 @@ class BuildItem(_Strict):
     lines: dict[Section, tuple[str, ...]] = {}
     question: str | None = None
     recommendation: str | None = None
+    # Fixed choices; the user may still write an answer of their own (ADR-026 decision 5).
+    options: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def _fits_its_source(self):

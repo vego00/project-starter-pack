@@ -417,7 +417,7 @@ def test_the_build_order_lists_modules_with_their_start_conditions(design):
     order = [build.index(f"단계: {name}") for name in ("에이전트 흐름", "서비스 API", "운영")]
     assert order == sorted(order)
     assert "## 만드는 순서" in build
-    assert "핵심 요구사항마다 평가 사례를 먼저 쓰고" in build
+    assert "지킬 것: 구현 전에 핵심 요구사항마다 평가 사례를 테스트로 먼저 쓴다" in build
     assert "답변 응답 시간: 목표치를 시작 전에 사용자에게 묻는다" in build
     assert "docs/gates.md" in files["AGENTS.md"]
 
@@ -428,7 +428,14 @@ def test_every_start_condition_gets_a_line_to_record_it(design):
     gates = files["docs/gates.md"]
     for line in files["BUILD.md"].splitlines():
         if line.startswith("- ") and "(이유: " in line:
-            assert f"- [ ] {line[2 : line.index(' (이유: ')]}" in gates
+            text = line[2 : line.index(" (이유: ")]
+            if text.startswith("지킬 것: "):
+                assert f"- {text}" in gates  # Kept while building, not approved.
+            elif text.startswith("빌드 준비: "):
+                # Not answered in build preparation yet, so the builder asks it first.
+                assert f"- [ ] {text.removeprefix('빌드 준비: ')} (빌드 준비에서 남김" in gates
+            else:
+                assert f"- [ ] {text}" in gates
     assert "정할 값: 답변 응답 시간 목표치:" in gates
 
 
@@ -586,6 +593,8 @@ def run_journey(client, idea=IDEA):
             action = {"action": "plan_deploy"}
         elif prompt["type"] == "designing":
             action = {"action": "design"}
+        elif prompt["type"] == "build":
+            action = {"action": "build_finish"}
         elif prompt["card"]["preparing"]:
             action = {"action": "prepare"}
         else:
@@ -697,6 +706,8 @@ def test_a_finished_journey_can_change_one_decision_and_redesign():
         while view["prompt"]:  # Only cards the change affected are asked again.
             if view["prompt"]["type"] == "designing":
                 action = {"action": "design"}
+            elif view["prompt"]["type"] == "build":
+                action = {"action": "build_finish"}
             else:
                 assert view["prompt"]["type"] == "decision"
                 preparing = view["prompt"]["card"]["preparing"]

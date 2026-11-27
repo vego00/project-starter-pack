@@ -409,6 +409,8 @@ def test_a_finished_journey_saves_its_design_in_a_shape_that_loads_again():
             action = {"action": "plan_deploy"}
         elif prompt["type"] == "designing":
             action = {"action": "design"}
+        elif prompt["type"] == "build":
+            action = {"action": "build_finish"}
         elif prompt["card"]["preparing"]:
             action = {"action": "prepare"}
         else:

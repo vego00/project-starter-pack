@@ -58,6 +58,8 @@ NODE_WRITES: dict[str, set[str]] = {
     "composer": {"artifacts"},
     "design_gate": {"gate_outcome", "gate_error"},
     "designer": {"design"},
+    # Build preparation answers (ADR-026 ③). `done_gate` only sends the journey back here.
+    "build_gate": GATE_WRITES | {"build_answers", "plan_scope"},
     "issue_gate": GATE_WRITES,
     "fork_gate": {"plan_scope", "focus_card", "editing_card", "gate_outcome", "gate_error"},
     "done_gate": GATE_WRITES | {"plan_scope"},
@@ -122,7 +124,7 @@ def _after_engine_for(registry: Registry):
             planned = deploy_planned(state.plan_scope, state.decisions, stage_of)
             return "controller" if planned else "fork_gate"
         # Nothing changed, so a finished design is not generated again.
-        return "done_gate" if state.gate_outcome == "unchanged" else "reviewer"
+        return "build_gate" if state.gate_outcome == "unchanged" else "reviewer"
 
     return route
 
@@ -152,7 +154,16 @@ def _after_design_gate(state: JourneyState) -> str:
     return "design_gate" if state.gate_outcome == "invalid" else "designer"
 
 
+def _after_build(state: JourneyState) -> str:
+    if state.gate_outcome == "finish":
+        return "done_gate"
+    # An answer or a kept decision changes no card, so the design is not generated again.
+    return "build_gate" if state.gate_outcome in ("invalid", "keep") else "constraint_engine"
+
+
 def _after_done(state: JourneyState) -> str:
+    if state.gate_outcome == "build":
+        return "build_gate"
     # Keeping a decision changes nothing, so the design is not generated again.
     return "done_gate" if state.gate_outcome in ("invalid", "keep") else "constraint_engine"
 
@@ -175,7 +186,7 @@ def build_graph(registry: Registry, *, checkpointer: Checkpointer, deps: Journey
     graph.add_conditional_edges(
         "constraint_engine",
         _after_engine_for(registry),
-        ["controller", "fork_gate", "reviewer", "done_gate"],
+        ["controller", "fork_gate", "reviewer", "build_gate"],
     )
     graph.add_conditional_edges("fork_gate", _after_fork, ["fork_gate", "constraint_engine"])
     # A card without a usable brief is shown with its options first; `prepare` asks the models.
@@ -191,8 +202,13 @@ def build_graph(registry: Registry, *, checkpointer: Checkpointer, deps: Journey
     graph.add_edge("composer", "design_gate")
     graph.add_conditional_edges("design_gate", _after_design_gate, ["design_gate", "designer"])
     # A finished journey waits here, so a decision can still change and the design follow it.
-    graph.add_edge("designer", "done_gate")
-    graph.add_conditional_edges("done_gate", _after_done, ["done_gate", "constraint_engine"])
+    graph.add_edge("designer", "build_gate")
+    graph.add_conditional_edges(
+        "build_gate", _after_build, ["build_gate", "done_gate", "constraint_engine"]
+    )
+    graph.add_conditional_edges(
+        "done_gate", _after_done, ["done_gate", "build_gate", "constraint_engine"]
+    )
     graph.add_conditional_edges("issue_gate", _after_issue, ["issue_gate", "constraint_engine"])
     return graph.compile(checkpointer=checkpointer)
 

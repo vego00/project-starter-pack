@@ -154,6 +154,27 @@ items:
       - {card: backend.implementation, in: [code]}
     question: 화면은 몇 개이고 각 화면에 무엇을 보여 줄까요?
     recommendation: 요구사항마다 화면이나 탭 하나를 두고, 결과와 근거를 같은 화면에 보여 줍니다.
+  - id: bot_flow
+    title: 봇 대화 흐름
+    source: ask
+    when:
+      - {card: product.surface, in: [messenger]}
+    question: 봇이 무엇을 묻고 어떻게 답하며, 실패하면 무엇이라고 안내할까요?
+    recommendation: 요구사항마다 질문 하나와 답 하나로 시작하고, 실패하면 무엇이 안 됐는지와 다시 시도하는 방법을 한 문장으로 알립니다.
+  - id: report_format
+    title: 리포트 양식
+    source: ask
+    when:
+      - {card: product.surface, in: [report]}
+    question: 리포트에 어떤 항목을 어떤 순서로 넣을까요?
+    recommendation: 요약 한 줄, 요구사항별 결과와 근거, 확인하지 못한 것 순서로 씁니다.
+  - id: tracing_scope
+    title: 실행 추적 데이터 범위
+    source: ask
+    when:
+      - {card: ops.tracing, in: [langsmith]}
+    question: 실행 추적 도구로 보낼 데이터의 범위는 어디까지인가요?
+    recommendation: 노드 이름, 걸린 시간, 토큰 수만 보내고 사용자가 쓴 원문은 보내지 않습니다.
   - {id: open_targets, title: 정할 목표치, source: ask, compute: open_targets}
   - id: n8n_trigger
     title: n8n 시작 방식
@@ -161,6 +182,7 @@ items:
     when:
       - {card: backend.implementation, in: [n8n]}
     question: workflow를 무엇으로 시작할까요?
+    options: [Webhook, Schedule Trigger, 서비스 트리거 노드]
     recommendation: 외부 요청이면 Webhook, 정해진 시간이면 Schedule Trigger, 메일이나 메신저가 오면 그 서비스의 트리거 노드로 시작합니다.
   - id: n8n_service_nodes
     title: n8n 서비스 연동 노드

@@ -115,6 +115,8 @@ def finish(client):
             action = {"action": "plan_deploy"}
         elif prompt["type"] == "designing":
             action = {"action": "design"}
+        elif prompt["type"] == "build":
+            action = {"action": "build_finish"}
         elif prompt["card"]["preparing"]:
             action = {"action": "prepare"}
         else:

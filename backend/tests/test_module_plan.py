@@ -33,7 +33,10 @@ def test_the_rules_load_against_the_cards():
     ("change", "message"),
     [
         (("cards: [backend.execution]", "cards: [backend.nothing]"), "unknown cards"),
-        (("in: [web]}]\n      - text: 봇", "in: [webb]}]\n      - text: 봇"), "unknown options"),
+        (
+            ("in: [web]}]\n        kind: asked", "in: [webb]}]\n        kind: asked"),
+            "unknown options",
+        ),
         (("after: [{module: data}]", "after: [{module: ops}]"), "earlier modules"),
     ],
 )
@@ -89,15 +92,16 @@ def test_start_conditions_follow_the_decisions():
     assert not any("API 키" in text for text in gate_texts(private["agent"]))
     assert any("모델 파일" in text for text in gate_texts(private["agent"]))
     assert any("대화 흐름" in text for text in gate_texts(team["client"]))
-    assert any("비용 상한과 알림" in text for text in gate_texts(team["ops"]))
-    assert not any("비용 상한과 알림" in text for text in gate_texts(private["ops"]))
+    # The first build is local, so cloud cost limits wait in the bundle's "배포 (나중)" (ADR-026).
+    assert not any("비용 상한과 알림" in text for text in gate_texts(team["ops"]))
 
 
 def test_the_screen_module_is_named_after_the_chosen_surface_and_waits_for_a_design():
     basic = plan(CHOICES["basic"])["client"]
 
     assert basic.name == "웹 화면"
-    assert "승인 전에는 화면 코드를 쓰지 않는다" in basic.gates[0].text
+    # Set in build preparation instead of a mock-up approval (ADR-026 decision 4).
+    assert basic.gates[0].kind == "asked" and basic.gates[0].asks == "screen_layout"
     assert basic.gates[0].why
 
 
